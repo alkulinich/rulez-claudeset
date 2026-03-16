@@ -35,11 +35,11 @@ If no argument provided, ask the user for the issue number.
 ./scripts/git-start-issue.sh <issue-number> [custom-branch]
 ```
 
-5. **After script completes:**
+4. **After script completes:**
    - Read the issue body from the output
    - Summarize the requirements for the user
 
-6. **Enter plan mode:**
+5. **Enter plan mode:**
    - Use the EnterPlanMode tool to transition into planning
    - In plan mode, analyze the issue requirements and create an implementation plan
    - The plan should include:

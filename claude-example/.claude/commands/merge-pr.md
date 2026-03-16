@@ -43,18 +43,12 @@ If no argument provided, ask the user for the PR number.
 7. Restore stashed changes (if any)
 ```
 
-5. **Ask user to confirm** using AskUserQuestion tool with options:
-   - "Merge" (default merge commit)
-   - "Squash" (squash and merge)
-   - "Rebase" (rebase and merge)
-   - "Cancel"
-
-6. **On confirmation**, execute the script:
+5. Execute the script:
 ```bash
-./scripts/git-merge-pr.sh <pr-number> <merge-method>
+./scripts/git-merge-pr.sh <pr-number> merge
 ```
 
-7. **Close linked issues:**
+6. **Close linked issues:**
    - Extract issue references from the PR title, branch name, and body using:
      ```bash
      gh pr view <number> --json title,headRefName,body
@@ -68,7 +62,7 @@ If no argument provided, ask the user for the PR number.
      ```
    - Skip issues that are already closed
 
-8. **List remaining open issues:**
+7. **List remaining open issues:**
    - Run:
      ```bash
      gh issue list --state open --limit 20 --json number,title,labels,createdAt
@@ -80,7 +74,7 @@ If no argument provided, ask the user for the PR number.
      Match PRs to issues by checking if the PR branch name or title contains the issue number (e.g., branch `feature/42-user-auth` or title containing `#42` maps to issue #42)
    - Display a formatted table with columns: number, title, labels, and PR (show PR number like `#45` if found, or `-` if none)
 
-9. **Suggest next issue:**
+8. **Suggest next issue:**
    - From the open issues, suggest the next one to work on using this priority:
      1. Issues with `priority:high` or `urgent` labels first
      2. Then oldest issues (by creation date)
