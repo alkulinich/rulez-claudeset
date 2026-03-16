@@ -30,12 +30,7 @@ If no argument provided, ask the user for the issue number.
 5. Display issue details
 ```
 
-3. **Ask user to confirm** using AskUserQuestion tool with options:
-   - "Start" (proceed with default branch name)
-   - "Custom branch" (let user specify branch name)
-   - "Cancel"
-
-4. **On confirmation**, execute the script:
+3. Execute the script:
 ```bash
 ./scripts/git-start-issue.sh <issue-number> [custom-branch]
 ```
