@@ -4,7 +4,7 @@ Create the approved issues on GitHub.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:6-create-issues`
 
 1. **Collect the approved issue list** from the conversation above.
 

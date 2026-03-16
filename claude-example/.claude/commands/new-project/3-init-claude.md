@@ -4,7 +4,7 @@ Create CLAUDE.md for the new project with context from PLAN.md and project setup
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:3-init-claude`
 
 1. **Read context:**
    - Read `PLAN.md` from the project root

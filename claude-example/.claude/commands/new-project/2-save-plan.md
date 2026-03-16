@@ -4,9 +4,9 @@ Save the implementation plan from the current conversation to PLAN.md.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:2-save-plan`
 
-1. **Extract the plan** from the conversation above (the output of feature-dev).
+1. **Extract the plan** from the conversation above.
 
 2. **Write it to `PLAN.md`** in the project root using the Write tool.
    - Keep the original structure and detail

@@ -3,7 +3,7 @@
 # to the target repo, replacing script paths so they reference the submodule location.
 #
 # Usage: Run from repo root after `git submodule update`
-#   ./shared/scripts/setup-commands.sh
+#   ./shared-tools/claude-example/scripts/setup-commands.sh
 
 set -e
 
@@ -24,7 +24,7 @@ while IFS= read -r file; do
   rel="${file#$SOURCE_DIR/}"
   dest="$REPO_ROOT/.claude/commands/$rel"
   mkdir -p "$(dirname "$dest")"
-  sed 's|./scripts/|shared/scripts/|g' "$file" > "$dest"
+  sed 's|./scripts/|shared-tools/claude-example/scripts/|g' "$file" > "$dest"
   count=$((count + 1))
 done < <(find "$SOURCE_DIR" -name '*.md' -type f)
 

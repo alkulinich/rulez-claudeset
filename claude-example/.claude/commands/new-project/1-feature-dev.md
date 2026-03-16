@@ -4,7 +4,7 @@ Research and plan a new project using feature-dev.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:1-feature-dev`
 
 1. **Launch feature-dev** with the user's project description:
    - Use the Skill tool to invoke `feature-dev:feature-dev` with `$ARGUMENTS`

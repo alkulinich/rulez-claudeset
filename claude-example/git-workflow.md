@@ -122,7 +122,7 @@ gh pr create --base main --title "Feature: API Key Management"
 
 ## Automated Workflow (Claude Code)
 
-Claude Code commands automate the git workflow. Scripts live in `scripts/` (or `shared/scripts/` when used as a submodule).
+Claude Code commands automate the git workflow. Scripts live in `scripts/` (or `shared-tools/claude-example/scripts/` when used as a submodule).
 
 ### Available Commands
 
@@ -180,19 +180,11 @@ After updating the shared submodule, run the setup scripts to install commands a
 
 ```bash
 cd shared && git pull origin main && cd ..
-./shared/scripts/setup-commands.sh
-./shared/scripts/sync-config.sh
+./shared-tools/claude-example/scripts/setup-commands.sh
 ```
 
 `setup-commands.sh` copies `.claude/commands/*.md` from the shared submodule and adjusts script paths automatically.
 
-`sync-config.sh` syncs Claude Code configuration files (`CLAUDE.md`, `.claude/settings.json`, agents, skills) from the shared submodule to the target repo. It detects the repo type from `package.json` and uses a safety mechanism to avoid overwriting local modifications:
-
-| Flag | Effect |
-|------|--------|
-| (none) | Only updates files that haven't been locally modified |
-| `--force` | Overwrites all files, even with local changes |
-| `--dry-run` | Shows what would happen without modifying files |
 
 ## Commit Messages
 

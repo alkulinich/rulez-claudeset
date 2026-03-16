@@ -4,7 +4,7 @@ Review the planned issues and suggest splitting large ones into more granular ta
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:5-refine-issues`
 
 1. **Review each issue from the conversation above** and evaluate:
    - Is it achievable in a single PR?

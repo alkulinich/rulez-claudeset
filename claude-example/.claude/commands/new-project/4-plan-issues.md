@@ -4,7 +4,7 @@ Break the implementation plan into GitHub issues.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:4-plan-issues`
 
 1. **Read context:**
    - Read `PLAN.md` from the project root

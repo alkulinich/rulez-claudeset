@@ -10,7 +10,7 @@ If no argument provided, ask the user what the issue should be about.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh add-issue`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh add-issue`
 
 1. **Gather context:**
    - Ask clarifying questions if the description is vague

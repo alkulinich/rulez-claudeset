@@ -4,7 +4,7 @@ Show the issue dependency graph to visualize parallel work streams.
 
 ## Instructions
 
-0. **Track command:** `shared/scripts/set-current-command.sh new-project`
+0. **Track command:** `shared-tools/claude-example/scripts/set-current-command.sh new-project:7-dependency-graph`
 
 1. **Fetch open issues:**
    ```bash
