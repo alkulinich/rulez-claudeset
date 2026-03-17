@@ -45,13 +45,7 @@ feat: add example feature
 - [ ] Check Y renders correctly
 ```
 
-5. **Ask user to confirm or edit** using AskUserQuestion tool with options:
-   - "Create PR" (proceed with proposal)
-   - "Edit files" (modify file list)
-   - "Edit message" (modify commit/title)
-   - "Cancel"
-
-6. **On confirmation**, execute the script:
+5. Execute the script:
 ```bash
 ./scripts/git-create-pr.sh "<branch>" "<base>" "<title>" "<body>" <files...>
 ```

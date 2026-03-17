@@ -14,6 +14,7 @@ Break the implementation plan into GitHub issues.
    - Each issue should be a self-contained unit of work
    - Use conventional issue titles: `[Category] Description` (e.g., `[Foundation] Project setup and Docker config`)
    - Order issues by dependency (foundational work first)
+   - Issues should contain link to the `PLAN.md` and all necessary related docs
 
 3. **Present the list** as a table:
 

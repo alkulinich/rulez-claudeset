@@ -33,4 +33,7 @@ Show the issue dependency graph to visualize parallel work streams.
    Critical path: #1 → #2 → #4 → #7
    ```
 
-4. **Suggest starting points** — issues with no dependencies that can begin immediately.
+4. **Save to the file** PLAN_ISSUES_DEPENDENCIES.md for future references
+   - Add a header with project name and date
+
+5. **Suggest starting points** — issues with no dependencies that can begin immediately.

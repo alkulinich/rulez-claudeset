@@ -8,10 +8,7 @@ Create the approved issues on GitHub.
 
 1. **Collect the approved issue list** from the conversation above.
 
-2. **For each issue**, create it using:
-   ```bash
-   gh issue create --title "<title>" --body "<body>"
-   ```
+2. **For each issue**, create it using 'create-issue' command
    - Title: the issue title from the approved list
    - Body: scope of work, acceptance criteria, and any dependencies on other issues
    - Add labels if the repo has them (e.g., `foundation`, `core`, `enhancement`)
