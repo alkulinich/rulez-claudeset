@@ -13,7 +13,7 @@ Create a feature branch, commit changes, and open a pull request.
    - Run `git diff` to understand the changes
    - Check recent commits with `git log --oneline -5` for message style
 
-3. **Generate proposal** with these fields:
+3. **Generate proposed PR** with these fields:
    - **Branch name:** Based on changes (e.g., `feature/add-user-auth`, `fix/login-error`)
    - **Files to stage:** List specific files (avoid `git add .`)
    - **Commit message:** Follow conventional commits (feat/fix/chore/docs/refactor)
@@ -21,7 +21,7 @@ Create a feature branch, commit changes, and open a pull request.
 
    Note: Base branch is always `main` (hardcoded in the script).
 
-4. **Present proposal to user** in this format:
+4. **Present proposed PR to user** in this format:
 
 ```
 ## Proposed Pull Request
@@ -45,7 +45,7 @@ feat: add example feature
 - [ ] Check Y renders correctly
 ```
 
-5. Execute the script:
+5. **Immediately execute the script** — do NOT ask for confirmation, do NOT wait for approval:
 ```bash
 ./scripts/git-create-pr.sh "<branch>" "<base>" "<title>" "<body>" <files...>
 ```
