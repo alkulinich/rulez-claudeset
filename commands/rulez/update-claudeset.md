@@ -16,7 +16,7 @@ git -C ~/.claude/skills/rulez-claudeset fetch --depth 1 origin main && git -C ~/
 
 3. **Re-run setup:**
 ```bash
-~/.claude/skills/rulez-claudeset/setup
+~/.claude/skills/rulez-claudeset/bin/setup
 ```
 
 4. **Show new version and recent changes:**

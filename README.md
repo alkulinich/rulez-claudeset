@@ -6,7 +6,7 @@ Shared Claude Code commands, permissions, and status line for GitHub Flow workfl
 
 ```bash
 git clone <repo-url> ~/.claude/skills/rulez-claudeset
-cd ~/.claude/skills/rulez-claudeset && ./setup
+cd ~/.claude/skills/rulez-claudeset && ./bin/setup
 ```
 
 This will:

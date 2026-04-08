@@ -126,7 +126,7 @@ Claude Code commands automate the git workflow. Install via:
 
 ```bash
 git clone <repo-url> ~/.claude/skills/rulez-claudeset
-cd ~/.claude/skills/rulez-claudeset && ./setup
+cd ~/.claude/skills/rulez-claudeset && ./bin/setup
 ```
 
 ### Available Commands

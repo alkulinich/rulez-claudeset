@@ -9,7 +9,7 @@ If you used the `shared-tools/claude-example/` submodule with GitHub Flow (`main
 | Before | After |
 |--------|-------|
 | `shared-tools/` git submodule per repo | Global install at `~/.claude/skills/rulez-claudeset/` |
-| `shared-tools/claude-example/scripts/install.sh` | `./setup` (one-time) |
+| `shared-tools/claude-example/scripts/install.sh` | `./bin/setup` (one-time) |
 | `/start-issue`, `/create-pr`, etc. | `/rulez:start-issue`, `/rulez:create-pr`, etc. |
 | `./shared-tools/claude-example/scripts/*.sh` | `~/.claude/skills/rulez-claudeset/scripts/*.sh` |
 | Manual `git submodule update` | Auto-updates on session start |
@@ -19,7 +19,7 @@ If you used the `shared-tools/claude-example/` submodule with GitHub Flow (`main
 1. **Install globally:**
    ```bash
    git clone git@github.com:alkulinich/rulez-claudeset.git ~/.claude/skills/rulez-claudeset
-   cd ~/.claude/skills/rulez-claudeset && ./setup
+   cd ~/.claude/skills/rulez-claudeset && ./bin/setup
    ```
 
 2. **Remove old submodule** from each project repo:
@@ -77,7 +77,7 @@ If you previously used the `shared/` submodule approach with `setup-commands.sh`
 | Before | After |
 |--------|-------|
 | `shared/` or `shared-tools/` git submodule per repo | Global install at `~/.claude/skills/rulez-claudeset/` |
-| `shared/scripts/setup-commands.sh` | `./setup` (one-time) |
+| `shared/scripts/setup-commands.sh` | `./bin/setup` (one-time) |
 | `shared/scripts/sync-config.sh` | Automatic via SessionStart hook |
 | `develop` → `main` branching (GitFlow) | `main`-only (GitHub Flow) |
 | `/start-issue`, `/create-pr`, etc. | `/rulez:start-issue`, `/rulez:create-pr`, etc. |
@@ -89,7 +89,7 @@ If you previously used the `shared/` submodule approach with `setup-commands.sh`
 1. **Install globally:**
    ```bash
    git clone <repo-url> ~/.claude/skills/rulez-claudeset
-   cd ~/.claude/skills/rulez-claudeset && ./setup
+   cd ~/.claude/skills/rulez-claudeset && ./bin/setup
    ```
 
 2. **Remove old submodule** from each project repo:

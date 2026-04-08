@@ -42,7 +42,7 @@ fi
 # Pull and re-setup
 OLD_HEAD="$LOCAL"
 git -C "$SKILL_DIR" pull --ff-only origin main 2>/dev/null || exit 0
-"$SKILL_DIR/setup" -q
+"$SKILL_DIR/bin/setup" -q
 
 # Write marker for next session to display
 OLD_VER=$(git -C "$SKILL_DIR" show "$OLD_HEAD:VERSION" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
