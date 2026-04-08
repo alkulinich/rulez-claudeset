@@ -14,7 +14,7 @@ ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 branch=$(cd "$dir" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
 
 # Current command
-cmd=$(cat "$dir/.claude/.current-command" 2>/dev/null | tr -d '\n')
+cmd=$(cat "$dir/.claude/.current-command" 2>/dev/null | tr -d '\n' || true)
 
 # Session time
 session_time=$("$SCRIPT_DIR/session-time.sh" 2>/dev/null || echo '')
