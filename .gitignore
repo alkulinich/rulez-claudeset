@@ -1,2 +1,4 @@
-shared-tools/
-/.claude/
+.claude/
+.last-update
+.update-lock
+.updated-marker

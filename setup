@@ -1,0 +1,71 @@
+#!/bin/bash
+set -e
+
+SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAUDE_DIR="$HOME/.claude"
+QUIET=false
+
+[[ "$1" == "-q" ]] && QUIET=true
+
+log() { $QUIET || echo "$@"; }
+
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq is required (brew install jq)"
+  exit 1
+fi
+
+# 1. Symlink commands
+mkdir -p "$CLAUDE_DIR/commands"
+ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
+log "Linked commands → ~/.claude/commands/rulez"
+
+# 2. Merge permissions into ~/.claude/settings.json
+SETTINGS_SRC="$SKILL_DIR/settings.json"
+SETTINGS_DST="$CLAUDE_DIR/settings.json"
+
+if [ ! -f "$SETTINGS_DST" ]; then
+  cp "$SETTINGS_SRC" "$SETTINGS_DST"
+  log "Installed ~/.claude/settings.json"
+else
+  merged="$(jq -s '
+    .[0] as $existing | .[1] as $new |
+    $existing * {
+      permissions: {
+        allow: (($existing.permissions.allow // []) + ($new.permissions.allow // []) | unique)
+      },
+      statusLine: $new.statusLine
+    }
+  ' "$SETTINGS_DST" "$SETTINGS_SRC")"
+
+  # Add SessionStart hook if not already present
+  merged="$(echo "$merged" | jq '
+    .hooks.SessionStart //= [] |
+    if (.hooks.SessionStart | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length) == 0
+    then .hooks.SessionStart += [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+      }]
+    }]
+    else . end
+  ')"
+
+  printf '%s\n' "$merged" > "$SETTINGS_DST"
+  log "Merged ~/.claude/settings.json (permissions + SessionStart hook)"
+fi
+
+# 3. Install SessionStart hook for fresh installs (no existing settings)
+# Already handled in the merge block above; for fresh installs, add it now
+if ! jq -e '.hooks.SessionStart' "$SETTINGS_DST" &>/dev/null; then
+  jq '.hooks.SessionStart = [{
+    "matcher": "",
+    "hooks": [{
+      "type": "command",
+      "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+    }]
+  }]' "$SETTINGS_DST" > "$SETTINGS_DST.tmp" && mv "$SETTINGS_DST.tmp" "$SETTINGS_DST"
+  log "Added SessionStart auto-update hook"
+fi
+
+log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."

@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+CLAUDE_DIR="$HOME/.claude"
+QUIET=false
+
+[[ "$1" == "-q" ]] && QUIET=true
+
+log() { $QUIET || echo "$@"; }
+
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq is required (brew install jq)"
+  exit 1
+fi
+
+# 1. Remove commands symlink
+if [ -L "$CLAUDE_DIR/commands/rulez" ]; then
+  rm "$CLAUDE_DIR/commands/rulez"
+  log "Removed ~/.claude/commands/rulez symlink"
+fi
+
+# 2. Remove rulez-claudeset entries from settings.json
+SETTINGS="$CLAUDE_DIR/settings.json"
+if [ -f "$SETTINGS" ]; then
+  jq '
+    .permissions.allow = ([.permissions.allow // [] | .[] | select(test("rulez-claudeset") | not)] | unique) |
+    .hooks.SessionStart = [.hooks.SessionStart // [] | .[] | select(.hooks | any(.command | test("rulez-claudeset")) | not)] |
+    if .hooks.SessionStart == [] then del(.hooks.SessionStart) else . end |
+    if .hooks == {} then del(.hooks) else . end |
+    .permissions.allow = ([.permissions.allow // [] | .[] | select(test("rulez:") | not)]) |
+    del(.statusLine)
+  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  log "Cleaned ~/.claude/settings.json (removed permissions, hook, statusLine)"
+fi
+
+log "Done! rulez-claudeset uninstalled."
