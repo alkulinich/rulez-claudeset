@@ -33,4 +33,16 @@ if [ -f "$SETTINGS" ]; then
   log "Cleaned ~/.claude/settings.json (removed permissions, hook, statusLine)"
 fi
 
+# 3. Remove RULEZ.md symlink and @RULEZ.md from CLAUDE.md
+if [ -L "$CLAUDE_DIR/RULEZ.md" ]; then
+  rm "$CLAUDE_DIR/RULEZ.md"
+  log "Removed ~/.claude/RULEZ.md symlink"
+fi
+
+CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+if [ -f "$CLAUDE_MD" ] && grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
+  sed -i '' '/@RULEZ\.md/d' "$CLAUDE_MD"
+  log "Removed @RULEZ.md from ~/.claude/CLAUDE.md"
+fi
+
 log "Done! rulez-claudeset uninstalled."

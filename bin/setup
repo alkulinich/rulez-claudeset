@@ -80,4 +80,19 @@ else
   log "Merged ~/.claude/settings.json"
 fi
 
+# 3. Symlink RULEZ.md and add @RULEZ.md to CLAUDE.md
+ln -sfn "$SKILL_DIR/RULEZ.md" "$CLAUDE_DIR/RULEZ.md"
+log "Linked RULEZ.md → ~/.claude/RULEZ.md"
+
+CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+if [ ! -f "$CLAUDE_MD" ]; then
+  echo "@RULEZ.md" > "$CLAUDE_MD"
+  log "Created ~/.claude/CLAUDE.md with @RULEZ.md"
+elif ! grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
+  echo "@RULEZ.md" >> "$CLAUDE_MD"
+  log "Added @RULEZ.md to ~/.claude/CLAUDE.md"
+else
+  log "@RULEZ.md already in ~/.claude/CLAUDE.md"
+fi
+
 log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
