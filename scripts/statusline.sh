@@ -10,6 +10,18 @@ dir=$(echo "$input" | jq -r '.workspace.current_dir')
 model=$(echo "$input" | jq -r '.model.display_name')
 ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 
+# Effort level (undocumented JSON path > env var > project settings > user settings)
+effort=$(echo "$input" | jq -r '.effort_level // .model.effort // empty')
+if [ -z "$effort" ]; then
+  effort="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+fi
+if [ -z "$effort" ] && [ -f "$dir/.claude/settings.json" ]; then
+  effort=$(jq -r '.effortLevel // empty' "$dir/.claude/settings.json" 2>/dev/null || true)
+fi
+if [ -z "$effort" ] && [ -f "$HOME/.claude/settings.json" ]; then
+  effort=$(jq -r '.effortLevel // empty' "$HOME/.claude/settings.json" 2>/dev/null || true)
+fi
+
 # Git branch
 branch=$(cd "$dir" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
 
@@ -23,6 +35,20 @@ if [ -n "$session_time" ]; then
   time_part=$(printf ' | \033[1;33m%s\033[0;34m' "$session_time")
 fi
 
+# Effort chip
+effort_part=''
+if [ -n "$effort" ]; then
+  case "$effort" in
+    low)    eff_short='LOW' ;;
+    medium) eff_short='MED' ;;
+    high)   eff_short='HI'  ;;
+    max)    eff_short='MAX' ;;
+    auto)   eff_short='AUTO';;
+    *)      eff_short="$effort" ;;
+  esac
+  effort_part=$(printf ' | \033[1;35m%s\033[0;34m' "$eff_short")
+fi
+
 # Context meter
 ctx_part=''
 if [ -n "$ctx_pct" ]; then
@@ -33,7 +59,7 @@ if [ -n "$ctx_pct" ]; then
 fi
 
 # Build output
-pid_section=$(printf '\033[0;34m[PID: %s | %s%s%s]\033[0m' "$PPID" "$model" "$time_part" "$ctx_part")
+pid_section=$(printf '\033[0;34m[PID: %s | %s%s%s%s]\033[0m' "$PPID" "$model" "$effort_part" "$time_part" "$ctx_part")
 
 cmd_section=''
 if [ -n "$cmd" ]; then
