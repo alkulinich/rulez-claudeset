@@ -52,6 +52,7 @@
       "Bash(~/.claude/skills/rulez-claudeset/scripts/git-push-fixes.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/git-merge-pr.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/git-commit-handoff.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/todo.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/session-time.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/context-meter.sh:*)",
 
