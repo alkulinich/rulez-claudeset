@@ -2,6 +2,8 @@
 
 Write current progress to HANDOFF.md so the next agent with a fresh context can continue.
 
+HANDOFF.md is overwritten each session (it describes *now*). Past handoffs are preserved as git history — view them with `git log -p HANDOFF.md` on the current branch.
+
 ## Instructions
 
 1. **Review the conversation** — what was the task, what was attempted, what's the current state.
@@ -31,3 +33,5 @@ Any non-obvious choices made during this session that the next agent should know
 ```
 
 3. **Be honest and specific.** The value of a handoff is in the details — vague summaries waste the next agent's time. Include file paths, error messages, and reasoning.
+
+4. **Commit it** — run `bash ~/.claude/skills/rulez-claudeset/scripts/git-commit-handoff.sh` to preserve this handoff in git history. The script only stages `HANDOFF.md` (not other WIP), skips if unchanged, and writes a `docs: handoff — <task>` commit.
