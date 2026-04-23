@@ -29,8 +29,9 @@ fi
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
-# Fetch and compare
-git -C "$SKILL_DIR" fetch --depth 1 origin main 2>/dev/null || exit 0
+# Fetch and compare (full fetch — avoids false-divergence from shallow clones
+# when origin has moved forward by multiple commits; repo is tiny)
+git -C "$SKILL_DIR" fetch origin main 2>/dev/null || exit 0
 LOCAL=$(git -C "$SKILL_DIR" rev-parse HEAD 2>/dev/null)
 REMOTE=$(git -C "$SKILL_DIR" rev-parse origin/main 2>/dev/null)
 

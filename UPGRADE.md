@@ -1,5 +1,15 @@
 # Upgrade Guide
 
+## To v1.1.1 — from v1.1.0
+
+Patch release. No user action required.
+
+### Fixed
+
+- **`bin/auto-update.sh` and `/rulez:update-claudeset` no longer use `git fetch --depth 1`**. The shallow fetch caused false-divergence errors (`Diverging branches can't be fast-forwarded`) whenever origin had advanced by multiple commits since the clone's last update — the clone couldn't verify the common ancestor from a single fetched commit. Now does a plain `git fetch origin main`, which is trivial cost for this repo and avoids the failure mode entirely. Existing shallow clones will self-deepen on the next fetch.
+
+---
+
 ## To v1.1.0 — from v1.0.0
 
 Additive release. No breaking changes, no migration required beyond letting the SessionStart auto-update pull in the new code (or running `/rulez:update-claudeset`). `bin/setup` is idempotent and will pick up the new symlinks/settings additively.
@@ -17,16 +27,16 @@ Additive release. No breaking changes, no migration required beyond letting the 
 
 `install.sh` → `bin/setup-per-project.sh`. If you had documentation or muscle memory pointing at `./install.sh`, update it. The global setup entry point (`bin/setup`) is unchanged.
 
-### Known gap: auto-update silently skips on divergence
+### Stuck clone? (fixed in v1.1.1, kept here for reference)
 
-`bin/auto-update.sh` uses `git pull --ff-only`, which refuses to reconcile when the local clone at `~/.claude/skills/rulez-claudeset/` has committed locally (e.g., manual edits in the clone). If your clone has diverged and hasn't updated in a while, run:
+`bin/auto-update.sh` uses `git pull --ff-only`, which refuses to reconcile when the local clone at `~/.claude/skills/rulez-claudeset/` has committed locally (e.g., manual edits in the clone). If your clone has truly diverged (has unique local commits), run:
 
 ```bash
 # 1. Check if there's anything unique in your local commits first
 git -C ~/.claude/skills/rulez-claudeset log --oneline origin/main..HEAD
 
 # 2. If the above is empty or duplicates of work already on origin, reset:
-git -C ~/.claude/skills/rulez-claudeset fetch --depth 1 origin main
+git -C ~/.claude/skills/rulez-claudeset fetch origin main
 git -C ~/.claude/skills/rulez-claudeset reset --hard origin/main
 ~/.claude/skills/rulez-claudeset/bin/setup
 ```

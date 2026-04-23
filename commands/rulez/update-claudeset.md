@@ -11,7 +11,7 @@ cat ~/.claude/skills/rulez-claudeset/VERSION
 
 2. **Pull latest changes** (no throttle, always fetch):
 ```bash
-git -C ~/.claude/skills/rulez-claudeset fetch --depth 1 origin main && git -C ~/.claude/skills/rulez-claudeset pull --ff-only origin main
+git -C ~/.claude/skills/rulez-claudeset fetch origin main && git -C ~/.claude/skills/rulez-claudeset pull --ff-only origin main
 ```
 
 3. **Re-run setup:**
