@@ -9,9 +9,14 @@ Pull the latest version and re-run setup.
 cat ~/.claude/skills/rulez-claudeset/VERSION
 ```
 
-2. **Pull latest changes** (no throttle, always fetch):
+2. **Pull latest changes** (no throttle, always fetch — unshallow the clone once if it was installed with `--depth 1`):
 ```bash
-git -C ~/.claude/skills/rulez-claudeset fetch origin main && git -C ~/.claude/skills/rulez-claudeset pull --ff-only origin main
+if [ -f ~/.claude/skills/rulez-claudeset/.git/shallow ]; then
+  git -C ~/.claude/skills/rulez-claudeset fetch --unshallow origin main
+else
+  git -C ~/.claude/skills/rulez-claudeset fetch origin main
+fi
+git -C ~/.claude/skills/rulez-claudeset pull --ff-only origin main
 ```
 
 3. **Re-run setup:**

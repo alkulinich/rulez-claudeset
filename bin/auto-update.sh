@@ -29,9 +29,15 @@ fi
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
-# Fetch and compare (full fetch — avoids false-divergence from shallow clones
-# when origin has moved forward by multiple commits; repo is tiny)
-git -C "$SKILL_DIR" fetch origin main 2>/dev/null || exit 0
+# Fetch and compare. First time on a shallow clone (from old --depth 1 installs)
+# we unshallow to ensure common ancestry is visible, then do a plain fetch.
+# Shallow fetches caused false-divergence errors when origin advanced by
+# multiple commits between updates — the clone couldn't verify a common ancestor.
+if [ -f "$SKILL_DIR/.git/shallow" ]; then
+  git -C "$SKILL_DIR" fetch --unshallow origin main 2>/dev/null || exit 0
+else
+  git -C "$SKILL_DIR" fetch origin main 2>/dev/null || exit 0
+fi
 LOCAL=$(git -C "$SKILL_DIR" rev-parse HEAD 2>/dev/null)
 REMOTE=$(git -C "$SKILL_DIR" rev-parse origin/main 2>/dev/null)
 

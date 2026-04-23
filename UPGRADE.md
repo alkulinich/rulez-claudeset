@@ -1,12 +1,20 @@
 # Upgrade Guide
 
-## To v1.1.1 — from v1.1.0
+## To v1.1.2 — from v1.1.1
 
 Patch release. No user action required.
 
 ### Fixed
 
-- **`bin/auto-update.sh` and `/rulez:update-claudeset` no longer use `git fetch --depth 1`**. The shallow fetch caused false-divergence errors (`Diverging branches can't be fast-forwarded`) whenever origin had advanced by multiple commits since the clone's last update — the clone couldn't verify the common ancestor from a single fetched commit. Now does a plain `git fetch origin main`, which is trivial cost for this repo and avoids the failure mode entirely. Existing shallow clones will self-deepen on the next fetch.
+- **Completes the shallow-clone fix from v1.1.1.** v1.1.1 dropped `--depth 1` from new fetches, but a pre-existing shallow clone (from a v1.0.0 install) isn't automatically unshallowed by a plain `git fetch origin main` — it just fetches the new tip and leaves the ancestry gap, so `pull --ff-only` still reports false divergence. Both `bin/auto-update.sh` and `/rulez:update-claudeset` now detect `.git/shallow` and call `git fetch --unshallow origin main` on the first run, converting the clone to full history once. Subsequent runs use a plain fetch.
+
+Users upgrading from v1.1.0 or earlier: the first auto-update after pulling v1.1.2 will do a one-time full-history fetch of this repo (small — a few hundred KB). After that, fetches are incremental as usual.
+
+---
+
+## To v1.1.1 — from v1.1.0
+
+Patch release. Superseded by v1.1.2 (the fix was incomplete — see v1.1.2 notes above).
 
 ---
 
