@@ -9,9 +9,25 @@ input=$(cat)
 dir=$(echo "$input" | jq -r '.workspace.current_dir')
 model=$(echo "$input" | jq -r '.model.display_name')
 ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
-# Effort level (undocumented JSON path > env var > project settings > user settings)
-effort=$(echo "$input" | jq -r '.effort_level // .model.effort // empty')
+# Effort level — upstream does not expose it in statusLine JSON (tracked at
+# anthropics/claude-code#51982). Best-effort resolution, highest precedence first:
+#   1. Most recent `/effort <arg>` invocation in the transcript (captures explicit
+#      session overrides; the interactive picker form leaves empty args and is lost).
+#   2. CLAUDE_CODE_EFFORT_LEVEL env var (set before `claude` launch).
+#   3. effortLevel in project .claude/settings.json.
+#   4. effortLevel in user ~/.claude/settings.json.
+effort=''
+if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+  # JSONL content is JSON-escaped (literal `\n`, not whitespace). Match the full
+  # Claude-Code-rendered invocation: name + message + non-empty args, with a tight
+  # gap budget to avoid false positives from quoted example text.
+  effort=$(grep -oE '<command-name>/effort</command-name>[^<]{0,80}<command-message>[^<]{0,40}</command-message>[^<]{0,80}<command-args>[^<]+</command-args>' "$transcript" 2>/dev/null \
+    | tail -1 \
+    | sed -nE 's#.*<command-args>([^<]+)</command-args>#\1#p' \
+    | tr -d '[:space:]\\' || true)
+fi
 if [ -z "$effort" ]; then
   effort="${CLAUDE_CODE_EFFORT_LEVEL:-}"
 fi
@@ -42,9 +58,9 @@ if [ -n "$effort" ]; then
     low)    eff_short='LOW' ;;
     medium) eff_short='MED' ;;
     high)   eff_short='HI'  ;;
+    xhigh)  eff_short='XHI' ;;
     max)    eff_short='MAX' ;;
-    auto)   eff_short='AUTO';;
-    *)      eff_short="$effort" ;;
+    *)      eff_short=$(printf '%s' "$effort" | tr '[:lower:]' '[:upper:]' | cut -c1-4) ;;
   esac
   effort_part=$(printf ' | \033[1;35m%s\033[0;34m' "$eff_short")
 fi
