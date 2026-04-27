@@ -8,7 +8,27 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 input=$(cat)
 dir=$(echo "$input" | jq -r '.workspace.current_dir')
 model=$(echo "$input" | jq -r '.model.display_name')
-ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+# Context % vs auto-compact threshold. Upstream's .context_window.used_percentage
+# is computed against the FULL context window (1M on Opus 4.7), but auto-compact
+# triggers around 400k — which makes the meter stay green long after compaction
+# is imminent. Recompute from raw tokens (.context_window.current_usage); fall
+# back to used_percentage * 2.5 (the 1M:400k ratio) when current_usage is null
+# (pre-first-API-call on 1M models). See claude-code#43989.
+ctx_pct=$(echo "$input" | jq -r '
+  (.context_window // {}) as $cw
+  | ($cw.context_window_size // 0) as $size
+  | (if $size >= 1000000 then 400000 else $size end) as $threshold
+  | $cw.current_usage as $u
+  | if ($u != null) and ($threshold > 0) then
+      ((($u.input_tokens // 0)
+        + ($u.cache_creation_input_tokens // 0)
+        + ($u.cache_read_input_tokens // 0)) * 100 / $threshold) | floor
+    elif ($cw.used_percentage // null) != null and $size >= 1000000 then
+      ($cw.used_percentage * 2.5) | floor
+    else
+      $cw.used_percentage // empty
+    end
+')
 transcript=$(echo "$input" | jq -r '.transcript_path // empty')
 
 # Effort level — upstream does not expose it in statusLine JSON (tracked at
