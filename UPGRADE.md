@@ -1,5 +1,17 @@
 # Upgrade Guide
 
+## To v1.1.4 — from v1.1.3
+
+Patch release. No user action required.
+
+### Fixed
+
+- **Statusline context meter now reflects auto-compact proximity, not full-window proximity.** Previously the bar percentage came straight from upstream's `.context_window.used_percentage`, which is calculated against the full model context (1M on Opus 4.7) — so a session at 149k / 400k tokens (the threshold `/context` reports as "37%") was rendered as 15%, staying green long after auto-compact was imminent. The meter now sums the raw input tokens from `.context_window.current_usage` and divides against the auto-compact threshold (400k on 1M-context models, full window otherwise). The number now matches what `/context` shows. See [claude-code#43989](https://github.com/anthropics/claude-code/issues/43989).
+
+  Pre-first-API-call (when `current_usage` is null), falls back to `used_percentage × 2.5` on 1M models, then to the raw `used_percentage` for non-1M models.
+
+---
+
 ## To v1.1.3 — from v1.1.2
 
 Patch release. No user action required.
