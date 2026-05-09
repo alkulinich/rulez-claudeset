@@ -62,23 +62,56 @@ If no argument provided, ask the user for the PR number.
      ```
    - Skip issues that are already closed
 
-7. **List remaining open issues:**
-   - Run:
-     ```bash
-     gh issue list --state open --limit 20 --json number,title,labels,createdAt
-     ```
-   - For each issue, check if there's an open PR linked to it:
-     ```bash
-     gh pr list --state open --json number,title,headRefName
-     ```
-     Match PRs to issues by checking if the PR branch name or title contains the issue number (e.g., branch `feature/42-user-auth` or title containing `#42` maps to issue #42)
-   - Display a formatted table with columns: number, title, labels, and PR (show PR number like `#45` if found, or `-` if none)
+7. **List remaining open issues (Agent).**
 
-8. **Suggest next issue:**
-   - From the open issues, suggest the next one to work on using this priority:
-     1. Issues with `priority:high` or `urgent` labels first
-     2. Then oldest issues (by creation date)
-   - Ask the user if they want to start working on the suggested issue via `/rulez:start-issue <number>`
+   Use the **Agent tool** with `subagent_type: "general-purpose"`. The
+   Agent runs `gh issue list` + `gh pr list` and joins them so the JSON
+   never enters the main thread. Set `PROJECT_ROOT=$(pwd)` first. Pass
+   the prompt body below verbatim, substituting `<project_root>` (the
+   captured value) and `<merged_pr>` (the PR number you just merged):
+
+   ```
+   You are listing open issues for a project and matching them to open PRs.
+   Operate inside <project_root>.
+
+   Steps:
+   1. cd "<project_root>"
+   2. Run: gh issue list --state open --limit 20 --json number,title,labels,createdAt
+   3. Run: gh pr list --state open --json number,title,headRefName
+   4. For each issue, find a matching open PR by checking whether the PR's
+      head branch name or title contains the issue number (e.g., branch
+      "feature/42-user-auth" or title containing "#42" matches issue #42).
+      Skip PR #<merged_pr> if it's still listed in the PR set.
+   5. Build a markdown table with columns: #, Title, Labels, PR.
+      - Show PR number as "#45" if found, "-" if none.
+      - Labels as comma-separated.
+   6. Choose a "next issue" suggestion using this priority:
+        a. Issues with label "priority:high" or "urgent" first.
+        b. Then oldest by createdAt.
+      If there are no open issues, set "suggested_next" to null.
+
+   Return a single JSON object, no prose, no code fences:
+     {
+       "table":          "| # | Title | Labels | PR |\n|---|---|---|---|\n| 12 | Foo | priority:high | - |\n...",
+       "suggested_next": {"number": 12, "title": "...", "reason": "priority:high"}
+     }
+   ```
+
+   - Extract the first balanced `{ ... }` block from the Agent's final
+     message.
+   - Validate with `printf '%s' "$json" | jq -e . >/dev/null`.
+   - On parse failure: dispatch ONE retry Agent with the same prompt.
+   - On second failure: print
+     `(Agent dispatch failed for open-issues, falling back to inline)`
+     and run the gh queries in the main thread.
+
+   Print `table` verbatim to the user.
+
+8. **Suggest next issue.**
+
+   If `suggested_next` is non-null, ask the user whether to start
+   working on it via `/rulez:start-issue <number>` (mention the
+   `reason` so the priority is visible). If null, skip this step.
 
 ## Example Execution
 
