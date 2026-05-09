@@ -72,8 +72,15 @@ for date in $DATES; do
     fi
 
     printf '\n**%s**\n' "$project"
-    printf '%s' "$bullets_json" | jq -r '.[]' | while IFS= read -r bullet; do
+    # Index-based access so bullets containing literal newlines (used for
+    # nested sub-bullets, e.g. "Worked on X:\n  - PR #1") stay intact —
+    # `jq -r '.[]' | while read` would split each newline into its own
+    # iteration and lose the leading "- " on continuation lines.
+    bi=0
+    while [ "$bi" -lt "$bullet_count" ]; do
+      bullet=$(printf '%s' "$bullets_json" | jq -r ".[$bi]")
       printf -- '- %s\n' "$bullet"
+      bi=$((bi + 1))
     done
   done < <(printf '%s' "$INPUT" | jq -r --arg d "$date" '.[$d] | keys_unsorted[]')
 done
