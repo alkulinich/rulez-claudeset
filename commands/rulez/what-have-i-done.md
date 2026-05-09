@@ -56,19 +56,17 @@ This command runs silently — every shell call is whitelisted. Don't compose ad
       to capture commit subjects + ISO date.
    5. Bucket by calendar day, using the dates list verbatim. Do NOT
       infer dates beyond the window.
-   6. For each date with activity, write 1–4 TOPICAL bullets that
+   6. For each date with activity, write 1–3 FLAT bullets that
       describe **what was worked on**, not the steps you took to do
-      it. Group related commits into a single topic. Each bullet may
-      optionally carry concrete sub-items (PR numbers, files,
-      decisions) on indented lines. Use HANDOFF.md and PR titles as
-      the source of grouping; bare commit subjects ("refactor X",
-      "spec → plan → impl") are noise.
+      it. Group related commits into a single topic. Each bullet is
+      one short single-line sentence — NO nested lists, NO embedded
+      newlines, NO sub-items. Concrete artifacts (PR numbers, file
+      names, decisions) belong inline as a parenthetical at the end
+      of the sentence. Use HANDOFF.md and PR titles as the source of
+      grouping; bare commit subjects ("refactor X", "spec → plan →
+      impl") are noise.
 
-      Format for sub-items: a single bullet string MAY contain
-      embedded newlines followed by "  - " for each sub-item. The
-      renderer prints those verbatim, producing nested markdown.
-
-      Bad (steps-not-substance, no grouping):
+      Bad (steps-not-substance):
         - Wrote spec, then plan
         - Scaffolded tests
         - Implemented the renderer
@@ -77,24 +75,14 @@ This command runs silently — every shell call is whitelisted. Don't compose ad
         - Updated README
         - Released
 
-      Good (topical, with sub-items where useful):
+      Bad (nested / multi-line — do not do this):
         - Worked on API team's staging findings:
-            - PR #63 LeaseWeb step3 re-normalize fuse + shared
-              CURRENT_SCHEMA_VERSION constant
-            - PR #64 stopped per-cycle Telegram spam in LW and HZ
-            - PR #65 max_nvme_tb in capabilities.storage (schema
-              bump 2.0 → 2.1)
-            - PR #66 isUnknownIdentifierError + last_fetch_not_found_at
-              column so LW step2 stops re-fetching dead products
-        - Shipped new indexer per RELEASE_PLAN
+            - PR #63 ...
+            - PR #64 ...
 
-      Note for the sub-items example above: in JSON the bullet string
-      is literally:
-        "Worked on API team's staging findings:\n  - PR #63 ...\n  - PR #64 ..."
-      Use a real `\n` escape inside the JSON string and two leading
-      spaces before each `- `. Do not return Markdown lists outside
-      strings — the value of each date key is still a flat array of
-      strings.
+      Good (flat, topical, artifacts inline):
+        - Worked on API team's staging findings (PR #63 schema_version mismatch fuse + shared CURRENT_SCHEMA_VERSION constant; PR #64 stopped per-cycle Telegram spam; PR #65 max_nvme_tb with schema bump 2.0→2.1; PR #66 isUnknownIdentifierError + last_fetch_not_found_at column).
+        - Shipped new indexer per RELEASE_PLAN.
 
    7. If no activity at all in the window, return:
         {"_note": "no activity in window"}
