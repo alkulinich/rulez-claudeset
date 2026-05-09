@@ -76,8 +76,10 @@ The same markdown is also written to `~/.claude/what-have-i-done/<today>.md`. Re
 | `scripts/punts-detect.sh` | Stop hook — regex-screens session transcripts, writes raw punt evidence | Auto-invoked on session Stop |
 | `scripts/punts-enrich.sh` | Promotes regex-only raw rows to structured rows via `claude -p` | `bash ~/.claude/skills/rulez-claudeset/scripts/punts-enrich.sh` |
 | `scripts/punts-extract-prompt.sh` | Builds the extraction prompt fed to the enrichment subagent | Called by triage / enrich |
+| `scripts/what-have-i-done-context.sh` | Prints `TODAY`/`DATES_LIST`/window ISO timestamps so the slash command never hand-rolls bash arithmetic | Called by `/rulez:what-have-i-done` |
 | `scripts/what-have-i-done-discover.sh` | Lists recently-touched Claude project dirs, resolved to real cwds | Called by `/rulez:what-have-i-done` |
 | `scripts/what-have-i-done-render.sh` | Pure stdin→markdown formatter for the rollup | Called by `/rulez:what-have-i-done` |
+| `scripts/what-have-i-done-finalize.sh` | Merges per-project Agent JSONs, renders, writes the dated file, prints to stdout | Called by `/rulez:what-have-i-done` |
 
 ## Requirements
 

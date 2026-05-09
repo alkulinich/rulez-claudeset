@@ -35,6 +35,17 @@ DATES=$(printf '%s' "$INPUT" | jq -r 'keys_unsorted[]' | sort -r)
 printf "# What I've done — generated %s\n" "$TODAY"
 
 for date in $DATES; do
+  is_today=0
+  [ "$date" = "$TODAY" ] && is_today=1
+
+  # For prior days, skip the date entirely if no project under it has bullets.
+  # (Today always prints — it shows "no activity" markers for empty projects.)
+  if [ "$is_today" -eq 0 ]; then
+    has_any=$(printf '%s' "$INPUT" \
+      | jq --arg d "$date" '[.[$d] | values[] | select(length > 0)] | length')
+    [ "$has_any" -eq 0 ] && continue
+  fi
+
   if [ "$date" = "$TODAY" ]; then
     heading="Today"
   elif [ "$date" = "$YESTERDAY" ]; then
@@ -44,9 +55,6 @@ for date in $DATES; do
   fi
 
   printf '\n## %s (%s)\n' "$heading" "$date"
-
-  is_today=0
-  [ "$date" = "$TODAY" ] && is_today=1
 
   while IFS= read -r project; do
     [ -z "$project" ] && continue

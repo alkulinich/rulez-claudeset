@@ -9,19 +9,15 @@ Cross-project rollup of the last N calendar days of HANDOFF.md commits + recent 
 
 ## Instructions
 
+This command runs silently — every shell call is whitelisted. Don't compose ad-hoc bash with heredocs or arithmetic; use the helper scripts and the Write tool as described.
+
 1. **Resolve the window**
 
-   Parse argument (`$ARGUMENTS`). If it's a positive integer, set `N` to it; otherwise `N=3`.
-
    ```bash
-   TODAY=$(date +%Y-%m-%d)
-   YESTERDAY=$(date -j -f %Y-%m-%d -v-1d "$TODAY" +%Y-%m-%d)
-   START_DATE=$(date -j -f %Y-%m-%d -v-$((N-1))d "$TODAY" +%Y-%m-%d)
-   START_ISO=$(date -j -f %Y-%m-%d "$START_DATE" +%Y-%m-%dT00:00:00%z)
-   END_ISO=$(date -j -f %Y-%m-%d -v+1d "$TODAY" +%Y-%m-%dT00:00:00%z)
+   bash ~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-context.sh "$N"
    ```
 
-   Build `DATES_LIST` as `today, today-1, …, today-(N-1)` in `YYYY-MM-DD` form.
+   `$N` is `$ARGUMENTS` when it's a positive integer, otherwise unset (the script defaults to 3). Parse the `KEY=VALUE` lines and remember `TODAY`, `START_ISO`, `END_ISO`, and `DATES_LIST` (oldest→newest comma-separated).
 
 2. **Discover projects**
 
@@ -60,11 +56,26 @@ Cross-project rollup of the last N calendar days of HANDOFF.md commits + recent 
       to capture commit subjects + ISO date.
    5. Bucket by calendar day, using the dates list verbatim. Do NOT
       infer dates beyond the window.
-   6. For each date in the dates list that has activity, write 1–3
-      short bullets summarizing what landed that day. HANDOFF.md
-      narrative takes precedence; commit subjects fill in gaps.
-      Bullets should be plain prose, present tense or past tense,
-      no markdown formatting inside the bullet.
+   6. For each date with activity, write 1–3 GROUPED bullets — not
+      one bullet per commit. Each bullet should be 1–2 sentences
+      summarizing a coherent chunk of work and its purpose, merging
+      related commits into a single narrative line. Reach for the
+      "broader picture", not commit-subject echoes. HANDOFF.md
+      narrative takes precedence as the source of grouping; commit
+      subjects fill in gaps. Plain prose, no markdown formatting
+      inside the bullet, no leading dash.
+
+      Bad (too tight, one-per-commit):
+        - Added schema_version mismatch fuse to LeaseWeb step 3
+        - Extracted CURRENT_SCHEMA_VERSION as a constant
+        - Fixed step 3 alert spam by gating Telegram on transitions
+
+      Good (grouped, broader picture):
+        - Hardened LeaseWeb step 3: added a schema_version mismatch
+          fuse, extracted CURRENT_SCHEMA_VERSION as a shared constant,
+          and stopped Telegram from spamming alerts every cycle by
+          gating on broken-row state transitions.
+
    7. If no activity at all in the window, return:
         {"_note": "no activity in window"}
 
@@ -74,55 +85,39 @@ Cross-project rollup of the last N calendar days of HANDOFF.md commits + recent 
    Only include dates that had activity. Other dates are implied empty.
    ```
 
-4. **Validate, retry, normalize**
+4. **Save each Agent return to disk** (use the Write tool, NOT bash heredocs)
 
-   For each Agent return:
+   For each Agent's final message:
 
-   - Extract the first balanced `{ ... }` block from the Agent's final message.
-   - Validate with `printf '%s' "$json" | jq -e . >/dev/null`.
+   - Extract the first balanced `{ ... }` block.
+   - Validate by feeding it to `jq -e .`. (You can pipe a single short string through bash without heredocs: e.g. `printf '%s' "<json>" | jq -e .` is fine, but for multi-line content prefer the Write tool.)
    - On parse failure: dispatch ONE retry Agent for that project with the same prompt.
-   - On second failure: synthesize `{"<TODAY>": ["(summary failed)"]}` for that project so the failure is visible in the rollup.
-   - If the JSON contains `_note` (e.g., `"not a git repo"` or `"no activity in window"`), treat it as `{}` for merge purposes.
+   - On second failure: synthesize the literal string `{"<TODAY>": ["(summary failed)"]}` (substituting today's date) so the failure is visible in the rollup.
+   - Use the **Write tool** to save the validated JSON to `/tmp/whid-<project_basename>.json`. `<project_basename>` = `basename "$real_cwd"`.
 
-   For each project, build a per-project dict keyed by every date in `DATES_LIST` (initialize to `[]`), then overlay the Agent-returned bullets.
+   Treat objects whose only key is `_note` as empty for downstream merge purposes — finalize.sh handles that automatically; you just save what the Agent returned.
 
-5. **Merge**
+5. **Finalize: merge, render, write, print**
 
-   Build a single nested object:
+   Build a single `bash` invocation that hands every (basename, json_path) pair to the finalize script. Pass `TODAY` and `DATES_LIST` from step 1.
 
-   ```json
-   {
-     "<DATE>": {
-       "<project_basename>": ["bullet", ...],
-       ...
-     },
+   ```bash
+   bash ~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-finalize.sh \
+     "$TODAY" "$DATES_LIST" \
+     <basename1> /tmp/whid-<basename1>.json \
+     <basename2> /tmp/whid-<basename2>.json \
      ...
-   }
    ```
 
-   `project_basename = basename "$real_cwd"`. Every date in `DATES_LIST` appears as a top-level key; every project appears under each date (with `[]` if no bullets).
+   The script merges the per-project returns into the nested `{date: {project: [bullets]}}` shape, renders the markdown via the existing renderer, writes it to `~/.claude/what-have-i-done/<today>.md`, and prints the same body to stdout.
 
-6. **Render**
+6. **Reply with the markdown**
 
-   ```bash
-   printf '%s' "$MERGED_JSON" \
-     | bash ~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-render.sh "$TODAY" \
-     > /tmp/whid-$$.md
-   ```
-
-7. **Write the dated file and print to chat**
-
-   ```bash
-   mkdir -p ~/.claude/what-have-i-done
-   cp /tmp/whid-$$.md "$HOME/.claude/what-have-i-done/$TODAY.md"
-   cat /tmp/whid-$$.md
-   rm -f /tmp/whid-$$.md
-   ```
-
-   Then display the markdown body to the user as your reply.
+   The finalize script's stdout IS your reply body. Display it to the user as the slash command's response. Optionally clean up `/tmp/whid-*.json` afterwards (`rm -f /tmp/whid-*.json`) — they're harmless leftovers but cleaning is tidy.
 
 ## Notes
 
 - Output goes both to chat and to `~/.claude/what-have-i-done/<today>.md`. Re-running on the same day overwrites the file (intentional — later runs see fresher commits).
 - Empty days for prior dates are omitted from the rendered output. Empty days for *today* show the project name with `(no git activity in window)` so you can see the project was checked.
 - A project that consistently fails to summarize is flagged once under today's heading as `(summary failed)` rather than silently dropped.
+- Every shell command in this flow is whitelisted in the rulez-claudeset settings, so the run should not trigger any approval prompts. If it does, the script paths or arguments drifted from the whitelist — fix that, don't approve through.

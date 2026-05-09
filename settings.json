@@ -58,6 +58,10 @@
       "Bash(~/.claude/skills/rulez-claudeset/scripts/punts-detect.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/punts-extract-prompt.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/punts-enrich.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-context.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-discover.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-render.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-finalize.sh:*)",
 
       "Skill(rulez:test-pr)",
       "Skill(rulez:push-fixes)",
@@ -65,6 +69,7 @@
       "Skill(rulez:create-pr)",
       "Skill(rulez:punts-triage)",
       "Skill(rulez:punts-enrich)",
+      "Skill(rulez:what-have-i-done)",
 
       "Bash(chmod:*)",
       "Bash(curl:*)",
