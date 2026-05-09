@@ -80,7 +80,8 @@ today*, so an empty today still tells the user the project was checked.
 │      (extract Task / What Worked sections)                  │
 │  • git log --since=<start> --until=<end>                    │
 │      --pretty='%cI|%h|%s' (commit subjects + ISO date)      │
-│  • Bucket by calendar day                                   │
+│  • Bucket by calendar day, using the `dates` list verbatim  │
+│    (do not infer dates beyond the window)                   │
 │  • Summarize each day into 1–3 bullets                      │
 │  • Return single JSON object:                               │
 │      { "<YYYY-MM-DD>": ["bullet 1", "bullet 2"], … }        │
@@ -145,7 +146,8 @@ Pure formatter.
    that one project once. Second failure → mark `(summary failed)` for
    that project across all dates in window.
 5. Dispatcher merges per-project objects into a single nested object
-   keyed first by date, then by project basename.
+   keyed first by date, then by project basename
+   (`basename "$real_cwd"`).
 6. Dispatcher feeds the merged JSON to `render.sh`, captures stdout.
 7. Dispatcher writes the markdown to
    `~/.claude/what-have-i-done/<today>.md` and prints the same body
