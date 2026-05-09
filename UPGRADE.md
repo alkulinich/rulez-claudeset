@@ -1,5 +1,57 @@
 # Upgrade Guide
 
+## To v1.4.1 — from v1.4.0
+
+Patch release for `/rulez:what-have-i-done`. **No user action required**
+beyond letting the SessionStart auto-update + setup re-run pick up the
+new permission entries.
+
+### Fixed
+
+- **The command now runs silently.** v1.4.0 dispatched bash with
+  inline `(N-1)` arithmetic and a multi-line heredoc, both of which
+  trip the harness "expansion obfuscation" guard and prompted the user
+  on every invocation. The heredoc + arithmetic moved into two new
+  scripts (`what-have-i-done-context.sh`, `what-have-i-done-finalize.sh`),
+  Claude now writes per-Agent JSONs via the Write tool instead of bash
+  heredocs, and all four `what-have-i-done-*.sh` scripts are whitelisted
+  in `settings.json`. The setup script merges these allowlist entries
+  into `~/.claude/settings.json` automatically.
+- **Per-project bullets are now grouped, not one-per-commit.** The
+  Agent prompt asks for 1–3 narrative bullets (1–2 sentences each)
+  that merge related commits into a coherent line, with a worked
+  example. Bullets read like a standup, not a commit log.
+- **Empty prior-day section headings are suppressed.** v1.4.0 printed
+  `## Yesterday (date)` even when every project under that date had no
+  bullets, leaving a dangling heading. The renderer now skips the
+  heading entirely when no project under a prior date will produce
+  output. Today's heading still always prints (it carries the
+  no-activity markers).
+
+### Added
+
+- `scripts/what-have-i-done-context.sh` — prints `TODAY`,
+  `YESTERDAY`, `START_DATE`, `START_ISO`, `END_ISO`, and `DATES_LIST`
+  as `KEY=VALUE` lines for the slash command to parse. Eliminates the
+  hand-rolled `(N-1)` arithmetic.
+- `scripts/what-have-i-done-finalize.sh` — accepts `(basename, json_path)`
+  pairs, merges them into the nested `{date: {project: [bullets]}}`
+  shape, renders via the existing renderer, writes the dated file, and
+  prints the markdown to stdout. Skips missing/invalid per-project
+  JSONs with a stderr warning rather than failing the run.
+- Tests for both new scripts plus the empty-prior-day fix in the
+  renderer (`tests/what-have-i-done/test-context.sh`,
+  `test-finalize.sh`). 35 asserts total, all green.
+
+### Why
+
+The first live run of v1.4.0 prompted the user three times (date math
++ two heredoc bash blocks) and produced bullets that read like commit
+subjects rather than a standup summary. The whole point of the tool
+was to fight impostor syndrome, which it can't do if it's noisy AND
+the bullets feel like a tight commit list. Both flaws were small
+enough to patch in a v1.4.1.
+
 ## To v1.4.0 — from v1.3.3
 
 Minor release. **No user action required.** New slash command:
