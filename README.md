@@ -27,6 +27,15 @@ git submodule add https://github.com/alkulinich/rulez-claudeset rulez-claudeset
 
 This copies commands into the repo's `.claude/` with paths rewritten for the submodule location.
 
+## Uninstall
+
+```bash
+~/.claude/skills/rulez-claudeset/bin/uninstall
+rm -rf ~/.claude/skills/rulez-claudeset
+```
+
+This removes the commands symlink, the SessionStart hook, the rulez permissions, the status line, and the `@RULEZ.md` import. It does not touch `~/.claude/what-have-i-done/` or `.claude/punts/` data in your projects.
+
 ## Commands
 
 | Command | Description |
