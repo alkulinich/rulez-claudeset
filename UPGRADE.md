@@ -1,5 +1,59 @@
 # Upgrade Guide
 
+## To v1.4.2 — from v1.4.1
+
+Patch release for `/rulez:what-have-i-done`. **No user action required.**
+
+### Fixed
+
+- **Projects with long-lived JSONL sessions are no longer skipped.**
+  v1.4.1 used `find ~/.claude/projects -mtime -N` against directory
+  mtime, but on macOS appending to an existing JSONL doesn't update
+  the parent dir's mtime — so any project where Claude Code reuses
+  the same session file dropped off the radar even after fresh
+  activity. `scripts/what-have-i-done-discover.sh` now scans the
+  most-recent JSONL inside each project dir and gates on **its**
+  file mtime, which gets bumped on every append.
+- **The `.cwd` lookup tolerates leading non-session records.** Some
+  JSONLs start with a `file-history-snapshot` (or other meta
+  record) that has no `.cwd`. v1.4.1 read only the first line and
+  gave up; v1.4.2 scans the first ~200 lines for the earliest record
+  carrying `.cwd`. Same project that triggered the discovery fix
+  also triggered this one.
+- **Multi-line bullets render correctly.** The renderer used `jq -r
+  '.[]' | while read bullet`, which split each embedded newline
+  into a fresh iteration and lost the leading `- ` on continuation
+  lines. It now indexes into the bullet array (`jq -r ".[$i]"`)
+  so a bullet string can carry `\n  - sub-item` segments verbatim.
+
+### Changed
+
+- **Projects are now grouped by GitHub repo name, not folder name.**
+  Discovery output gained a third column, `<display_name>`, derived
+  from `git -C <real_cwd> remote get-url origin` (with `.git`
+  stripped). Falls back to the cwd basename when no remote is
+  configured. Two checkouts of the same repo collapse into one row.
+  Output reads `dc-import-2026` instead of `26.03-dc-import-2026`.
+- **Per-project bullets describe what was worked on, not how.** The
+  Agent prompt was rewritten with a new Bad/Good worked example:
+  topical lead bullets summarising the *area of work* (e.g. "Worked
+  on API team's staging findings"), with optional indented
+  sub-bullets carrying concrete artifacts (PR numbers, file names,
+  decisions). The "wrote spec → plan → impl" style of bullet —
+  steps-not-substance — is explicitly flagged as Bad.
+
+### Why
+
+The first live run after v1.4.1 showed three flaws together: a
+project the user had worked on yesterday was missing entirely
+(silent skip), the present projects were labelled by their on-disk
+folder name (e.g. `26.03-shared-tools` instead of the repo name
+`rulez-claudeset`), and one day's bullets read like a process diary
+("scaffolded tests, implemented renderer, …") rather than naming
+what got built. All three are observation-quality, not just
+cosmetic — the rollup misleads the reader on each. v1.4.2 patches
+all three; same scope ceiling as v1.4.1, no full superpowers loop.
+
 ## To v1.4.1 — from v1.4.0
 
 Patch release for `/rulez:what-have-i-done`. **No user action required**
