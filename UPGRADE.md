@@ -1,686 +1,241 @@
 # Upgrade Guide
 
+User-facing notes per release. Each section: **Action** (what you must
+do) + **Caveat** (what changed that you'll notice). Internal change
+descriptions and motivation prose live in the commit messages, not
+here. The legacy v1.0.0 migration sections at the bottom are kept
+verbatim — anyone arriving from a pre-1.0 install needs them.
+
 ## To v1.5.0 — from v1.4.5
 
-Minor release. **No user action required for the global install** —
-the auto-update SessionStart hook picks it up. **Per-project installs
-need a re-run of `bin/setup-per-project.sh`** to refresh the copied
-command bodies (the changes are inside `commands/rulez/*.md`, which
-the per-project installer copies into the repo's `.claude/`).
+**Action:** Re-run `bin/setup-per-project.sh` for any per-project
+installs (the changes are inside `commands/rulez/*.md`, which the
+per-project installer copies into the repo's `.claude/`). Global
+installs are picked up by the auto-update hook.
 
-### Changed
-
-Five commands now dispatch **Agent-tool subagents** to keep large
-outputs (PR diffs, full file bodies, `git diff`, JSON listings,
-UPGRADE.md history) out of the main thread's context. The git-* shell
-scripts behind these commands were already context-safe — pollution
-lived entirely in the gathering / drafting steps inside each command's
-`.md` file.
-
-- **`/rulez:test-pr`** — both Phase 1 (PR diff + linked issue + changed
-  files → test plan) and Phase 3 (typecheck/lint/build/test execution
-  → pass/fail table) run in Agents. Failure output is summarized to
-  the first ~20 lines of stdout+stderr per failing step.
-- **`/rulez:create-pr`** — `eslint --fix` + `git status` + `git diff` +
-  `git log -5` + drafting of branch/title/body all happen inside an
-  Agent. Main thread sees only the proposed PR block.
-- **`/rulez:merge-pr`** step 7 — `gh issue list` + `gh pr list` JSON
-  fetch + table render runs in an Agent.
-- **`/rulez:push-fixes`** — `git diff` + commit-message drafting runs
-  in an Agent.
-- **`/rulez:update-claudeset`** step 5 — UPGRADE.md (now 750+ lines,
-  20+ sections) is sliced inside an Agent down to just the new
-  sections between old and new VERSION.
-
-Conventions match the existing exemplars in
-`commands/rulez/what-have-i-done.md` and `commands/rulez/punts-triage.md`:
-`subagent_type: "general-purpose"`, JSON return validated with
-`jq -e .`, single retry on parse failure, **visible** fallback to inline
-on second failure (never a silent stub — these are user-visible
-actions, not summaries).
-
-### Why
-
-Pure context budget. Same UX, less noise. Diffs, full file bodies, test
-logs, and the entire UPGRADE.md history no longer enter the main thread
-on routine command runs, freeing budget for the actual conversation
-around the work.
-
-### Caveat
-
-For `/rulez:test-pr`, you no longer see live test progress streaming
-into the main thread — you see the final pass/fail table with the
-first 20 lines of stderr+stdout for any failing step. Trade-off vs full
-visibility was made deliberately. If a step fails opaquely, re-run the
-failing command manually to see the full output.
-
-### Deferred
-
-`/rulez:add-issue`, `/rulez:handoff`, `/rulez:start-issue`, and
-`/rulez:brainstorm` deliberately stay on the main thread — they
-*consume* the conversation context they're invoked from, so a subagent
-would lose the very thing they need.
+**Caveat:** `/rulez:test-pr` no longer streams live test progress into
+the main thread — you see a final pass/fail table with the first ~20
+lines of stderr+stdout for any failing step. If a step fails opaquely,
+re-run the failing command manually to see full output.
 
 ## To v1.4.5 — from v1.4.4
 
-Patch release for `/rulez:what-have-i-done`. **No user action required.**
+**Action:** None.
 
-### Changed
-
-- **Empty projects are omitted on every date, today included.** v1.4.0
-  through v1.4.4 special-cased today by rendering empty projects with
-  a `- (no git activity in window)` marker so the user could tell
-  the project was checked. In practice the marker just clutters the
-  rollup — three out of four projects on a typical day have nothing
-  to show, so the rollup opens with a wall of negative space before
-  the actual content. The renderer now applies the same rule that
-  prior days already did: skip projects with no bullets, and skip
-  date headings entirely when no project under them has bullets.
-- **The `(no git activity in window)` string is gone entirely.**
-  Tests, slash command notes, and README updated to match.
-
-### Why
-
-The marker was a defensive choice ("did the project even get
-checked?") that traded readability for one small reassurance. The
-reassurance turned out not to be worth the cost — every fresh
-`/rulez:what-have-i-done` run buried the actual signal under
-no-activity placeholders.
+**Caveat:** `/rulez:what-have-i-done` no longer renders empty projects
+under any date heading (today included). The `(no git activity in
+window)` marker is gone — date headings disappear entirely when
+nothing under them has bullets.
 
 ## To v1.4.4 — from v1.4.3
 
-Patch release for `/rulez:what-have-i-done`. **No user action required.**
+**Action:** None.
 
-### Changed
-
-- **Bullets become signal-only — drop PR numbers, SHAs, file paths.**
-  v1.4.3 banned sub-items but invited "(PR #X, file Y; PR #Z, …)" as
-  an inline parenthetical. The model dutifully shoved every artifact
-  it had into that parenthetical, producing 250–400-character lead
-  bullets — same density as v1.4.2's nested form, just less
-  readable. The Agent prompt now reframes the parenthetical's role
-  as **signal — the why**: a metric ("777/779 LW rows on
-  schema_version 1.0"), a symptom ("Telegram alert spam"), or a
-  trigger ("staging migrate.ts auto-bootstrap bug"). It explicitly
-  forbids PR numbers, commit SHAs, file paths, and enumerations
-  joined by semicolons. Trade-off: PR numbers and file paths are no
-  longer in the rollup; use `git log` or open HANDOFF.md if you need
-  to dig.
-- **Bad/Good worked example rebuilt with three Bads.** v1.4.3's two
-  Bads ("steps-not-substance", "nested") missed the v1.4.3-shaped
-  failure mode; a third Bad ("artifact dump in the parenthetical")
-  now sits next to a Good rebuilt from old v1.4.2 lead bullets.
-- **Soft length advice (~120 chars).** Stated as a self-check
-  ("if it's running long, you're probably enumerating artifacts"),
-  not a hard cap.
-
-### Why
-
-The shape of the bullet drives readability more than the formatting
-rules around it. v1.4.3's "flat with parenthetical" rule was
-correct, but without naming what the parenthetical is *for*, the
-parenthetical became a junk drawer. v1.4.4 names the role.
+**Caveat:** `/rulez:what-have-i-done` bullets drop PR numbers, commit
+SHAs, file paths, and semicolon-enumerations. The inline parenthetical
+now carries *signal* (a metric, symptom, or trigger), not artifacts.
+If you need PR numbers or file paths, use `git log` or open
+`HANDOFF.md`.
 
 ## To v1.4.3 — from v1.4.2
 
-Patch release for `/rulez:what-have-i-done`. **No user action required.**
+**Action:** None.
 
-### Changed
-
-- **Bullets are flat-only — no nested sub-items.** v1.4.2 invited
-  per-bullet sub-items via `\n  - ` syntax inside the JSON string;
-  the live run produced rollups dense enough to read like a
-  release-note tree, which defeats the "broader picture" goal. The
-  Agent prompt now requires single-line bullets; concrete artifacts
-  (PR numbers, files, decisions) belong inline as a parenthetical at
-  the end of the sentence. The Bad/Good worked example was rewritten
-  with both a "steps-not-substance" Bad and a "nested / multi-line"
-  Bad so future drift is easy to flag.
-
-The renderer still tolerates multi-line bullet strings (defensive
-support landed in v1.4.2) — but the prompt no longer asks for them,
-so produced rollups should stay flat in practice.
+**Caveat:** `/rulez:what-have-i-done` bullets are flat — no nested
+sub-items. Concrete artifacts go inline as a parenthetical.
 
 ## To v1.4.2 — from v1.4.1
 
-Patch release for `/rulez:what-have-i-done`. **No user action required.**
+**Action:** None.
 
-### Fixed
-
-- **Projects with long-lived JSONL sessions are no longer skipped.**
-  v1.4.1 used `find ~/.claude/projects -mtime -N` against directory
-  mtime, but on macOS appending to an existing JSONL doesn't update
-  the parent dir's mtime — so any project where Claude Code reuses
-  the same session file dropped off the radar even after fresh
-  activity. `scripts/what-have-i-done-discover.sh` now scans the
-  most-recent JSONL inside each project dir and gates on **its**
-  file mtime, which gets bumped on every append.
-- **The `.cwd` lookup tolerates leading non-session records.** Some
-  JSONLs start with a `file-history-snapshot` (or other meta
-  record) that has no `.cwd`. v1.4.1 read only the first line and
-  gave up; v1.4.2 scans the first ~200 lines for the earliest record
-  carrying `.cwd`. Same project that triggered the discovery fix
-  also triggered this one.
-- **Multi-line bullets render correctly.** The renderer used `jq -r
-  '.[]' | while read bullet`, which split each embedded newline
-  into a fresh iteration and lost the leading `- ` on continuation
-  lines. It now indexes into the bullet array (`jq -r ".[$i]"`)
-  so a bullet string can carry `\n  - sub-item` segments verbatim.
-
-### Changed
-
-- **Projects are now grouped by GitHub repo name, not folder name.**
-  Discovery output gained a third column, `<display_name>`, derived
-  from `git -C <real_cwd> remote get-url origin` (with `.git`
-  stripped). Falls back to the cwd basename when no remote is
-  configured. Two checkouts of the same repo collapse into one row.
-  Output reads `dc-import-2026` instead of `26.03-dc-import-2026`.
-- **Per-project bullets describe what was worked on, not how.** The
-  Agent prompt was rewritten with a new Bad/Good worked example:
-  topical lead bullets summarising the *area of work* (e.g. "Worked
-  on API team's staging findings"), with optional indented
-  sub-bullets carrying concrete artifacts (PR numbers, file names,
-  decisions). The "wrote spec → plan → impl" style of bullet —
-  steps-not-substance — is explicitly flagged as Bad.
-
-### Why
-
-The first live run after v1.4.1 showed three flaws together: a
-project the user had worked on yesterday was missing entirely
-(silent skip), the present projects were labelled by their on-disk
-folder name (e.g. `26.03-shared-tools` instead of the repo name
-`rulez-claudeset`), and one day's bullets read like a process diary
-("scaffolded tests, implemented renderer, …") rather than naming
-what got built. All three are observation-quality, not just
-cosmetic — the rollup misleads the reader on each. v1.4.2 patches
-all three; same scope ceiling as v1.4.1, no full superpowers loop.
+**Caveat:** `/rulez:what-have-i-done` projects are now grouped by
+GitHub repo name (e.g. `dc-import-2026` instead of
+`26.03-dc-import-2026`). Projects with long-lived JSONL sessions that
+were silently skipped before now appear correctly.
 
 ## To v1.4.1 — from v1.4.0
 
-Patch release for `/rulez:what-have-i-done`. **No user action required**
-beyond letting the SessionStart auto-update + setup re-run pick up the
-new permission entries.
+**Action:** None — auto-update + setup re-run picks up the new
+permission entries.
 
-### Fixed
-
-- **The command now runs silently.** v1.4.0 dispatched bash with
-  inline `(N-1)` arithmetic and a multi-line heredoc, both of which
-  trip the harness "expansion obfuscation" guard and prompted the user
-  on every invocation. The heredoc + arithmetic moved into two new
-  scripts (`what-have-i-done-context.sh`, `what-have-i-done-finalize.sh`),
-  Claude now writes per-Agent JSONs via the Write tool instead of bash
-  heredocs, and all four `what-have-i-done-*.sh` scripts are whitelisted
-  in `settings.json`. The setup script merges these allowlist entries
-  into `~/.claude/settings.json` automatically.
-- **Per-project bullets are now grouped, not one-per-commit.** The
-  Agent prompt asks for 1–3 narrative bullets (1–2 sentences each)
-  that merge related commits into a coherent line, with a worked
-  example. Bullets read like a standup, not a commit log.
-- **Empty prior-day section headings are suppressed.** v1.4.0 printed
-  `## Yesterday (date)` even when every project under that date had no
-  bullets, leaving a dangling heading. The renderer now skips the
-  heading entirely when no project under a prior date will produce
-  output. Today's heading still always prints (it carries the
-  no-activity markers).
-
-### Added
-
-- `scripts/what-have-i-done-context.sh` — prints `TODAY`,
-  `YESTERDAY`, `START_DATE`, `START_ISO`, `END_ISO`, and `DATES_LIST`
-  as `KEY=VALUE` lines for the slash command to parse. Eliminates the
-  hand-rolled `(N-1)` arithmetic.
-- `scripts/what-have-i-done-finalize.sh` — accepts `(basename, json_path)`
-  pairs, merges them into the nested `{date: {project: [bullets]}}`
-  shape, renders via the existing renderer, writes the dated file, and
-  prints the markdown to stdout. Skips missing/invalid per-project
-  JSONs with a stderr warning rather than failing the run.
-- Tests for both new scripts plus the empty-prior-day fix in the
-  renderer (`tests/what-have-i-done/test-context.sh`,
-  `test-finalize.sh`). 35 asserts total, all green.
-
-### Why
-
-The first live run of v1.4.0 prompted the user three times (date math
-+ two heredoc bash blocks) and produced bullets that read like commit
-subjects rather than a standup summary. The whole point of the tool
-was to fight impostor syndrome, which it can't do if it's noisy AND
-the bullets feel like a tight commit list. Both flaws were small
-enough to patch in a v1.4.1.
+**Caveat:** `/rulez:what-have-i-done` runs silently now (v1.4.0
+prompted on every invocation). Per-project bullets are 1–3 narrative
+lines per day instead of one-per-commit, and empty prior-day headings
+are suppressed.
 
 ## To v1.4.0 — from v1.3.3
 
-Minor release. **No user action required.** New slash command:
-`/rulez:what-have-i-done`.
+**Action:** None.
 
-### Added
-
-- **`/rulez:what-have-i-done [N]`** — cross-project rollup of the last
-  N calendar days (default 3) of HANDOFF.md commits + commit subjects
-  across every Claude project you've recently touched. Dispatches one
-  general-purpose Agent per project in parallel, merges the per-project
-  JSON returns by date, and renders a grouped-by-project markdown
-  rollup. Output goes to chat and to
-  `~/.claude/what-have-i-done/<today>.md` (overwritten on same-day
-  re-runs).
-- `scripts/what-have-i-done-discover.sh` — discovers recently-touched
-  Claude project dirs and resolves them to their real `cwd` via the
-  first JSONL line of the most-recent session file. Filters
-  `/private/var/...` temp dirs and dedupes by real cwd.
-- `scripts/what-have-i-done-render.sh` — pure stdin→markdown formatter
-  for the merged rollup JSON.
-- `tests/what-have-i-done/` — discovery fixtures + golden render test
-  (mirrors `tests/punts/` shape).
-
-### Why
-
-Built to push back on impostor syndrome on days when it doesn't feel
-like much got done. Reads what already exists in git (HANDOFF.md +
-commit subjects) — no separate tracking layer. Grouping per-project
-per-day mirrors the way I context-switch.
+**Caveat:** New command — `/rulez:what-have-i-done [N]`. Cross-project
+rollup of the last N calendar days (default 3) of HANDOFF.md +
+commit subjects across every Claude project you've touched. Output
+also written to `~/.claude/what-have-i-done/<today>.md`.
 
 ## To v1.3.3 — from v1.3.2
 
-Patch release. **No user action required.** `/rulez:handoff` now pushes
-the handoff commit automatically.
+**Action:** None.
 
-### What changed
-
-- `scripts/git-commit-handoff.sh` runs `git push` after the commit
-  succeeds. Pushes to the current branch's upstream; safely skips if the
-  branch has no upstream or HEAD is detached. Push failures are reported
-  but do not fail the script — the commit is preserved either way.
-- `commands/rulez/handoff.md` step 4 now reads "Commit and push it" and
-  documents the new behaviour inline.
-
-### Why
-
-- The Claude Code harness has a hard-coded "Git Push to Default Branch"
-  prompt that fires on every direct `git push origin main`, even with
-  auto mode on. The harness inspects the visible Bash command, so a push
-  issued from inside a script is not flagged.
-- The handoff workflow is a pre-authorized doc-only commit on a single
-  file (`HANDOFF.md`). Each handoff session paying the prompt cost was
-  pure friction.
-- The next session often runs on a fresh clone (or a different host),
-  so the handoff genuinely needs to reach the remote, not just the
-  local repo.
-
-### Caveat
-
-This is a deliberate, scoped bypass of a harness safety prompt. The
-script only ever stages `HANDOFF.md`, so the blast radius is one file.
-If you don't want the push, edit the script (`scripts/git-commit-handoff.sh`)
-or skip it and run `git commit` manually instead.
+**Caveat:** `/rulez:handoff` now pushes the handoff commit to the
+remote automatically (deliberate scoped bypass of the harness's
+"Git Push to Default Branch" prompt; only ever stages
+`HANDOFF.md`). If you don't want the push, edit
+`scripts/git-commit-handoff.sh` or skip the script and commit
+manually.
 
 ## To v1.3.2 — from v1.3.1
 
-Patch release. **No user action required.** UX-only tweak to
-`/rulez:handoff`.
+**Action:** None.
 
-### What changed
-
-- `/rulez:handoff` now ends with a short literal line telling the user
-  to run `/compact` to free up context. `/compact` is a client-side
-  command that the assistant cannot invoke from inside a skill, so the
-  handoff flow simply prompts the user to type it themselves after the
-  commit lands.
-
-### Migration
-
-Pull, re-run setup. No state change.
+**Caveat:** `/rulez:handoff` ends with a literal "Run `/compact`
+now" line so you can free context for the next task. `/compact` is
+client-side; the assistant cannot invoke it itself.
 
 ## To v1.3.1 — from v1.3.0
 
-Patch release. **No user action required.** Behavior parity with v1.3.0;
-the change is internal to how `/rulez:punts-triage` reaches enrichment.
+**Action:** None — pull, re-run setup. Existing raw + slice files work
+under either v1.3.0 or v1.3.1 paths.
 
-### What changed
-
-- **`/rulez:punts-triage` now enriches via the Agent (Task) tool from
-  inside the triage session itself**, instead of shelling out to
-  `scripts/punts-enrich.sh` (which loops `claude -p`). One Agent
-  dispatch per slice file, dispatched in parallel (cap 8 per round; if
-  the backlog is large, triage offers to fall back to the script).
-
-### Why
-
-- The Agent tool runs inside the triage session — same prompt cache,
-  same conversation context, no separate billing artifact per call.
-- Per-chunk parallelism without managing background subshells.
-- The wrapper-vs-bare-array nuisance from `claude -p --output-format
-  json` is sidestepped: the triage flow parses the Agent's plain
-  message output directly, locates the JSON array, validates it, and
-  writes it back.
-
-### What's unchanged
-
-- `scripts/punts-enrich.sh` and `/rulez:punts-enrich` still exist for
-  batch / non-interactive back-fills (cron, scripted drains, sessions
-  outside Claude Code).
-- The Stop hook is untouched — still synchronous-only, still writes
-  regex-only raw files.
-- The slice file format on disk and raw file naming are unchanged.
-  Files written by v1.3.0 enrich the same way under v1.3.1; mixed
-  installs across machines work without coordination.
-
-### Migration
-
-Pull, re-run setup. No data migration. Existing raw + slice pairs work
-under either path.
+**Caveat:** `/rulez:punts-triage` enriches in-session via the Agent
+tool (parallel, shared prompt cache) instead of looping `claude -p`.
+`scripts/punts-enrich.sh` and `/rulez:punts-enrich` still exist for
+batch / non-interactive back-fills.
 
 ## To v1.3.0 — from v1.2.5
 
-Minor release. **Behavior change** to the punt-detection pipeline: subagent
-enrichment is now deferred from the Stop hook to a dedicated `punts-enrich.sh`
-script, auto-invoked at the top of `/rulez:punts-triage`.
-
-### Motivation
-
-The Stop hook used to fork a backgrounded subshell that ran one `claude -p`
-per chunk. On long-running sessions, the subshell could:
-
-- Run for several minutes draining a backlog (38+ chunks × ~10 s each).
-- Be killed mid-flight when the parent terminal closed (saw `Killed: 9` in
-  tests; slice files leaked).
-- Stack up if Stop fired multiple times in close succession.
-
-Mixing synchronous artifact capture with long-tail asynchronous enrichment
-in one script made behavior hard to reason about and debug.
-
-### What changed
-
-- **Stop hook (`scripts/punts-detect.sh`)** now does only synchronous work:
-  offset bookkeeping, regex screen, slice extraction, and a regex-only
-  fallback raw file per hit-bearing chunk. **No `claude -p`. No backgrounded
-  subshell.** Returns in milliseconds even on multi-MB transcripts.
-- Slice files (`.claude/punts/state/slice-<sid>-<chunk_end>-<pid>.jsonl`)
-  now persist on disk until enrichment consumes them.
-- New script **`scripts/punts-enrich.sh`** walks `raw/*.json` files with
-  `fallback == "regex-only"`, finds the matching slice, runs `claude -p` to
-  extract structured rows, validates the response is parseable JSON, and on
-  success overwrites the raw file and removes the slice. Idempotent — safe
-  to run repeatedly.
-- New slash command **`/rulez:punts-enrich`** for manual invocation.
-- **`/rulez:punts-triage` now auto-invokes enrich** as its first step, so
-  most users will never need to call enrich directly.
-
-### Migration
-
-No user action required. Existing raw files with claude-wrapper output (from
-v1.2.x runs) are skipped by enrich because `.fallback != "regex-only"`. New
-hits captured under v1.3.0 will be regex-only until triage.
-
-If you have stale slice files from a pre-v1.3.0 install (left behind when
-the old detached subshell was killed), they will be picked up by enrich on
-its next run.
-
-### Storage note
-
-Slice files now accumulate on disk until enrichment runs. For typical
-sessions this is a few KB per chunk; for long-running dialogs with many
-hits, it can grow into MBs. If you never run `/rulez:punts-triage` and
-slice files become a concern, an opportunistic cleanup is:
-
+**Action:** None for the punt pipeline. If slice files accumulate at
+`.claude/punts/state/` between Stop and triage and you want to prune
+old ones:
 ```bash
 find .claude/punts/state -name 'slice-*' -mtime +14 -delete
 ```
 
-This may be added to the hook itself in a future release.
+**Caveat:** The Stop hook is now sync-only (millisecond return);
+subagent enrichment moved to `/rulez:punts-triage` (auto-invoked) or
+`scripts/punts-enrich.sh`. Slice files persist on disk until
+enrichment consumes them. Pre-v1.3.0 raw files with claude-wrapper
+output are skipped by enrich (they're already structured).
 
 ## To v1.2.5 — from v1.2.4
 
-Patch release. **Real bug fix** — recommended for anyone with long-running
-sessions.
+**Action:** None.
 
-### Fixed
-
-- **Stop hook no longer crashes with SIGPIPE on transcripts > 64 KB.**
-  v1.2.2 introduced byte-window slicing using `tail -c +X | head -c Y`
-  pipelines inside `read_window`. When the transcript is larger than the
-  OS pipe buffer (~64 KB on macOS/Linux), `head` closes the pipe after
-  reading `Y` bytes while `tail` still has more to write — `tail` exits
-  141 (SIGPIPE), and under `set -euo pipefail` that 141 propagated and
-  aborted the whole script. Symptom: Claude Code reported `Stop hook
-  error: Failed with non-blocking status code: No stderr output` on
-  long sessions; offset state still advanced (the failure is downstream
-  of that), so subsequent fires would re-fail on the next chunk window
-  rather than re-screening already-processed bytes.
-
-  Fix: append `|| true` to each `tail | head` pipeline in `read_window`
-  and in the slice-extract path. The output is already complete by the
-  time `tail` dies, so suppressing the pipefail propagation is safe.
-
-### Test added
-
-- `test_no_sigpipe_on_large_transcript` — builds a 100 KB transcript,
-  forces 8 KB chunks, and asserts script exits 0. The previous chunking
-  test used a 635-byte transcript that fits entirely in the pipe buffer
-  (so `tail` finished before SIGPIPE could fire), which is why the bug
-  was missed earlier.
+**Caveat:** Stop hook fix — long sessions (>64 KB transcripts) no
+longer crash with SIGPIPE. Symptom under v1.2.2–v1.2.4 was *"Stop
+hook error: Failed with non-blocking status code"*; offset state
+still advanced, so subsequent fires re-failed on the next chunk
+window. Fixed by `|| true` on the `tail | head` slice pipelines.
 
 ## To v1.2.4 — from v1.2.3
 
-Patch release. No user action required.
+**Action:** None.
 
-### Fixed
-
-- **Subagent output is now JSON-validated before replacing the regex-only
-  fallback.** Previously the hook trusted `claude -p`'s exit status, but a
-  0 exit with truncated stdout is a real failure mode (observed on >5 MB
-  transcripts pre-v1.2.2). The script now runs `jq -e .` on the temp file
-  after `claude -p` returns; if the output isn't parseable JSON, the temp
-  is discarded and the synchronous regex-only fallback already on disk
-  remains the artifact. Triage now has a guarantee: every `raw/*.json`
-  file is parseable JSON.
+**Caveat:** Subagent JSON output is now validated via `jq -e .` before
+replacing the regex-only fallback. Bad output (truncated JSON on >5 MB
+transcripts) keeps the synchronous regex-only artifact instead of
+overwriting with garbage. Triage now has a guarantee: every
+`raw/*.json` file is parseable JSON.
 
 ## To v1.2.3 — from v1.2.2
 
-Patch release. No user action required. Documentation/clarity fix only;
-behavior unchanged from v1.2.2.
+**Action:** None.
 
-### Fixed
-
-- **Subagent prompt now reflects the slice-file reality.**
-  `scripts/punts-extract-prompt.sh` was still calling its input
-  `transcript_path` and telling the subagent to "Read the transcript at
-  …" — but since v1.2.2 the file passed in is actually a per-chunk slice
-  with intentionally-clipped surrounding bytes. The prompt now names it a
-  "transcript slice" and instructs the subagent to limit quotes to what's
-  in the slice; the variable is renamed `slice_path` for the same reason.
-  The `session_ended_at` line also notes that the timestamp reflects when
-  the Stop hook fired, not when the underlying messages were originally
-  written (matters during backlog drains). No functional change to the
-  hook or the output schema.
+**Caveat:** Internal subagent prompt clarity fix — no behavior change.
 
 ## To v1.2.2 — from v1.2.1
 
-Patch release. No user action required.
+**Action:** None — defaults are tuned. Override only if you want
+different chunking:
+- `PUNT_MAX_CHUNK` — max bytes per chunk (default 262144 / 256 KB).
+- `PUNT_LOOKBACK` — pre-chunk context bytes per slice (default 4096 / 4 KB).
 
-### Fixed
-
-- **Punt subagent no longer chokes on long sessions.** v1.2.1 made the outer
-  Stop hook incremental, but the subagent's own prompt still said *"Read the
-  transcript at `<full transcript>`"* — so on long-running dialogs (e.g. a
-  multi-week session that had accumulated 5+ MB of JSONL with hundreds of
-  matched phrases) `claude -p` blew its input context and either errored or
-  wrote a truncated/malformed raw file. The hook now hands the subagent a
-  per-chunk slice file (just the new byte window, plus a small lookback for
-  the "1-2 surrounding lines" context quote) and slices large windows into
-  multiple chunks, fanning out one detached `claude -p` per chunk.
-
-### Behavior changes
-
-- Output filenames are now `raw/<session_id>-<chunk_end>-<pid>.json` — one
-  per chunk that contains hits. Steady-state sessions still produce one file
-  per Stop fire (one chunk = one file); only oversized windows fan out.
-- Slice files live at `.claude/punts/state/slice-<session_id>-<chunk_end>-<pid>.jsonl`
-  and are deleted by the backgrounded subshell after enrichment. Already
-  covered by the same `.claude/punts/state/` gitignore note from v1.2.1.
-
-### New tunables (env vars)
-
-- `PUNT_MAX_CHUNK` — max bytes per chunk handed to one subagent
-  (default `262144`, i.e. 256 KB).
-- `PUNT_LOOKBACK` — bytes of pre-chunk context included in each slice
-  (default `4096`, i.e. 4 KB).
-
-Both are read once per Stop fire; no need to set them globally unless you
-want different behavior than the defaults.
+**Caveat:** Punt subagent handles long sessions via per-chunk slicing;
+oversized windows fan out to multiple `claude -p` invocations. Output
+filenames changed to `raw/<session_id>-<chunk_end>-<pid>.json` (one
+per chunk that contains hits — typically still one per Stop fire).
+Slice files live at `.claude/punts/state/slice-*.jsonl`.
 
 ## To v1.2.1 — from v1.2.0
 
-Patch release. No user action required.
+**Action:** If your project gitignores `.claude/punts/raw/`, also
+ignore `.claude/punts/state/` — state files are transient
+bookkeeping.
 
-### Fixed
-
-- **Stop hook no longer re-screens the entire transcript on every turn.**
-  `scripts/punts-detect.sh` previously `jq`-walked the full JSONL transcript
-  from byte 0 at every Stop fire, even though transcripts are append-only —
-  making the hook's cost grow linearly with session length. The script now
-  persists a per-session byte offset at `.claude/punts/state/<session_id>.offset`
-  and only screens bytes added since the last run. Output filenames change from
-  `raw/<session_id>.json` (overwritten each run) to
-  `raw/<session_id>-<offset>-<pid>.json` (one per Stop run that finds hits) —
-  `/rulez:punts-triage` already iterates `raw/*.json` so it consumes the new
-  shape transparently.
-
-### Project-level housekeeping
-
-If your project tracks `.claude/punts/raw/` in `.gitignore`, add
-`.claude/punts/state/` to the same ignore block — state files are transient
-bookkeeping, not artifacts.
+**Caveat:** Stop hook is incremental now (per-session byte offset at
+`.claude/punts/state/<session_id>.offset`); only screens bytes added
+since the last run. Output filenames changed to
+`raw/<session_id>-<offset>-<pid>.json` (one per Stop run with hits).
 
 ## To v1.2.0 — from v1.1.4
 
-Additive feature release. No breaking changes. Re-run `bin/setup` (or let the
-SessionStart auto-update do it) to pick up the new Stop hook.
-
-### What's new
-
-- **Punt detection.** Sessions now end with a regex screen of the transcript
-  for "pre-existing", "out of scope", and similar phrasing — plus the
-  explicit `[PUNT]: <reason>` marker (now documented in `RULEZ.md`). When at
-  least one hit is found, a backgrounded `claude -p` extracts structured
-  evidence into `.claude/punts/raw/<session-uuid>.json`. The hook returns
-  immediately so the UI is not blocked. If `claude` is not on PATH, the raw
-  regex hits are written instead so evidence is never lost.
-- **Triage on demand.** New `/rulez:punts-triage` slash command walks the
-  accumulated raw evidence interactively. APPROVE writes a curated
-  `.claude/punts/<slug>.md` (git-tracked, one issue per file); REJECT drops
-  the row; SKIP leaves it for next time; MERGE appends to an existing `.md`
-  when the same `id` (SHA-1 of the claim) resurfaces.
-- **`RULEZ.md` addition.** New `## Punts` section asking Claude to flag
-  out-of-scope decisions as `[PUNT]: <reason>` on their own line. Soft hint —
-  the regex catches both marked and un-marked punts.
-
-### Project-level housekeeping
-
-The runtime data lives under `<project>/.claude/punts/`:
-
-- `.claude/punts/raw/` — transient evidence; safe to delete.
-- `.claude/punts/<slug>.md` — curated knowledge.
-
-Most projects already gitignore `.claude/` wholesale; if you want to track
-the curated `.md` files in git, narrow the ignore to:
-
+**Action:** Decide your `.claude/` gitignore stance for the new punt
+artifacts. Most projects already ignore `.claude/` wholesale; if you
+want to track the curated `<slug>.md` files in git:
 ```
 .claude/*
 !.claude/punts/
 .claude/punts/raw/
 ```
+To disable the punt Stop hook entirely, remove its entry from
+`~/.claude/settings.json`. `bin/setup` will not re-add it as long as
+some hook with that command path exists.
 
-### Disabling
-
-If you do not want the Stop hook, edit `~/.claude/settings.json` and remove
-the `Stop` entry whose command references `rulez-claudeset/scripts/punts-detect.sh`.
-`bin/setup` will not re-add it on subsequent runs as long as a hook with that
-command path exists, so removing it is sticky.
-
----
+**Caveat:** New punt detection — Stop hook regex-screens transcripts
+for "pre-existing", "out of scope", "[PUNT]:" etc. New
+`/rulez:punts-triage` walks the accumulated raw evidence and promotes
+approved items to `.claude/punts/<slug>.md`. New `## Punts` section
+in `RULEZ.md`.
 
 ## To v1.1.4 — from v1.1.3
 
-Patch release. No user action required.
+**Action:** None.
 
-### Fixed
-
-- **Statusline context meter now reflects auto-compact proximity, not full-window proximity.** Previously the bar percentage came straight from upstream's `.context_window.used_percentage`, which is calculated against the full model context (1M on Opus 4.7) — so a session at 149k / 400k tokens (the threshold `/context` reports as "37%") was rendered as 15%, staying green long after auto-compact was imminent. The meter now sums the raw input tokens from `.context_window.current_usage` and divides against the auto-compact threshold (400k on 1M-context models, full window otherwise). The number now matches what `/context` shows. See [claude-code#43989](https://github.com/anthropics/claude-code/issues/43989).
-
-  Pre-first-API-call (when `current_usage` is null), falls back to `used_percentage × 2.5` on 1M models, then to the raw `used_percentage` for non-1M models.
-
----
+**Caveat:** Statusline context meter now reflects auto-compact
+proximity (400k threshold on 1M-context models), not full-window
+proximity. The number now matches `/context`. Previously a session
+at 149k / 400k showed as 15% (full window) instead of 37%
+(auto-compact).
 
 ## To v1.1.3 — from v1.1.2
 
-Patch release. No user action required.
+**Action:** To see the `/effort` chip in the statusline, set effort
+via one of: `/effort <level>` mid-session (with arg, not the
+interactive picker — that one still can't be captured), or
+`CLAUDE_CODE_EFFORT_LEVEL` env var, or `effortLevel` in
+`.claude/settings.json` / `~/.claude/settings.json`.
 
-### Fixed
-
-- **`/effort` chip in the statusline now actually renders.** It never worked: the primary probe read a `.effort_level` / `.model.effort` JSON field that upstream doesn't emit (tracked at [anthropics/claude-code#51982](https://github.com/anthropics/claude-code/issues/51982)), and the fallback chain (`CLAUDE_CODE_EFFORT_LEVEL` env var, `effortLevel` in settings.json) was unset for most users — so the chip resolved to empty every render.
-
-  The bogus JSON probe is gone. In its place, the script now scans `transcript_path` for the most recent explicit `/effort <level>` invocation, which captures mid-session overrides as long as you pass the level as an arg (e.g., `/effort max`). The interactive picker form (`/effort` + arrow-key selection) still can't be captured — Claude Code doesn't write the selected value anywhere the statusline can read, so picker-selected overrides remain invisible until upstream exposes effort in the statusline JSON.
-
-- **Chip label set matches real CLI values.** Added `xhigh` → `XHI`; removed non-existent `auto`. Unknown values fall back to an uppercase 4-char truncation.
-
-### To see the chip
-
-The chip is still opt-in — nothing displays until effort is resolvable from one of these sources (in order):
-
-1. Most recent `/effort <level>` in the current session's transcript.
-2. `CLAUDE_CODE_EFFORT_LEVEL` env var, e.g. `export CLAUDE_CODE_EFFORT_LEVEL=high`.
-3. `effortLevel` in the project `.claude/settings.json`.
-4. `effortLevel` in `~/.claude/settings.json`.
-
----
+**Caveat:** `/effort` chip now actually renders (was always empty
+before). Picker-form selections (`/effort` + arrow keys) remain
+invisible until upstream exposes effort in the statusline JSON.
 
 ## To v1.1.2 — from v1.1.1
 
-Patch release. No user action required.
+**Action:** None — but the first auto-update after v1.1.2 will do a
+one-time full-history fetch (small, a few hundred KB) for users on
+v1.1.0 or earlier. Subsequent fetches are incremental.
 
-### Fixed
-
-- **Completes the shallow-clone fix from v1.1.1.** v1.1.1 dropped `--depth 1` from new fetches, but a pre-existing shallow clone (from a v1.0.0 install) isn't automatically unshallowed by a plain `git fetch origin main` — it just fetches the new tip and leaves the ancestry gap, so `pull --ff-only` still reports false divergence. Both `bin/auto-update.sh` and `/rulez:update-claudeset` now detect `.git/shallow` and call `git fetch --unshallow origin main` on the first run, converting the clone to full history once. Subsequent runs use a plain fetch.
-
-Users upgrading from v1.1.0 or earlier: the first auto-update after pulling v1.1.2 will do a one-time full-history fetch of this repo (small — a few hundred KB). After that, fetches are incremental as usual.
-
----
+**Caveat:** Completes the shallow-clone fix from v1.1.1 — pre-existing
+shallow clones from v1.0.0 are now properly unshallowed.
 
 ## To v1.1.1 — from v1.1.0
 
-Patch release. Superseded by v1.1.2 (the fix was incomplete — see v1.1.2 notes above).
-
----
+Superseded by v1.1.2 — the fix was incomplete. See v1.1.2.
 
 ## To v1.1.0 — from v1.0.0
 
-Additive release. No breaking changes, no migration required beyond letting the SessionStart auto-update pull in the new code (or running `/rulez:update-claudeset`). `bin/setup` is idempotent and will pick up the new symlinks/settings additively.
+**Action:** None — `bin/setup` is idempotent and the SessionStart
+auto-update picks up new symlinks/settings additively. If you have
+documentation pointing at `./install.sh`, update to
+`bin/setup-per-project.sh` (renamed; the global setup entry point at
+`bin/setup` is unchanged).
 
-### What's new
-
-| Feature | Summary |
-|---------|---------|
-| `/rulez:todo` command | Manage a project-root `TODO.txt` in the [todo.txt format](https://github.com/todotxt/todo.txt/). Agent-interpretive — type `/rulez:todo buy milk`, `/rulez:todo done 3`, `/rulez:todo archive`, etc. Backed by `scripts/todo.sh` with full todo.sh subcommand parity (`add`, `ls`, `do`, `rm`, `pri`, `archive`). |
-| HANDOFF.md history in git | `/rulez:handoff` now commits `HANDOFF.md` after rewriting it. Past handoffs are preserved as git history on the current branch — view with `git log -p HANDOFF.md`. No separate HISTORY.md or CHANGELOG.md. Backed by `scripts/git-commit-handoff.sh`. |
-| `/effort` level in statusline | Statusline now shows a magenta `LOW` / `MED` / `HI` / `MAX` / `AUTO` chip between the model and session time. Sourced from (in order): undocumented JSON path, `$CLAUDE_CODE_EFFORT_LEVEL`, project `.claude/settings.json`, user `~/.claude/settings.json`. Omitted silently when nothing is configured. *Known gap:* mid-session `/effort max` doesn't persist to disk, so the chip won't reflect it until you also update settings. |
-| `RULEZ.md` global rules | New `RULEZ.md` at the repo root is symlinked to `~/.claude/RULEZ.md` by `bin/setup`, and `@RULEZ.md` is appended to `~/.claude/CLAUDE.md` so its contents are always in context. Current content: compact-instructions for preserving architecture/decisions/verification state during session compression. |
-
-### Minor rename
-
-`install.sh` → `bin/setup-per-project.sh`. If you had documentation or muscle memory pointing at `./install.sh`, update it. The global setup entry point (`bin/setup`) is unchanged.
-
-### Stuck clone? (fixed in v1.1.1, kept here for reference)
-
-`bin/auto-update.sh` uses `git pull --ff-only`, which refuses to reconcile when the local clone at `~/.claude/skills/rulez-claudeset/` has committed locally (e.g., manual edits in the clone). If your clone has truly diverged (has unique local commits), run:
-
-```bash
-# 1. Check if there's anything unique in your local commits first
-git -C ~/.claude/skills/rulez-claudeset log --oneline origin/main..HEAD
-
-# 2. If the above is empty or duplicates of work already on origin, reset:
-git -C ~/.claude/skills/rulez-claudeset fetch origin main
-git -C ~/.claude/skills/rulez-claudeset reset --hard origin/main
-~/.claude/skills/rulez-claudeset/bin/setup
-```
+**Caveat:** New features:
+- `/rulez:todo` — manage `TODO.txt` in todo.txt format.
+- HANDOFF.md history in git — `/rulez:handoff` now commits the file;
+  view past handoffs with `git log -p HANDOFF.md`.
+- `/effort` level chip in the statusline (see v1.1.3 for caveats).
+- `RULEZ.md` symlinked into `~/.claude/` and `@RULEZ.md` appended to
+  `~/.claude/CLAUDE.md` so global rules are always in context.
 
 ---
 
