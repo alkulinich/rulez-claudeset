@@ -63,3 +63,10 @@ To test statusline: `echo '<json>' | bash scripts/statusline.sh`
 ## Version Bumping
 
 Update `VERSION` file. UPGRADE.md sections use format `## To vX.Y.Z — from <source>`.
+
+UPGRADE.md sections are **user-facing** — keep them tight. Each section is
+**Action:** (what the user must do, or `None.`) plus optional **Caveat:** (a
+behavior change the user will notice). That's it. Why/internal-change prose
+belongs in the commit message; test-added notes don't belong anywhere user-
+facing. The Agent slicer in `/rulez:update-claudeset` returns sections
+verbatim, so every line in here lands in front of the user on update.
