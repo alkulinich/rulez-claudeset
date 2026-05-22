@@ -44,16 +44,26 @@ This command runs silently — every shell call is whitelisted. Don't compose ad
    Steps:
    1. cd into the project path.
    2. If `.git` is missing, return JSON: {"_note": "not a git repo"}.
+      Otherwise refresh remote refs so handoffs committed on feature
+      branches (possibly from another machine) are visible — best
+      effort, ignore failure if offline or no `origin` is configured:
+        git fetch --quiet origin 2>/dev/null || true
    3. Run:
-        git log --since="<START_ISO>" --until="<END_ISO>" \
+        git log --branches --remotes \
+          --since="<START_ISO>" --until="<END_ISO>" \
           --pretty='%cI|%h|%s' -- HANDOFF.md
+      `--branches --remotes` picks up HANDOFF.md commits from every
+      branch you've worked on in the window, not just the currently
+      checked-out one. `git log` returns each unique commit once.
       For each commit, run `git show <sha>:HANDOFF.md` to read the
       handoff text as it existed at that commit. Note the calendar
       date from the commit's ISO timestamp (local TZ).
    4. Run:
-        git log --since="<START_ISO>" --until="<END_ISO>" \
+        git log --branches --remotes \
+          --since="<START_ISO>" --until="<END_ISO>" \
           --pretty='%cI|%h|%s'
-      to capture commit subjects + ISO date.
+      to capture commit subjects + ISO date (same cross-branch reason
+      as step 3).
    5. Bucket by calendar day, using the dates list verbatim. Do NOT
       infer dates beyond the window.
    6. For each date with activity, write 1–3 FLAT bullets that
