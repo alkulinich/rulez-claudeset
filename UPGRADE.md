@@ -6,6 +6,15 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.5.1 — from v1.5.0
+
+**Action:** None.
+
+**Caveat:** `/rulez:what-have-i-done` now surfaces handoffs from
+feature branches you haven't merged back to main yet — previously it
+only saw the currently checked-out branch's history. Expect richer
+rollups on workflows where you handoff mid-branch.
+
 ## To v1.5.0 — from v1.4.5
 
 **Action:** Re-run `bin/setup-per-project.sh` for any per-project
