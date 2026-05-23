@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CODEX_DIR="${CODEX_DIR:-$HOME/.codex}"
+SKILLS_DIR="$CODEX_DIR/skills"
+SKILL_NAME="rulez-tools"
+SKILL_SRC="$REPO_ROOT/adapters/codex/skills/$SKILL_NAME"
+SKILL_DST="$SKILLS_DIR/$SKILL_NAME"
+
+if [ ! -d "$SKILL_SRC" ]; then
+  printf 'Error: missing Codex skill source: %s\n' "$SKILL_SRC" >&2
+  exit 1
+fi
+
+mkdir -p "$SKILLS_DIR"
+
+if [ -L "$SKILL_DST" ]; then
+  rm "$SKILL_DST"
+elif [ -e "$SKILL_DST" ]; then
+  printf 'Error: Refusing to overwrite non-symlink: %s\n' "$SKILL_DST" >&2
+  exit 1
+fi
+
+ln -sfn "$SKILL_SRC" "$SKILL_DST"
+
+printf 'Installed Codex skill: %s\n' "$SKILL_NAME"
+printf '  %s -> %s\n' "$SKILL_DST" "$SKILL_SRC"
