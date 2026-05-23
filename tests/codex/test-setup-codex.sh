@@ -80,3 +80,17 @@ test_rulez_tools_skill_frontmatter_is_valid() {
   assert_contains 'description: "Use for Rulez shared tooling in Codex:' "$(sed -n '3p' "$skill_file")" "skill description is quoted YAML"
   assert_eq "---" "$(sed -n '4p' "$skill_file")" "skill frontmatter closes"
 }
+
+test_rulez_tools_skill_documents_punts_workflows() {
+  local skill_file skill_body
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+
+  assert_contains "use rulez-tools to enrich punts" "$skill_body" "skill documents punts enrich phrasing"
+  assert_contains "use rulez-tools to triage punts" "$skill_body" "skill documents punts triage phrasing"
+  assert_contains ".claude/punts/raw" "$skill_body" "skill documents shared raw punts storage"
+  assert_contains ".claude/punts/state/slice-" "$skill_body" "skill documents punt slice storage"
+  assert_contains "spawn_agent" "$skill_body" "skill documents Codex subagent enrichment"
+  assert_contains "APPROVE / REJECT / SKIP / MERGE" "$skill_body" "skill documents interactive triage choices"
+  assert_contains "scripts/punts-extract-prompt.sh" "$skill_body" "skill documents shared prompt builder"
+}
