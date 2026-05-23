@@ -16,6 +16,33 @@ This will:
 
 Auto-updates run in the background on every Claude Code session (1-hour throttle, ff-only pull).
 
+## Install (Codex)
+
+Install the same repository as a Codex skill source and run the Codex adapter
+installer:
+
+```bash
+git clone https://github.com/alkulinich/rulez-claudeset ~/.codex/skills/rulez-claudeset
+cd ~/.codex/skills/rulez-claudeset && ./bin/setup-codex
+```
+
+This symlinks the Codex skill:
+
+```text
+~/.codex/skills/rulez-tools -> ~/.codex/skills/rulez-claudeset/adapters/codex/skills/rulez-tools
+```
+
+Then ask Codex with phrases like:
+
+```text
+use rulez-tools to start issue 123
+use rulez-tools to create PR
+use rulez-tools to test PR 5
+```
+
+The first Codex adapter covers GitHub workflow and handoff commands only. The
+Claude slash commands, settings, hooks, and statusline remain Claude-specific.
+
 ## Install (per-project)
 
 Add as a submodule and run the per-project installer:
@@ -55,6 +82,10 @@ This removes the commands symlink, the SessionStart hook, the rulez permissions,
 | `/rulez:what-have-i-done [N]` | Cross-project rollup: last N calendar days (default 3) of HANDOFF.md + commit subjects across every recently-touched Claude project. |
 | `/rulez:new-project:*` | New project setup workflow (7 steps) |
 | `/rulez:update-claudeset` | Pull latest version and re-run setup |
+
+For Codex, use the `rulez-tools` skill instead of Claude slash commands. The
+first supported Codex workflows are start issue, create PR, test PR, push
+fixes, merge PR, and handoff.
 
 ## Punts
 
