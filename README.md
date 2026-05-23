@@ -18,8 +18,9 @@ Auto-updates run in the background on every Claude Code session (1-hour throttle
 
 ## Install (Codex)
 
-Install the same repository as a Codex skill source and run the Codex adapter
-installer:
+Install the same repository as a Codex skill source, then run the Codex adapter
+installer. The repository checkout stays at `~/.codex/skills/rulez-claudeset`;
+`setup-codex` symlinks the `rulez-tools` skill into Codex's skill directory.
 
 ```bash
 mkdir -p ~/.codex/skills
@@ -47,6 +48,14 @@ The Codex adapter covers GitHub workflow, handoff, punts enrich, and punts
 triage workflows. It reuses the existing `.claude/punts/` queue; Claude slash
 commands, settings, hooks, and statusline remain Claude-specific.
 
+To update an existing Codex install:
+
+```bash
+cd ~/.codex/skills/rulez-claudeset
+git pull --ff-only
+./bin/setup-codex
+```
+
 ## Install (per-project)
 
 Add as a submodule and run the per-project installer:
@@ -58,7 +67,7 @@ git submodule add https://github.com/alkulinich/rulez-claudeset rulez-claudeset
 
 This copies commands into the repo's `.claude/` with paths rewritten for the submodule location.
 
-## Uninstall
+## Uninstall (Claude)
 
 ```bash
 ~/.claude/skills/rulez-claudeset/bin/uninstall
@@ -66,6 +75,16 @@ rm -rf ~/.claude/skills/rulez-claudeset
 ```
 
 This removes the commands symlink, the SessionStart hook, the rulez permissions, the status line, and the `@RULEZ.md` import. It does not touch `~/.claude/what-have-i-done/` or `.claude/punts/` data in your projects.
+
+## Uninstall (Codex)
+
+```bash
+rm -f ~/.codex/skills/rulez-tools
+rm -rf ~/.codex/skills/rulez-claudeset
+```
+
+This removes the Codex `rulez-tools` skill symlink and the cloned repository
+checkout. It does not touch `.claude/punts/` data in your projects.
 
 ## Commands
 
