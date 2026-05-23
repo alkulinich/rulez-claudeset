@@ -65,8 +65,8 @@ When the user says `use rulez-tools to create PR`:
 
 1. Check status and diff.
 2. Ensure the branch and changes are appropriate for a PR.
-3. Gather or derive the branch name, base branch (`main` unless the user specifies otherwise), PR title, PR body, and exact file list to stage.
-4. From the target project workspace, run `"$RULEZ_HOME/scripts/git-create-pr.sh" "$branch" "$base" "$title" "$body" "${files[@]}"`.
+3. Gather or derive the branch name, PR title, PR body, and exact file list to stage. Treat `main` as the fixed base branch for the current script.
+4. From the target project workspace, run `"$RULEZ_HOME/scripts/git-create-pr.sh" "$branch" main "$title" "$body" "${files[@]}"`.
 5. Report the PR URL or the blocking error.
 
 When the user says `use rulez-tools to test PR 5`:
