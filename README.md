@@ -22,6 +22,7 @@ Install the same repository as a Codex skill source and run the Codex adapter
 installer:
 
 ```bash
+mkdir -p ~/.codex/skills
 git clone https://github.com/alkulinich/rulez-claudeset ~/.codex/skills/rulez-claudeset
 cd ~/.codex/skills/rulez-claudeset && ./bin/setup-codex
 ```
