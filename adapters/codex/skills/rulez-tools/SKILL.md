@@ -1,11 +1,11 @@
 ---
 name: rulez-tools
-description: "Use for Rulez shared tooling in Codex: GitHub workflow commands and handoffs backed by this repository's scripts."
+description: "Use for Rulez shared tooling in Codex: GitHub workflow commands, handoffs, and punts backed by this repository's scripts."
 ---
 
 # Rulez Tools
 
-Use this skill when the user asks Codex to use `rulez-tools`, or asks for Rulez-style GitHub workflow tasks such as starting an issue, creating a PR, testing a PR, pushing fixes, merging a PR, or writing a handoff.
+Use this skill when the user asks Codex to use `rulez-tools`, or asks for Rulez-style GitHub workflow tasks such as starting an issue, creating a PR, testing a PR, pushing fixes, merging a PR, writing a handoff, enriching punts, or triaging punts.
 
 ## Repository Layout
 
@@ -96,6 +96,99 @@ When the user says `use rulez-tools to write handoff`:
 3. From the target repository root, run `"$RULEZ_HOME/scripts/git-commit-handoff.sh"`.
 4. Report the committed handoff or any missing information needed to finish it.
 
+When the user says `use rulez-tools to enrich punts`:
+
+1. Use the `Punts Enrich` workflow below.
+2. Report `enriched=N failed=M skipped_no_slice=K already_structured=L`.
+3. If failures remain, explain that raw files and slice files were preserved for retry.
+
+When the user says `use rulez-tools to triage punts`:
+
+1. Use the `Punts Triage` workflow below.
+2. Ask for one decision per evidence row.
+3. Do not bulk-approve rows.
+
+## Punts Enrich
+
+Use this workflow when the user says `use rulez-tools to enrich punts`.
+
+Do not run `scripts/punts-enrich.sh` for Codex enrichment. That script is the Claude batch path and shells out to `claude -p`. Codex enrichment uses in-session `spawn_agent` calls and the existing `.claude/punts/` queue.
+
+Storage stays project-local:
+
+```text
+.claude/punts/raw/*.json
+.claude/punts/state/slice-*.jsonl
+.claude/punts/*.md
+```
+
+Workflow:
+
+1. From the target project root, find raw files at `.claude/punts/raw/*.json`. If the directory or files are missing, report `enriched=0 failed=0 skipped_no_slice=0 already_structured=0`.
+2. For each raw file, read `jq -r '.fallback // empty' "$raw_file"`.
+3. Files whose fallback is not `regex-only` are already structured. Count them as `already_structured` and leave them unchanged.
+4. For each regex-only raw file, compute the matching slice path: `.claude/punts/state/slice-<raw-basename>.jsonl`, where `<raw-basename>` is the raw file name without `.json`.
+5. If the slice is missing, count `skipped_no_slice` and leave the raw file unchanged.
+6. Read `session_id` and `regex_hits` from the raw file with `jq -r '.session_id // empty'` and `jq -r '.regex_hits // empty'`. Missing values count as `failed`.
+7. Build the extraction prompt with `"$RULEZ_HOME/scripts/punts-extract-prompt.sh" "$slice" "$session_id" "$regex_hits"`.
+8. Use Codex `spawn_agent` to enrich regex-only files, up to 8 files per round. Each agent receives exactly one prompt body and must return a single JSON array.
+9. For each agent result, extract the JSON array and validate it with `jq -e .`.
+10. On valid JSON, overwrite the raw file with the structured array and delete the matching slice file.
+11. On invalid JSON, agent failure, missing fields, or parse failure, leave the raw file and slice file untouched for retry.
+12. Report `enriched=N failed=M skipped_no_slice=K already_structured=L`.
+
+## Punts Triage
+
+Use this workflow when the user says `use rulez-tools to triage punts`.
+
+Triage is interactive and uses the existing `.claude/punts/` queue. Do not use `.codex/punts/`. Do not bulk-approve evidence rows.
+
+Workflow:
+
+1. Run the `Punts Enrich` workflow first.
+2. List raw files with `ls -1t .claude/punts/raw/*.json 2>/dev/null`.
+3. If there are no raw files, report `No untriaged punts.` and stop.
+4. Process raw files oldest first by mtime.
+5. For each structured evidence row, present the claim, evidence quote, files mentioned, source and confidence, session id, branch, and timestamp.
+6. Ask the user for one decision: `APPROVE / REJECT / SKIP / MERGE WITH <existing>`.
+7. On `APPROVE`, generate a lowercase kebab-case slug from `claim`, at most 64 characters. If the slug exists for a different id, append `-2`, `-3`, and so on. Write `.claude/punts/<slug>.md` using the punt markdown template below, then remove that row from the raw JSON.
+8. On `REJECT`, remove that row from the raw JSON.
+9. On `SKIP`, leave that row unchanged.
+10. On `MERGE WITH <existing>`, append a new evidence block to the existing `.claude/punts/*.md`, update `last_seen`, append the session id to `sessions`, then remove that row from the raw JSON.
+11. If a raw file becomes empty, delete it.
+12. End with `N approved, M rejected, K skipped, P merged.`
+
+Use this punt markdown template for approved rows:
+
+```markdown
+---
+id: <row.id>
+first_seen: <row.session_ended_at YYYY-MM-DD>
+last_seen: <row.session_ended_at YYYY-MM-DD>
+branches: [<row.branch>]
+sessions: [<row.session_id>]
+status: open
+source: <row.source>
+confidence: <row.subagent_confidence>
+---
+
+# <claim as title>
+
+## Evidence
+
+> <row.evidence_quote>
+
+(seen in session `<row.session_id>` on branch `<row.branch>` at <row.session_ended_at>)
+
+## Files
+
+- <each file from row.files_mentioned, one per bullet>
+
+## Suggested next step
+
+Ask the user what they want to do about it and record their answer here, or use your own concise recommendation if they say "you decide".
+```
+
 ## First-Pass Scope
 
-This skill currently covers GitHub workflow and handoff commands only. It does not install or manage Codex hooks, statusline behavior, punts, `what-have-i-done`, or Claude transcript/session storage.
+This skill currently covers GitHub workflow, handoff, punts enrich, and punts triage workflows. It does not install or manage Codex hooks, statusline behavior, `what-have-i-done`, `.codex/punts/`, or Claude transcript/session storage.
