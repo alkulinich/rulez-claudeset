@@ -1,6 +1,6 @@
 ---
 name: rulez-tools
-description: Use for Rulez shared tooling in Codex: GitHub workflow commands and handoffs backed by this repository's scripts.
+description: "Use for Rulez shared tooling in Codex: GitHub workflow commands and handoffs backed by this repository's scripts."
 ---
 
 # Rulez Tools

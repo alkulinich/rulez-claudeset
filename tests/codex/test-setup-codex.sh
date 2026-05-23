@@ -77,6 +77,6 @@ test_rulez_tools_skill_frontmatter_is_valid() {
 
   assert_eq "---" "$(sed -n '1p' "$skill_file")" "skill frontmatter opens"
   assert_eq "name: rulez-tools" "$(sed -n '2p' "$skill_file")" "skill name is rulez-tools"
-  assert_contains "description: Use for Rulez shared tooling in Codex" "$(sed -n '3p' "$skill_file")" "skill has useful description"
+  assert_contains 'description: "Use for Rulez shared tooling in Codex:' "$(sed -n '3p' "$skill_file")" "skill description is quoted YAML"
   assert_eq "---" "$(sed -n '4p' "$skill_file")" "skill frontmatter closes"
 }
