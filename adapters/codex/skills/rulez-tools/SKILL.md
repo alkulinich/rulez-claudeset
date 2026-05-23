@@ -1,6 +1,6 @@
 ---
 name: rulez-tools
-description: Use for Rulez shared tooling in Codex: GitHub workflow commands, handoffs, and future rulez workflows backed by this repository's scripts.
+description: Use for Rulez shared tooling in Codex: GitHub workflow commands and handoffs backed by this repository's scripts.
 ---
 
 # Rulez Tools
@@ -18,7 +18,7 @@ This skill is installed as a symlink from:
 to:
 
 ```text
-<rulez-claudeset-repo>/adapters/codex/skills/rulez-tools
+<rulez-tools-repo>/adapters/codex/skills/rulez-tools
 ```
 
 Resolve the shared repository root from this skill file before running scripts:
@@ -34,9 +34,9 @@ When working inside this repository, `RULEZ_HOME` is the repo root. In normal Co
 Prefer the shared scripts over reimplementing workflow logic:
 
 - Start issue: `scripts/git-start-issue.sh <issue-number> [branch-name]`
-- Create PR: `scripts/git-create-pr.sh`
+- Create PR: `scripts/git-create-pr.sh <branch> <base> <title> <body> <files...>`
 - Test PR: `scripts/git-test-pr.sh <pr-number>`
-- Push fixes: `scripts/git-push-fixes.sh`
+- Push fixes: `scripts/git-push-fixes.sh <message> <files...>`
 - Merge PR: `scripts/git-merge-pr.sh <pr-number>`
 - Handoff: `scripts/git-commit-handoff.sh`
 
@@ -65,8 +65,9 @@ When the user says `use rulez-tools to create PR`:
 
 1. Check status and diff.
 2. Ensure the branch and changes are appropriate for a PR.
-3. From the target project workspace, run `"$RULEZ_HOME/scripts/git-create-pr.sh"`.
-4. Report the PR URL or the blocking error.
+3. Gather or derive the branch name, base branch (`main` unless the user specifies otherwise), PR title, PR body, and exact file list to stage.
+4. From the target project workspace, run `"$RULEZ_HOME/scripts/git-create-pr.sh" "$branch" "$base" "$title" "$body" "${files[@]}"`.
+5. Report the PR URL or the blocking error.
 
 When the user says `use rulez-tools to test PR 5`:
 
@@ -78,8 +79,9 @@ When the user says `use rulez-tools to push fixes`:
 
 1. Check status and diff.
 2. Confirm the changes belong to the current PR or branch.
-3. From the target project workspace, run `"$RULEZ_HOME/scripts/git-push-fixes.sh"`.
-4. Report the pushed branch or any blocker.
+3. Gather or derive a focused commit message and exact file list to stage.
+4. From the target project workspace, run `"$RULEZ_HOME/scripts/git-push-fixes.sh" "$message" "${files[@]}"`.
+5. Report the pushed branch or any blocker.
 
 When the user says `use rulez-tools to merge PR 5`:
 
@@ -90,8 +92,9 @@ When the user says `use rulez-tools to merge PR 5`:
 When the user says `use rulez-tools to write handoff`:
 
 1. Inspect status, recent commits, and relevant context.
-2. From the target project workspace, run `"$RULEZ_HOME/scripts/git-commit-handoff.sh"`.
-3. Report the committed handoff or any missing information needed to write it.
+2. Create or update `HANDOFF.md` in the target repository root.
+3. From the target repository root, run `"$RULEZ_HOME/scripts/git-commit-handoff.sh"`.
+4. Report the committed handoff or any missing information needed to finish it.
 
 ## First-Pass Scope
 
