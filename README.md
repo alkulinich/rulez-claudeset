@@ -39,10 +39,13 @@ Then ask Codex with phrases like:
 use rulez-tools to start issue 123
 use rulez-tools to create PR
 use rulez-tools to test PR 5
+use rulez-tools to enrich punts
+use rulez-tools to triage punts
 ```
 
-The first Codex adapter covers GitHub workflow and handoff commands only. The
-Claude slash commands, settings, hooks, and statusline remain Claude-specific.
+The Codex adapter covers GitHub workflow, handoff, punts enrich, and punts
+triage workflows. It reuses the existing `.claude/punts/` queue; Claude slash
+commands, settings, hooks, and statusline remain Claude-specific.
 
 ## Install (per-project)
 
@@ -85,8 +88,8 @@ This removes the commands symlink, the SessionStart hook, the rulez permissions,
 | `/rulez:update-claudeset` | Pull latest version and re-run setup |
 
 For Codex, use the `rulez-tools` skill instead of Claude slash commands. The
-first supported Codex workflows are start issue, create PR, test PR, push
-fixes, merge PR, and handoff.
+supported Codex workflows are start issue, create PR, test PR, push fixes,
+merge PR, handoff, punts enrich, and punts triage.
 
 ## Punts
 
