@@ -6,7 +6,7 @@ test_setup_codex_creates_rulez_tools_symlink() {
   skill_src="$REPO_ROOT/adapters/codex/skills/rulez-tools"
   skill_dst="$temp_home/.codex/skills/rulez-tools"
 
-  output="$(HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex")"
+  output="$(HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex")"
 
   assert_symlink_target "$skill_dst" "$skill_src" "setup-codex installs rulez-tools symlink"
   assert_contains "Installed Codex skill: rulez-tools" "$output" "setup-codex prints success message"
@@ -18,8 +18,8 @@ test_setup_codex_is_idempotent_for_existing_symlink() {
   skill_src="$REPO_ROOT/adapters/codex/skills/rulez-tools"
   skill_dst="$temp_home/.codex/skills/rulez-tools"
 
-  HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
-  HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
+  HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
+  HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
 
   assert_symlink_target "$skill_dst" "$skill_src" "setup-codex can be re-run"
 }
@@ -33,7 +33,7 @@ test_setup_codex_replaces_broken_symlink() {
   mkdir -p "$temp_home/.codex/skills"
   ln -s "$temp_home/missing-target" "$skill_dst"
 
-  HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
+  HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
 
   assert_symlink_target "$skill_dst" "$skill_src" "setup-codex replaces broken symlink"
 }
@@ -46,9 +46,9 @@ test_setup_codex_refuses_to_overwrite_real_directory() {
   mkdir -p "$skill_dst"
 
   set +e
-  output="$(HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex" 2>&1)"
+  output="$(HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" 2>&1)"
   status=$?
-  set -e
+  set +e
 
   assert_eq "1" "$status" "setup-codex fails when destination is a real directory"
   assert_contains "Refusing to overwrite non-symlink" "$output" "setup-codex explains real-directory collision"
@@ -63,9 +63,9 @@ test_setup_codex_refuses_to_overwrite_real_file() {
   printf 'local file\n' > "$skill_dst"
 
   set +e
-  output="$(HOME="$temp_home" bash "$REPO_ROOT/bin/setup-codex" 2>&1)"
+  output="$(HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" 2>&1)"
   status=$?
-  set -e
+  set +e
 
   assert_eq "1" "$status" "setup-codex fails when destination is a real file"
   assert_contains "Refusing to overwrite non-symlink" "$output" "setup-codex explains real-file collision"
