@@ -53,7 +53,8 @@ requires schema files on a real path — process substitution fails).
 
 Identity: `raw_slug` = spec filename minus `.md`; `raw_repo` = project
 dir basename. The script lowercases both values and replaces characters
-outside `[a-z0-9._-]` with `-`, producing `slug`, `repo`, and
+outside `[a-z0-9_-]` with `-` (dots included — git refs reject `..` and
+`.lock`), then trims leading/trailing dashes, producing `slug`, `repo`, and
 `id = <repo>-<slug>`. Branch `spec2pr/<slug>`, worktree
 `~/.worktrees/<id>/`. No hashes in the branch/worktree name —
 single-user tool. On first import the script writes identity metadata
@@ -207,7 +208,7 @@ Env-overridable, defaults baked into the script:
 ### Codex invocation
 
 `codex exec --cd <worktree> --output-schema <tmp>/<role>.json
---output-last-message <logdir>/<stage>-r<N>.md` with the rendered prompt
+--output-last-message <logdir>/<stage>-r<N>.json` with the rendered prompt
 on **stdin** (no argv limits, no shell escaping), stderr to
 `<logdir>/<stage>-r<N>.stderr`, exit status checked directly. No timeout
 wrapper in v1 (codex config bounds runs; a hung codex is visible as a
