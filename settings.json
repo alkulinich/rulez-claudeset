@@ -70,8 +70,10 @@
       "Skill(rulez:punts-triage)",
       "Skill(rulez:punts-enrich)",
       "Skill(rulez:what-have-i-done)",
+      "Skill(rulez:spec2pr)",
 
       "Bash(chmod:*)",
+      "Bash(bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh:*)",
       "Bash(curl:*)",
       "Bash(tree:*)",
       "Bash(jq:*)",

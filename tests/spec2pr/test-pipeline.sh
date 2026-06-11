@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# End-to-end pipeline behavior after PR creation.
+
+queue_clean_pr_review() {
+  enqueue "$1" <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"clean"}'
+EOF
+}
+
+test_full_happy_path_done() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "full happy path exits 0"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "final done contract"
+  assert_eq "5" "$(codex_calls)" "happy path makes exactly five codex calls"
+  assert_contains "$(last_status_line)" "SPEC2PR DONE" "status ends with done"
+  assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
+}
+
+test_pr_review_dirty_round_pushes() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue 05-pr-review <<'EOF'
+printf 'review fix\n' > review-fix.txt
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"diff","summary":"missing review fix","evidence":"review-fix.txt absent"}],"notes":"fixed"}'
+EOF
+  queue_clean_pr_review 06-pr-review-clean
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  local origin_head wt_head
+  origin_head="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BRANCH")"
+  wt_head="$(git -C "$wt" rev-parse HEAD)"
+
+  assert_eq "0" "$RC" "dirty pr-review path exits 0"
+  assert_eq "$wt_head" "$origin_head" "final origin branch equals worktree head"
+  assert_contains "$(git -C "$wt" log -1 --format=%s)" \
+    "spec2pr: pr-review review fixes r1" "dirty pr-review fix commit is last"
+}
+
+test_oversized_diff_splits() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue 04-implement <<'EOF'
+perl -e 'print "x" x 200000' > large-diff.txt
+git add large-diff.txt
+git commit -qm 'large implementation diff'
+printf '{"status":"done","summary":"implemented large diff","blocked_reason":""}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "2" "$RC" "oversized diff exits 2"
+  assert_contains "$OUT" "SPEC2PR SPLIT diff" "diff split contract"
+}
+
+test_review_fix_after_pushed_implementation_halts_before_pr() {
+  make_sandbox
+  printf 'temporary failure\n' > "$SPEC2PR_TEST_GH/pr-create-fail"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "first run fails after pushed implementation"
+  assert_contains "$OUT" "SPEC2PR HALT pr-create: gh pr create failed" "first run reaches PR create"
+
+  rm "$SPEC2PR_TEST_GH/pr-create-fail"
+  queue_clean_spec_review 05-spec-review
+  enqueue 06-plan-review <<'EOF'
+printf '\nReview fix.\n' >> docs/superpowers/plans/toy-spec-plan.md
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"plan","summary":"plan needs update","evidence":"missing review fix"}],"notes":"fixed"}'
+EOF
+  queue_clean_plan_review 07-plan-review-clean
+  queue_implementation_commit 08-implement
+  queue_clean_pr_review 09-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "plan review fix after pushed implementation exits 1"
+  assert_contains "$OUT" \
+    "SPEC2PR HALT implement: review changes after implementation; rerun implementation required" \
+    "stale remote implementation halt"
+  assert_eq "7" "$(codex_calls)" "does not rerun implementation or pr-review after stale remote implementation"
+}
+
+test_open_pr_with_review_fix_after_implementation_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue 05-pr-review <<'EOF'
+printf 'pr-review failed\n' >&2
+exit 9
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "first run creates PR then halts before done"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: codex pr-review-r1 failed" "first run halts in pr-review"
+
+  printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
+  queue_clean_spec_review 06-spec-review
+  enqueue 07-plan-review <<'EOF'
+printf '\nOpen PR review fix.\n' >> docs/superpowers/plans/toy-spec-plan.md
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"plan","summary":"plan needs update","evidence":"missing open PR fix"}],"notes":"fixed"}'
+EOF
+  queue_clean_plan_review 08-plan-review-clean
+  queue_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "open PR with stale implementation exits 1"
+  assert_contains "$OUT" \
+    "SPEC2PR HALT implement: review changes after implementation; rerun implementation required" \
+    "stale open PR implementation halt"
+  assert_eq "8" "$(codex_calls)" "does not consume implementation or pr-review fixtures after stale open PR implementation"
+}
+
+test_open_pr_resume_allows_prior_pr_review_fix_commits() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue 05-pr-review <<'EOF'
+printf 'review fix before halt\n' > review-fix.txt
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"diff","summary":"missing review fix","evidence":"review-fix.txt absent"}],"notes":"fixed"}'
+EOF
+  enqueue 06-pr-review-fail <<'EOF'
+printf 'second pr-review failed\n' >&2
+exit 9
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "first run halts after dirty pr-review fix"
+  assert_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log -1 --format=%s)" \
+    "spec2pr: pr-review review fixes r1" "first run commits pr-review fix"
+
+  printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
+  queue_clean_spec_review 07-spec-review
+  queue_clean_plan_review 08-plan-review
+  queue_clean_pr_review 09-pr-review
+  queue_implementation_commit 10-implement
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "open PR resume after pr-review fix exits 0"
+  assert_contains "$OUT" "SPEC2PR OK implement: pr exists https://example.com/pr/1" "open PR resume keeps implementation"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "open PR resume finishes"
+  assert_eq "9" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
+}
