@@ -6,6 +6,14 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.6.0 — from v1.5.x
+
+**Action:** None. `/rulez:spec2pr` is available after auto-update.
+
+**Caveat:** `/rulez:spec2pr` requires the `codex` CLI and `gh` to be
+installed and authenticated. Runs write state to `~/.spec2pr/` and
+worktrees to `~/.worktrees/`.
+
 ## To v1.5.1 — from v1.5.0
 
 **Action:** None.
