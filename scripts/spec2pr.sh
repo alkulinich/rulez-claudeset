@@ -504,13 +504,16 @@ EOF
 
   STAGE="pr-create"
   git -C "$WORKTREE" push -q -u origin "$BRANCH" || halt "git push failed"
-  if ! PR_URL="$(cd "$WORKTREE" && gh pr create \
+  if ! pr_create_out="$(cd "$WORKTREE" && gh pr create \
       --title "spec2pr: $SLUG" \
       --body "Automated by spec2pr. Spec: $WT_SPEC_REL -- Plan: $WT_PLAN_REL" \
       --base main \
       --head "$BRANCH")"; then
     halt "gh pr create failed"
   fi
+  # Real `gh pr create` can print advisory lines to stdout alongside the URL;
+  # extract just the PR URL so the DONE contract line stays machine-parseable.
+  PR_URL="$(printf '%s\n' "$pr_create_out" | grep -Eo 'https://[^[:space:]]+' | tail -n1 || true)"
   [ -n "$PR_URL" ] || halt "gh pr create did not return URL"
   status "OK" "pr ok $PR_URL"
 fi
