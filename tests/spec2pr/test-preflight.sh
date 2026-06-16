@@ -84,15 +84,29 @@ test_preflight_first_run_creates_worktree_and_imports_spec() {
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "SPEC2PR OK preflight: preflight ok" "preflight ok logged"
 }
 
-test_preflight_foreign_lock_blocks_and_remains() {
+test_preflight_live_lock_blocks_and_remains() {
   make_sandbox
+  sleep 600 &
+  local live_pid=$!
+  mkdir -p "$SPEC2PR_HOME/$ID.lock"
+  printf '%s\n' "$live_pid" > "$SPEC2PR_HOME/$ID.lock/pid"
+  run_spec2pr "$SPEC"
+  kill "$live_pid" 2>/dev/null
+  assert_eq "1" "$RC" "live lock exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: locked by running spec2pr (pid=$live_pid)" "live lock halts naming pid"
+  assert_file_exists "$SPEC2PR_HOME/$ID.lock/pid" "live lock pid remains"
+  assert_eq "$live_pid" "$(cat "$SPEC2PR_HOME/$ID.lock/pid")" "live lock pid untouched"
+}
+
+test_preflight_stale_lock_reclaimed() {
+  make_sandbox
+  # 999999 is never a live PID on the test hosts (above macOS pid_max; not
+  # running on Linux) — the previous owner is gone, so the lock is stale.
   mkdir -p "$SPEC2PR_HOME/$ID.lock"
   printf '999999\n' > "$SPEC2PR_HOME/$ID.lock/pid"
   run_spec2pr "$SPEC"
-  assert_eq "1" "$RC" "foreign lock exits 1"
-  assert_contains "$OUT" "SPEC2PR HALT preflight:" "foreign lock halts"
-  assert_file_exists "$SPEC2PR_HOME/$ID.lock/pid" "foreign lock pid remains"
-  assert_eq "999999" "$(cat "$SPEC2PR_HOME/$ID.lock/pid")" "foreign lock pid untouched"
+  assert_contains "$OUT" "SPEC2PR OK preflight: reclaimed stale lock" "stale lock reclaimed"
+  assert_contains "$OUT" "SPEC2PR OK preflight: preflight ok" "run proceeds past reclaimed lock"
 }
 
 test_preflight_changed_source_after_import_halts() {
