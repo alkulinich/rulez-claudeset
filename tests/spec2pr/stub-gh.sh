@@ -2,6 +2,8 @@
 # Fake gh CLI. Driven by $SPEC2PR_TEST_GH:
 #   pr-list-url   - if present, its content is the `pr list` output (else empty)
 #   pr-create-url - its content is the `pr create` output (URL)
+#   pr-view-json  - if present, its content is the `pr view --json` output
+#   pr-view-fail  - if present, `pr view` prints it to stderr and exits 9
 # Every invocation is appended to $SPEC2PR_TEST_GH/gh.log with cwd.
 set -uo pipefail
 dir="${SPEC2PR_TEST_GH:?SPEC2PR_TEST_GH not set}"
@@ -9,6 +11,13 @@ printf 'cwd=%s args=%s\n' "$(pwd -P)" "$*" >> "$dir/gh.log"
 case "${1:-} ${2:-}" in
   "pr list")
     if [ -f "$dir/pr-list-url" ]; then cat "$dir/pr-list-url"; fi
+    ;;
+  "pr view")
+    if [ -f "$dir/pr-view-fail" ]; then
+      cat "$dir/pr-view-fail" >&2
+      exit 9
+    fi
+    if [ -f "$dir/pr-view-json" ]; then cat "$dir/pr-view-json"; fi
     ;;
   "pr create")
     if [ -f "$dir/pr-create-fail" ]; then
