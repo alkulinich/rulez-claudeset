@@ -139,7 +139,7 @@ test_resume_skips_plan_when_file_exists() {
 
   assert_eq "0" "$RC" "resume with existing plan exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "plan exists $PLAN_REL" "plan exists status"
-  assert_eq "8" "$(codex_calls)" "resume skips planner and implement fixtures"
+  assert_eq "6" "$(codex_calls)" "resume skips planner and implement fixtures"
 }
 
 test_implement_pushes_and_creates_pr() {
@@ -220,7 +220,7 @@ test_resume_skips_implement_when_pr_open() {
   assert_eq "0" "$RC" "open PR resume exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr exists https://example.com/pr/1" "pr exists status"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr list" "resume gh pr list ran in worktree"
-  assert_eq "8" "$(codex_calls)" "open PR resume skips implement fixture"
+  assert_eq "6" "$(codex_calls)" "open PR resume skips implement fixture"
 }
 
 test_pr_create_failure_rerun_skips_implement_and_retries_create() {
@@ -246,7 +246,7 @@ test_pr_create_failure_rerun_skips_implement_and_retries_create() {
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement exists $BRANCH" "remote branch skips implement"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "retry pr ok status"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr create" "retry gh pr create ran in worktree"
-  assert_eq "7" "$(codex_calls)" "retry skips implement fixture"
+  assert_eq "6" "$(codex_calls)" "retry skips implement fixture"
 }
 
 test_push_failure_rerun_skips_completed_local_implementation() {
@@ -282,7 +282,7 @@ EOF
   assert_eq "0" "$RC" "push retry exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement exists local" "local implementation marker skips implement"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "push retry pr ok status"
-  assert_eq "7" "$(codex_calls)" "push retry does not rerun implement"
+  assert_eq "6" "$(codex_calls)" "push retry does not rerun implement"
 }
 
 test_stale_head_marker_does_not_skip_implementation() {
@@ -307,7 +307,7 @@ test_stale_head_marker_does_not_skip_implementation() {
   assert_contains "$(git -C "$wt" log --format=%s)" "implement version file" "implementation ran after forged marker"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement ok $BRANCH" "implementation status logged after forged marker"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "forged marker rerun creates PR"
-  assert_eq "8" "$(codex_calls)" "forged marker consumes implementation fixture"
+  assert_eq "7" "$(codex_calls)" "forged marker consumes implementation fixture"
 }
 
 test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
@@ -333,7 +333,7 @@ test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
   assert_contains "$(git -C "$wt" log --format=%s)" "implement version file" "implementation ran after forged spec2pr-only range"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement ok $BRANCH" "implementation status logged after forged spec2pr-only range"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "forged spec2pr-only range rerun creates PR"
-  assert_eq "8" "$(codex_calls)" "forged spec2pr-only range consumes implementation fixture"
+  assert_eq "7" "$(codex_calls)" "forged spec2pr-only range consumes implementation fixture"
 }
 
 test_pr_create_failure_rerun_halts_on_ls_remote_error() {

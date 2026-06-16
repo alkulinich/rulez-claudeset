@@ -2,8 +2,24 @@
 # End-to-end pipeline behavior after PR creation.
 
 queue_clean_pr_review() {
-  enqueue "$1" <<'EOF'
-printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"clean"}'
+  enqueue_claude "$1-a-review" <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude "$1-b-classify" <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+}
+
+queue_dirty_pr_review() {
+  enqueue_claude "$1-a-review" <<'EOF'
+printf '{"result":"BLOCKER: missing review fix. Evidence: review-fix.txt absent."}'
+EOF
+  enqueue_claude "$1-b-classify" <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue "$1-fix" <<'EOF'
+printf 'review fix\n' > review-fix.txt
+printf '{"summary":"fixed review finding"}'
 EOF
 }
 
@@ -19,7 +35,8 @@ test_full_happy_path_done() {
   local wt="$SPEC2PR_WORKTREES/$ID"
   assert_eq "0" "$RC" "full happy path exits 0"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "final done contract"
-  assert_eq "5" "$(codex_calls)" "happy path makes exactly five codex calls"
+  assert_eq "4" "$(codex_calls)" "happy path makes four codex calls"
+  assert_eq "2" "$(claude_calls)" "happy path makes review and classify calls"
   assert_contains "$(last_status_line)" "SPEC2PR DONE" "status ends with done"
   assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
 }
@@ -30,10 +47,7 @@ test_pr_review_dirty_round_pushes() {
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
   queue_implementation_commit 04-implement
-  enqueue 05-pr-review <<'EOF'
-printf 'review fix\n' > review-fix.txt
-printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"diff","summary":"missing review fix","evidence":"review-fix.txt absent"}],"notes":"fixed"}'
-EOF
+  queue_dirty_pr_review 05-pr-review
   queue_clean_pr_review 06-pr-review-clean
   run_spec2pr "$SPEC"
 
@@ -46,6 +60,84 @@ EOF
   assert_eq "$wt_head" "$origin_head" "final origin branch equals worktree head"
   assert_contains "$(git -C "$wt" log -1 --format=%s)" \
     "spec2pr: pr-review review fixes r1" "dirty pr-review fix commit is last"
+}
+
+test_pr_review_reviewer_edit_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf 'reviewer edit\n' > reviewer-edit.txt
+printf '{"result":"No issues, but I edited a file."}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "reviewer edit exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: reviewer modified worktree" "reviewer edit halt"
+}
+
+test_pr_review_classifier_edit_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf '{"result":"No issues."}'
+EOF
+  enqueue_claude 05-pr-review-b-classify <<'EOF'
+printf 'classifier edit\n' > classifier-edit.txt
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "classifier edit exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: classifier modified worktree" "classifier edit halt"
+}
+
+test_pr_review_malformed_classifier_retries_once() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf '{"result":"No issues."}'
+EOF
+  enqueue_claude 05-pr-review-b-classify-bad <<'EOF'
+printf '{"result":"not json"}'
+EOF
+  enqueue_claude 05-pr-review-c-classify-good <<'EOF'
+printf '%s' '{"result":"Here: {\"blockers_found\":0,\"majors_found\":0}"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "malformed classifier retry exits 0"
+  assert_eq "3" "$(claude_calls)" "classifier malformed reply retried once"
+  assert_contains "$OUT" "SPEC2PR DONE" "retry still finishes done"
+}
+
+test_pr_review_malformed_classifier_halts_after_retry() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf '{"result":"No issues."}'
+EOF
+  enqueue_claude 05-pr-review-b-classify-bad <<'EOF'
+printf '{"result":"not json"}'
+EOF
+  enqueue_claude 05-pr-review-c-classify-bad <<'EOF'
+printf 'not a json envelope'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "second malformed classifier exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: classifier returned malformed JSON" "malformed classifier halt"
 }
 
 test_oversized_diff_splits() {
@@ -100,13 +192,13 @@ test_open_pr_with_review_fix_after_implementation_halts() {
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
   queue_implementation_commit 04-implement
-  enqueue 05-pr-review <<'EOF'
+  enqueue_claude 05-pr-review <<'EOF'
 printf 'pr-review failed\n' >&2
 exit 9
 EOF
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "first run creates PR then halts before done"
-  assert_contains "$OUT" "SPEC2PR HALT pr-review: codex pr-review-r1 failed" "first run halts in pr-review"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: claude pr-review-r1 failed" "first run halts in pr-review"
 
   printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
   queue_clean_spec_review 06-spec-review
@@ -123,7 +215,7 @@ EOF
   assert_contains "$OUT" \
     "SPEC2PR HALT implement: review changes after implementation; rerun implementation required" \
     "stale open PR implementation halt"
-  assert_eq "8" "$(codex_calls)" "does not consume implementation or pr-review fixtures after stale open PR implementation"
+  assert_eq "7" "$(codex_calls)" "does not consume implementation or pr-review fixtures after stale open PR implementation"
 }
 
 test_open_pr_resume_allows_prior_pr_review_fix_commits() {
@@ -132,11 +224,8 @@ test_open_pr_resume_allows_prior_pr_review_fix_commits() {
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
   queue_implementation_commit 04-implement
-  enqueue 05-pr-review <<'EOF'
-printf 'review fix before halt\n' > review-fix.txt
-printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"diff","summary":"missing review fix","evidence":"review-fix.txt absent"}],"notes":"fixed"}'
-EOF
-  enqueue 06-pr-review-fail <<'EOF'
+  queue_dirty_pr_review 05-pr-review
+  enqueue_claude 06-pr-review-fail <<'EOF'
 printf 'second pr-review failed\n' >&2
 exit 9
 EOF
@@ -155,5 +244,5 @@ EOF
   assert_eq "0" "$RC" "open PR resume after pr-review fix exits 0"
   assert_contains "$OUT" "SPEC2PR OK implement: pr exists https://example.com/pr/1" "open PR resume keeps implementation"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "open PR resume finishes"
-  assert_eq "9" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
+  assert_eq "7" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
 }

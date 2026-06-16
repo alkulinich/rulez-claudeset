@@ -5,9 +5,10 @@ SPEC2PR_MAX_SPEC="${SPEC2PR_MAX_SPEC:-32768}"
 SPEC2PR_MAX_PLAN="${SPEC2PR_MAX_PLAN:-65536}"
 SPEC2PR_MAX_DIFF="${SPEC2PR_MAX_DIFF:-131072}"
 SPEC2PR_CODEX_BIN="${SPEC2PR_CODEX_BIN:-codex}"
+SPEC2PR_CLAUDE_BIN="${SPEC2PR_CLAUDE_BIN:-claude}"
 SPEC2PR_HOME="${SPEC2PR_HOME:-$HOME/.spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
-MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
+MAX_FIX_ROUNDS=3
 
 STAGE="preflight"
 FINISHED=0
@@ -65,7 +66,7 @@ dirty() {
 on_exit() {
   local rc=$?
   if [ "$FINISHED" -ne 1 ]; then
-    local line="SPEC2PR HALT $STAGE: unexpected exit (rc=$rc)"
+    local line="SPEC2PR HALT $STAGE: unexpected exit"
     cleanup_own_paths
     printf '%s\n' "$line"
     if [ -n "$STATUS_PATH" ]; then
@@ -113,6 +114,14 @@ require_codex() {
   fi
 }
 
+require_claude() {
+  if [[ "$SPEC2PR_CLAUDE_BIN" == */* ]]; then
+    [ -x "$SPEC2PR_CLAUDE_BIN" ] || halt "missing dependency: $SPEC2PR_CLAUDE_BIN"
+  else
+    require_dependency "$SPEC2PR_CLAUDE_BIN"
+  fi
+}
+
 [ "$#" -eq 1 ] || halt "usage: spec2pr.sh <spec-path>"
 
 SPEC_INPUT="$1"
@@ -147,6 +156,7 @@ if [ "$SPEC_SIZE" -gt "$SPEC2PR_MAX_SPEC" ]; then
 fi
 
 require_codex
+require_claude
 require_dependency gh
 require_dependency jq
 require_dependency git
@@ -154,7 +164,7 @@ require_dependency git
 mkdir -p "$SPEC2PR_HOME" "$SPEC2PR_WORKTREES"
 LOCK_TARGET="$SPEC2PR_HOME/$ID.lock"
 if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
-  halt "locked by another spec2pr run"
+  halt "already running"
 fi
 LOCK_DIR="$LOCK_TARGET"
 LOCK_PATH="$LOCK_DIR/pid"
@@ -250,6 +260,17 @@ cat > "$TMP_DIR/implement.json" <<'EOF'
 }
 EOF
 
+cat > "$TMP_DIR/pr-fix.json" <<'EOF'
+{
+  "type": "object",
+  "properties": {
+    "summary": {"type": "string"}
+  },
+  "required": ["summary"],
+  "additionalProperties": false
+}
+EOF
+
 codex_call() {
   local role="$1" tag="$2" prompt_file="$3"
   local last="$META_DIR/$tag.json"
@@ -262,6 +283,58 @@ codex_call() {
     halt "codex $tag failed (stderr: $err)"
   fi
   jq -e . "$last" > /dev/null 2>&1 || halt "codex $tag returned invalid JSON ($last)"
+}
+
+claude_json_attempt() {
+  local tag="$1" prompt_file="$2" out="$3"
+  local err="$META_DIR/$tag.stderr"
+
+  if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" -p --output-format json \
+      --dangerously-skip-permissions \
+      < "$prompt_file" > "$out" 2> "$err"); then
+    return 2
+  fi
+  jq -e . "$out" > /dev/null 2>&1 || return 3
+}
+
+run_claude_json() {
+  local tag="$1" prompt_file="$2" out="$3"
+  local rc
+  set +e
+  claude_json_attempt "$tag" "$prompt_file" "$out"
+  rc=$?
+  set -e
+  case "$rc" in
+    0) ;;
+    2) halt "claude $tag failed (stderr: $META_DIR/$tag.stderr)" ;;
+    *) halt "claude $tag returned invalid JSON ($out)" ;;
+  esac
+}
+
+extract_json_object() {
+  awk '
+    BEGIN { started=0; depth=0; in_string=0; escape=0 }
+    {
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (!started) {
+          if (c == "{") { started=1; depth=1; out=c }
+          continue
+        }
+        out = out c
+        if (escape) { escape=0; continue }
+        if (c == "\\") { escape=1; continue }
+        if (c == "\"") { in_string = !in_string; continue }
+        if (!in_string && c == "{") depth++
+        if (!in_string && c == "}") {
+          depth--
+          if (depth == 0) { print out; exit 0 }
+        }
+      }
+      if (started) out = out "\n"
+    }
+    END { if (depth != 0) exit 1 }
+  '
 }
 
 changed_paths() {
@@ -357,7 +430,8 @@ STAGE="plan"
 if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
   pf="$META_DIR/plan.prompt"
   cat > "$pf" <<EOF
-Write an implementation plan for the feature spec at $WT_SPEC_REL.
+Use \$superpowers:writing-plans to write an implementation plan for the
+feature spec at $WT_SPEC_REL.
 
 Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files.
 Your final message must be exactly the JSON required by the output schema.
@@ -469,7 +543,8 @@ else
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       pf="$META_DIR/implement.prompt"
       cat > "$pf" <<EOF
-Implement the plan at $WT_PLAN_REL for the spec at $WT_SPEC_REL.
+Use \$superpowers:subagent-driven-development to implement the plan at
+$WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
 Make the necessary code, test, and documentation changes in this worktree.
 Commit the implementation changes. Do not push, do not create a PR.
@@ -519,13 +594,132 @@ EOF
 fi
 
 STAGE="pr-review"
-diff_size="$(git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c | tr -d ' ')"
+diff_file="$META_DIR/pr-review.diff"
+git -C "$WORKTREE" diff "$BASE_SHA...HEAD" > "$diff_file"
+diff_size="$(wc -c < "$diff_file" | tr -d ' ')"
 if [ "$diff_size" -gt "$SPEC2PR_MAX_DIFF" ]; then
   split diff "$diff_size" "$SPEC2PR_MAX_DIFF"
 fi
 
-review_loop pr-review "the full implementation diff: run \`git diff $BASE_SHA...HEAD\` in this worktree. It implements the plan at $WT_PLAN_REL for the spec at $WT_SPEC_REL. You may run the project's tests."
+for round in $(seq 1 "$MAX_FIX_ROUNDS"); do
+  if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    halt "dirty worktree before pr-review round"
+  fi
+
+  review_prompt="$META_DIR/pr-review-r$round.prompt"
+  review_json="$META_DIR/pr-review-r$round.claude.json"
+  review_file="$META_DIR/pr-review-r$round.review"
+  cat > "$review_prompt" <<EOF
+You are a fresh-eyes PR reviewer for an unattended spec2pr run.
+
+Review only the implementation diff below, produced from immutable base
+$BASE_SHA to HEAD. The spec is $WT_SPEC_REL and the plan is $WT_PLAN_REL.
+You may inspect files and run tests in this worktree, but do not edit files,
+commit, push, or comment on GitHub.
+
+Return your review as prose in the JSON envelope's result field.
+
+Diff:
+$(cat "$diff_file")
+EOF
+  run_claude_json "pr-review-r$round" "$review_prompt" "$review_json"
+  jq -er '.result' "$review_json" > "$review_file" \
+    || halt "reviewer response missing result ($review_json)"
+  if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    halt "reviewer modified worktree"
+  fi
+
+  classify_prompt="$META_DIR/pr-review-r$round.classify.prompt"
+  classify_json="$META_DIR/pr-review-r$round.classify.json"
+  classify_result="$META_DIR/pr-review-r$round.classify.result.json"
+  classify_tmp="$META_DIR/pr-review-r$round.classify.tmp"
+  malformed=0
+  for attempt in 1 2; do
+    cat > "$classify_prompt" <<EOF
+Classify the review below. Return only JSON with integer keys
+blockers_found and majors_found. Blockers are release-blocking correctness,
+safety, data-loss, security, or contract failures. Majors are high or medium
+severity regressions that should be fixed before human review.
+
+Review:
+$(cat "$review_file")
+EOF
+    set +e
+    claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
+    classify_rc=$?
+    set -e
+    if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      halt "classifier modified worktree"
+    fi
+    if [ "$classify_rc" -eq 2 ]; then
+      halt "claude pr-review-r$round.classify-a$attempt failed (stderr: $META_DIR/pr-review-r$round.classify-a$attempt.stderr)"
+    fi
+    if [ "$classify_rc" -ne 0 ]; then
+      malformed=1
+      continue
+    fi
+    if jq -e 'if (.result | type) == "object" then .result else (.result | tostring | fromjson?) end
+      | select(type=="object")
+      | {blockers_found, majors_found}
+      | select((.blockers_found|type)=="number" and (.majors_found|type)=="number")' \
+        "$classify_json" > "$classify_result" 2>/dev/null; then
+      malformed=0
+      break
+    fi
+    jq -r '.result // empty' "$classify_json" | extract_json_object > "$classify_tmp" 2>/dev/null || true
+    if [ -s "$classify_tmp" ] && jq -e '{blockers_found, majors_found}
+        | select((.blockers_found|type)=="number" and (.majors_found|type)=="number")' \
+        "$classify_tmp" > "$classify_result" 2>/dev/null; then
+      malformed=0
+      break
+    fi
+    malformed=1
+  done
+  if [ "$malformed" -ne 0 ]; then
+    halt "classifier returned malformed JSON"
+  fi
+  b="$(jq -r '.blockers_found' "$classify_result")"
+  m="$(jq -r '.majors_found' "$classify_result")"
+  if [ "$((b + m))" -eq 0 ]; then
+    status "OK" "pr-review r$round blockers=0 majors=0 clean"
+    break
+  fi
+
+  status "OK" "pr-review r$round blockers=$b majors=$m"
+  fix_prompt="$META_DIR/pr-review-r$round.fix.prompt"
+  cat > "$fix_prompt" <<EOF
+Fix the blocker and major findings from this fresh-eyes PR review.
+
+Review findings:
+$(cat "$review_file")
+
+Make the necessary code, test, and documentation changes in this worktree.
+Do not push, do not create a PR. Your final message must be exactly the JSON
+required by the output schema.
+EOF
+  codex_call pr-fix "pr-review-r$round.fix" "$fix_prompt"
+  jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
+  if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    git -C "$WORKTREE" add -A
+    git -C "$WORKTREE" commit -q -m "spec2pr: pr-review review fixes r$round"
+    git -C "$WORKTREE" push -q origin "$BRANCH" || halt "git push failed"
+    git -C "$WORKTREE" diff "$BASE_SHA...HEAD" > "$diff_file"
+  fi
+
+  if [ "$round" -eq "$MAX_FIX_ROUNDS" ]; then
+    dirty pr-review "$b" "$m" "$review_file"
+  fi
+done
 
 STAGE="done"
 git -C "$WORKTREE" push -q origin "$BRANCH" || halt "final git push failed"
+comment_body="$META_DIR/pr-review-comment.md"
+{
+  printf 'spec2pr PR review complete.\n\n'
+  grep ' pr-review r' "$STATUS_PATH" 2>/dev/null || true
+  printf '\nLogs: %s\n' "$META_DIR"
+} > "$comment_body"
+if ! (cd "$WORKTREE" && gh pr comment "$PR_URL" --body-file "$comment_body") >/dev/null 2>"$META_DIR/pr-comment.stderr"; then
+  status "OK" "pr comment failed $META_DIR/pr-comment.stderr"
+fi
 finish 0 "DONE pr=$PR_URL worktree=$WORKTREE"

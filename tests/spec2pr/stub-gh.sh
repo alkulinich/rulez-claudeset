@@ -17,4 +17,11 @@ case "${1:-} ${2:-}" in
     fi
     cat "$dir/pr-create-url"
     ;;
+  "pr comment")
+    if [ -f "$dir/pr-comment-fail" ]; then
+      cat "$dir/pr-comment-fail" >&2
+      exit 9
+    fi
+    echo "commented"
+    ;;
 esac
