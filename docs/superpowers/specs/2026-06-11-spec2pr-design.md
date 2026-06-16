@@ -70,12 +70,13 @@ outside `[a-z0-9_-]` with `-` (dots included — git refs reject `..` and
 `id = <repo>-<slug>`. Branch `spec2pr/<slug>`, worktree
 `~/.worktrees/<id>/`. The in-worktree spec path is the input spec's path
 relative to the source repo root (`wt_spec_rel`); the copied spec is always
-reviewed and planned from that same path. No hashes in the
-branch/worktree name — single-user tool. On first import the script
-writes identity metadata under `~/.spec2pr/<id>/`: `source-path`,
-`source-sha256`, and `base-sha`. These are not committed and are not
-progress state. On resume, a path or source-hash mismatch exits cleanly
-with `HALT preflight: worktree belongs to <path>` or
+reviewed and planned from that same path. The plan path is deterministic:
+`wt_plan_rel=docs/superpowers/plans/<slug>-plan.md`. No hashes in the
+branch/worktree name — single-user tool. On first import the script writes
+identity metadata under `~/.spec2pr/<id>/`: `source-path`, `source-sha256`,
+and `base-sha`. These are not committed and are not progress state. On
+resume, a path or source-hash mismatch exits cleanly with
+`HALT preflight: worktree belongs to <path>` or
 `HALT preflight: source spec changed since import`, preventing same-named
 specs, slug collisions, or edited source specs from silently reusing a
 stale branch/worktree.
@@ -103,8 +104,9 @@ undisturbed.
 2. **Spec-review loop** — review loop (below) on the in-worktree spec.
    The shared loop commits any fixes per dirty round.
 3. **Plan** — codex writes the plan via `$superpowers:writing-plans`,
-   returns `{plan_path, summary}`. Script validates the path is inside
-   the worktree under `docs/superpowers/plans/`. Plan size gate. Commit.
+   creating exactly `wt_plan_rel`, and returns `{plan_path, summary}`.
+   Script validates `plan_path == wt_plan_rel`, verifies no other files
+   changed, applies the plan size gate, then commits.
 4. **Plan-review loop** — same template, pointed at the plan. The shared
    loop commits any fixes per dirty round.
 5. **Implement** — codex implements the plan
@@ -147,10 +149,10 @@ the worktree.
   with `spec2pr: <stage> review fixes r<N>`. A dirty worktree after a
   clean round is a contract violation and halts, because a "clean" review
   round must not also make uncommitted changes.
-- Cap: 3 fix rounds (worst case 4 calls: 3 dirty + 1 clean). If round 3
-  found issues before fixing, commit any resulting fixes and exit
-  `DIRTY` with the last pre-fix findings in the log; a rerun starts with
-  a fresh clean-check round.
+- Cap: 3 review calls per invocation. Rounds 1-2 may be dirty, commit
+  fixes, and continue. If round 3 found issues before fixing, commit any
+  resulting fixes and exit `DIRTY` with the last pre-fix findings in the
+  log; a rerun starts with a fresh clean-check round.
 
 ### PR-review loop (stage 6 — cross-model, file channel)
 
@@ -162,7 +164,8 @@ fixer is still `codex exec`. Findings travel model-to-model through a
 **file** in the log dir, never through GitHub; the only PR comment is one
 best-effort human-facing summary at the end.
 
-Each round (cap 3, same `DIRTY` semantics) runs in the worktree:
+Each round (cap 3 review calls per invocation, same `DIRTY` semantics)
+runs in the worktree:
 
 1. **Review.** `claude -p` reviews `git diff "$base_sha"...HEAD`, may read
    files and run the project's tests, and must not edit. It runs
@@ -198,7 +201,8 @@ run still ends `DONE`.
 
 Rerunning the same spec: worktree exists and `~/.spec2pr/<id>/source-path`
 plus `source-sha256` match the current source spec → reuse; spec
-committed → skip import; plan file exists in worktree → skip plan stage.
+committed → skip import; `wt_plan_rel` exists in worktree → skip plan
+stage. Other files under `docs/superpowers/plans/` are ignored for resume.
 Review loops have no completion marker — they simply run again; a clean
 artifact converges in one cheap round.
 
