@@ -95,7 +95,8 @@ if [ -n "$ctx_pct" ]; then
 fi
 
 # Build output
-pid_section=$(printf '\033[0;34m[PID: %s | %s%s%s%s]\033[0m' "$PPID" "$model" "$effort_part" "$time_part" "$ctx_part")
+clock=$(date +%H:%M:%S)
+pid_section=$(printf '\033[0;34m[\033[1;33m%s\033[0;34m | PID: %s | %s%s%s%s]\033[0m' "$clock" "$PPID" "$model" "$effort_part" "$time_part" "$ctx_part")
 
 cmd_section=''
 if [ -n "$cmd" ]; then
