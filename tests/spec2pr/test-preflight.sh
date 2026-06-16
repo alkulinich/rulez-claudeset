@@ -92,6 +92,7 @@ test_preflight_live_lock_blocks_and_remains() {
   printf '%s\n' "$live_pid" > "$SPEC2PR_HOME/$ID.lock/pid"
   run_spec2pr "$SPEC"
   kill "$live_pid" 2>/dev/null
+  wait "$live_pid" 2>/dev/null
   assert_eq "1" "$RC" "live lock exits 1"
   assert_contains "$OUT" "SPEC2PR HALT preflight: locked by running spec2pr (pid=$live_pid)" "live lock halts naming pid"
   assert_file_exists "$SPEC2PR_HOME/$ID.lock/pid" "live lock pid remains"

@@ -108,6 +108,17 @@ EOF
   assert_contains "$OUT" "VERBOSE_MARKER_NOTES" "verbose prints notes"
 }
 
+test_spec_review_verbose_prints_clean_round_notes() {
+  make_sandbox
+  enqueue 01-spec-r1 <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"VERBOSE_CLEAN_NOTES"}'
+EOF
+  SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
+  assert_contains "$OUT" "spec-review r1 blockers=0 majors=0 clean" "clean count line printed"
+  assert_contains "$OUT" "VERBOSE_CLEAN_NOTES" "verbose prints clean review notes"
+  assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "VERBOSE_CLEAN_NOTES" "clean notes never written to status file"
+}
+
 test_spec_review_default_hides_findings() {
   make_sandbox
   enqueue 01-spec-r1 <<'EOF'

@@ -509,6 +509,7 @@ EOF
         halt "clean review round left uncommitted changes (contract violation)"
       fi
       status "OK" "$stage r$round blockers=0 majors=0 clean"
+      show_findings "$last"
       return 0
     fi
 
@@ -788,6 +789,7 @@ EOF
   m="$(jq -r '.majors_found' "$classify_result")"
   if [ "$((b + m))" -eq 0 ]; then
     status "OK" "pr-review r$round blockers=0 majors=0 clean"
+    show_review "$review_file"
     break
   fi
 
