@@ -47,6 +47,11 @@ codex exec --cd <worktree>
            --output-schema <tmp>/<role>.json
            --output-last-message <logdir>/<stage>-r<N>.json
            < rendered prompt (stdin)
+        │  PR-review reviewer/classifier only:
+        ▼
+claude -p --output-format json
+           --dangerously-skip-permissions
+           < rendered prompt (stdin)
 ```
 
 One runtime file. Prompt templates and JSON schemas are heredocs inside
@@ -63,34 +68,38 @@ dir basename. The script lowercases both values and replaces characters
 outside `[a-z0-9_-]` with `-` (dots included — git refs reject `..` and
 `.lock`), then trims leading/trailing dashes, producing `slug`, `repo`, and
 `id = <repo>-<slug>`. Branch `spec2pr/<slug>`, worktree
-`~/.worktrees/<id>/`. No hashes in the branch/worktree name —
-single-user tool. On first import the script writes identity metadata
-under `~/.spec2pr/<id>/`: `source-path`, `source-sha256`, and
-`base-sha`. These are not committed and are not progress state. On
-resume, a path or source-hash mismatch exits cleanly with
-`HALT preflight: worktree belongs to <path>` or
-`HALT preflight: source spec changed since import`, preventing
-same-named specs, slug collisions, or edited source specs from silently
-reusing a stale branch/worktree.
+`~/.worktrees/<id>/`. The in-worktree spec path is the input spec's path
+relative to the source repo root (`wt_spec_rel`); the copied spec is always
+reviewed and planned from that same path. No hashes in the
+branch/worktree name — single-user tool. On first import the script
+writes identity metadata under `~/.spec2pr/<id>/`: `source-path`,
+`source-sha256`, and `base-sha`. These are not committed and are not
+progress state. On resume, a path or source-hash mismatch exits cleanly
+with `HALT preflight: worktree belongs to <path>` or
+`HALT preflight: source spec changed since import`, preventing same-named
+specs, slug collisions, or edited source specs from silently reusing a
+stale branch/worktree.
 
 ### Worktree-first
 
 The branch + worktree are created in preflight from the fetched base
-commit `git rev-parse origin/main`, the spec is copied in and committed
-(`spec2pr: import spec`), and every codex call runs `--cd <worktree>`.
-The user's main checkout is never touched — required for parallel runs
-(one script invocation per spec, each in its own worktree) and so
-brainstorming can continue undisturbed.
+commit `git rev-parse origin/main`, the spec is copied to `wt_spec_rel`
+and committed (`spec2pr: import spec`), and every codex/claude call runs
+with the worktree as its working directory. The user's main checkout is
+never touched — required for parallel runs (one script invocation per
+spec, each in its own worktree) and so brainstorming can continue
+undisturbed.
 
 ## Stages
 
-1. **Preflight** — spec file exists; spec size gate; `codex` and `gh` on
-   PATH; repo has `origin/main` after `git fetch origin main`. Resolve
+1. **Preflight** — spec file exists inside a git repository; spec size
+   gate; `codex`, `claude`, `gh`, `jq`, and `git` on PATH (with
+   `SPEC2PR_CODEX_BIN` / `SPEC2PR_CLAUDE_BIN` env overrides for tests);
+   repo has `origin/main` after `git fetch origin main`. Resolve
    `base_sha=$(git rev-parse origin/main)`, create branch + worktree
    from that exact commit, write identity metadata under
-   `~/.spec2pr/<id>/`, then copy the spec into
-   `docs/superpowers/specs/<filename>` in the worktree and commit only
-   the copied spec.
+   `~/.spec2pr/<id>/`, then copy the spec to `wt_spec_rel` in the
+   worktree and commit only the copied spec.
 2. **Spec-review loop** — review loop (below) on the in-worktree spec.
    The shared loop commits any fixes per dirty round.
 3. **Plan** — codex writes the plan via `$superpowers:writing-plans`,
@@ -104,9 +113,11 @@ brainstorming can continue undisturbed.
    it returns `done`, the script verifies `git status --porcelain` is
    empty before pushing; dirty worktrees halt as
    `HALT implement: uncommitted changes after done` so the PR cannot omit
-   generated work. Then the **script** pushes the branch and runs
-   `gh pr create` (plumbing in script, judgment in codex). Title from
-   slug; body links spec + plan.
+   generated work. The script records `implementation-base`,
+   `implementation-head`, and an `implementation-ok` checksum record under
+   `~/.spec2pr/<id>/` before pushing. Then the **script** pushes the
+   branch and runs `gh pr create` (plumbing in script, judgment in codex).
+   Title from slug; body links spec + plan.
 6. **PR diff size gate**, then **PR-review loop** (cross-model, below).
    The script computes the immutable-base diff as:
    `base_sha=$(cat "$metadir/base-sha"); git diff "$base_sha"...HEAD`.
@@ -187,11 +198,24 @@ run still ends `DONE`.
 
 Rerunning the same spec: worktree exists and `~/.spec2pr/<id>/source-path`
 plus `source-sha256` match the current source spec → reuse; spec
-committed → skip import; plan file exists in worktree → skip plan stage;
-open PR for the branch (`gh pr list --head`) → skip implement and push.
+committed → skip import; plan file exists in worktree → skip plan stage.
 Review loops have no completion marker — they simply run again; a clean
-artifact converges in one cheap round. No progress state file, nothing
-to validate or go stale.
+artifact converges in one cheap round.
+
+Implementation resume is guarded by the implementation marker written
+after a successful `done` result. If an open PR for the branch
+(`gh pr list --head`) exists, or the remote branch already exists, the
+script skips implementation only when the current worktree head is the
+recorded `implementation-head` or contains only later `pr-review` fix
+commits on top of it. If a rerun's spec-review or plan-review loop commits
+new fixes after the recorded implementation, the script halts instead of
+reusing a stale PR:
+`HALT implement: review changes after implementation; rerun implementation required`.
+Unknown commits on top of the recorded implementation halt as
+`HALT implement: commits after implementation require manual review`.
+No state file drives progress; the marker is a local integrity proof for
+whether existing implementation work still matches the reviewed spec and
+plan.
 
 `source-sha256` is computed by a small helper that uses `shasum -a 256`
 on macOS and falls back to `sha256sum` where available; the test stub
