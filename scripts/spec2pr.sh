@@ -718,14 +718,16 @@ EOF
     if jq -e 'if (.result | type) == "object" then .result else (.result | tostring | fromjson?) end
       | select(type=="object")
       | {blockers_found, majors_found}
-      | select((.blockers_found|type)=="number" and (.majors_found|type)=="number")' \
+      | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
+      | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
         "$classify_json" > "$classify_result" 2>/dev/null; then
       malformed=0
       break
     fi
     jq -r '.result // empty' "$classify_json" | extract_json_object > "$classify_tmp" 2>/dev/null || true
     if [ -s "$classify_tmp" ] && jq -e '{blockers_found, majors_found}
-        | select((.blockers_found|type)=="number" and (.majors_found|type)=="number")' \
+        | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
+        | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
         "$classify_tmp" > "$classify_result" 2>/dev/null; then
       malformed=0
       break
