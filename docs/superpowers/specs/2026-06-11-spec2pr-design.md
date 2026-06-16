@@ -179,8 +179,11 @@ runs in the worktree:
    `.review` file and returns `{blockers_found, majors_found}`. `claude`
    has no `--output-schema`, so the script extracts the JSON tolerantly
    and validates it with `jq`; a malformed reply is retried once, then
-   `HALT pr-review`. This integer is the loop's only termination signal,
-   captured before any fix (the fresh-eyes-before-fix invariant).
+   `HALT pr-review`. The script again asserts `git status --porcelain`
+   is empty after the classify call; a classifier that modified the tree
+   → `HALT pr-review: classifier modified worktree`. This integer is the
+   loop's only termination signal, captured before any fix (the
+   fresh-eyes-before-fix invariant).
 3. **Clean?** `0/0` → record the round and break to Done. No fix, no
    commit.
 4. **Fix.** Otherwise `codex exec` runs with the `.review` file embedded
