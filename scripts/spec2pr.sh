@@ -8,7 +8,9 @@ SPEC2PR_CODEX_BIN="${SPEC2PR_CODEX_BIN:-codex}"
 SPEC2PR_CLAUDE_BIN="${SPEC2PR_CLAUDE_BIN:-claude}"
 SPEC2PR_HOME="${SPEC2PR_HOME:-$HOME/.spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
-MAX_FIX_ROUNDS=3
+MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
+# Set to any non-empty value to echo review findings and stage summaries to stdout.
+SPEC2PR_VERBOSE="${SPEC2PR_VERBOSE:-}"
 
 STAGE="preflight"
 FINISHED=0
@@ -35,6 +37,27 @@ status() {
     mkdir -p "$(dirname "$STATUS_PATH")"
     printf '%s\n' "$line" >> "$STATUS_PATH"
   fi
+}
+
+# Verbose helpers: print to stdout only (the status file stays terse and
+# machine-parseable). No-ops unless SPEC2PR_VERBOSE is set; a jq hiccup never
+# breaks the run.
+show_findings() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  jq -r '
+    (.findings[]? | "    \(.severity)  \(.artifact)\n           \(.summary)\n           evidence: \(.evidence)"),
+    ((.notes // "") | select(. != "") | "    notes: \(.)")
+  ' "$1" 2>/dev/null || true
+}
+
+show_summary() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  jq -r '.summary // empty | select(. != "") | "    summary: \(.)"' "$1" 2>/dev/null || true
+}
+
+show_review() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  sed 's/^/    /' "$1" 2>/dev/null || true
 }
 
 finish() { # <exit-code> <contract-words...>
@@ -164,7 +187,28 @@ require_dependency git
 mkdir -p "$SPEC2PR_HOME" "$SPEC2PR_WORKTREES"
 LOCK_TARGET="$SPEC2PR_HOME/$ID.lock"
 if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
-  halt "already running"
+  # Lock dir exists. Decide whether the recorded owner is still alive.
+  lock_pid="$(cat "$LOCK_TARGET/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    halt "locked by running spec2pr (pid=$lock_pid)"
+  fi
+  if [ -z "$lock_pid" ]; then
+    # No pid recorded: the owner is mid-acquire (between mkdir and the pid
+    # write) or the file is unreadable. Do not steal an initializing lock.
+    halt "locked by another spec2pr run (initializing)"
+  fi
+  # Recorded owner is gone. Atomically move the stale lock aside: rename is
+  # atomic, so of N racing reclaimers exactly one wins the move (the rest get
+  # ENOENT), and no process ever removes a lock another one is holding.
+  stale_dir="$LOCK_TARGET.stale.$$"
+  if mv "$LOCK_TARGET" "$stale_dir" 2>/dev/null; then
+    rm -rf "$stale_dir"
+  fi
+  # Contend for a fresh lock; mkdir is atomic, so a concurrent run may win it.
+  if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
+    halt "locked by another spec2pr run"
+  fi
+  status "OK" "reclaimed stale lock (owner pid=$lock_pid not running)"
 fi
 LOCK_DIR="$LOCK_TARGET"
 LOCK_PATH="$LOCK_DIR/pid"
@@ -465,10 +509,12 @@ EOF
         halt "clean review round left uncommitted changes (contract violation)"
       fi
       status "OK" "$stage r$round blockers=0 majors=0 clean"
+      show_findings "$last"
       return 0
     fi
 
     status "OK" "$stage r$round blockers=$b majors=$m"
+    show_findings "$last"
     if [ -n "$(git -C "$WORKTREE" status --porcelain)" ]; then
       git -C "$WORKTREE" add -A
       git -C "$WORKTREE" commit -q -m "spec2pr: $stage review fixes r$round"
@@ -507,6 +553,7 @@ EOF
     git -C "$WORKTREE" commit -q -m "spec2pr: write plan" || halt "git commit plan failed"
   fi
   status "OK" "plan ok $WT_PLAN_REL"
+  show_summary "$META_DIR/plan.json"
 else
   status "OK" "plan exists $WT_PLAN_REL"
 fi
@@ -624,6 +671,7 @@ EOF
           printf '%s\n' "$after_impl_head" > "$META_DIR/implementation-head"
           implementation_ok_record "$before_impl_head" "$after_impl_head" > "$META_DIR/implementation-ok"
           status "OK" "implement ok $BRANCH"
+          show_summary "$META_DIR/implement.json"
           ;;
         *)
           halt "unexpected implement status: $impl_status"
@@ -741,10 +789,12 @@ EOF
   m="$(jq -r '.majors_found' "$classify_result")"
   if [ "$((b + m))" -eq 0 ]; then
     status "OK" "pr-review r$round blockers=0 majors=0 clean"
+    show_review "$review_file"
     break
   fi
 
   status "OK" "pr-review r$round blockers=$b majors=$m"
+  show_review "$review_file"
   fix_prompt="$META_DIR/pr-review-r$round.fix.prompt"
   cat > "$fix_prompt" <<EOF
 Fix the blocker and major findings from this fresh-eyes PR review.

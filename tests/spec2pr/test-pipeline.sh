@@ -41,6 +41,26 @@ test_full_happy_path_done() {
   assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
 }
 
+test_pr_review_verbose_prints_clean_review() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf '{"result":"VERBOSE_CLEAN_PR_REVIEW"}'
+EOF
+  enqueue_claude 05-pr-review-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "verbose clean pr-review exits 0"
+  assert_contains "$OUT" "pr-review r1 blockers=0 majors=0 clean" "clean pr-review count line printed"
+  assert_contains "$OUT" "VERBOSE_CLEAN_PR_REVIEW" "verbose prints clean pr-review prose"
+  assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "VERBOSE_CLEAN_PR_REVIEW" "clean pr-review prose never written to status file"
+}
+
 test_pr_review_dirty_round_pushes() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
