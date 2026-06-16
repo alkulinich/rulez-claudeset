@@ -32,6 +32,53 @@ STATUS_PATH="$SPEC2PR_HOME/$ID.status"
 WT_SPEC_REL="${SPEC_ABS#"$GIT_ROOT/"}"
 WT_PLAN_REL="docs/superpowers/plans/$SPEC_SLUG-plan.md"
 
+github_repo_slug_from_origin_url() {
+  local url="$1"
+  local repo=""
+  case "$url" in
+    https://github.com/*)
+      repo="${url#https://github.com/}"
+      ;;
+    http://github.com/*)
+      repo="${url#http://github.com/}"
+      ;;
+    git@github.com:*)
+      repo="${url#git@github.com:}"
+      ;;
+    ssh://git@github.com/*)
+      repo="${url#ssh://git@github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  repo="${repo%.git}"
+  case "$repo" in
+    */*)
+      printf '%s\n' "$repo"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+build_pr_body() {
+  local head_sha="$1"
+  local origin_url repo spec_href plan_href
+  origin_url="$(git -C "$WORKTREE" config --get remote.origin.url || true)"
+  if repo="$(github_repo_slug_from_origin_url "$origin_url")"; then
+    spec_href="https://github.com/$repo/blob/$head_sha/$WT_SPEC_REL"
+    plan_href="https://github.com/$repo/blob/$head_sha/$WT_PLAN_REL"
+  else
+    spec_href="$WT_SPEC_REL"
+    plan_href="$WT_PLAN_REL"
+  fi
+
+  printf 'Automated by spec2pr.\n\n- Spec: [%s](%s)\n- Plan: [%s](%s)' \
+    "$WT_SPEC_REL" "$spec_href" "$WT_PLAN_REL" "$plan_href"
+}
+
 SPEC_SIZE="$(wc -c < "$SPEC_ABS" | tr -d ' ')"
 if [ "$SPEC_SIZE" -gt "$SPEC2PR_MAX_SPEC" ]; then
   split spec "$SPEC_SIZE" "$SPEC2PR_MAX_SPEC"
@@ -325,9 +372,11 @@ EOF
 
   STAGE="pr-create"
   git -C "$WORKTREE" push -q -u origin "$BRANCH" || halt "git push failed"
+  pr_head_sha="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  pr_body="$(build_pr_body "$pr_head_sha")"
   if ! pr_create_out="$(cd "$WORKTREE" && gh pr create \
       --title "spec2pr: $SLUG" \
-      --body "Automated by spec2pr. Spec: $WT_SPEC_REL -- Plan: $WT_PLAN_REL" \
+      --body "$pr_body" \
       --base main \
       --head "$BRANCH")"; then
     halt "gh pr create failed"

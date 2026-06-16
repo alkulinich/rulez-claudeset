@@ -2,6 +2,7 @@
 # Stage progression after spec review: plan generation and plan review.
 
 PLAN_REL="docs/superpowers/plans/toy-spec-plan.md"
+SPEC_REL="docs/superpowers/specs/toy-spec.md"
 
 queue_clean_spec_review() {
   enqueue "$1" <<'EOF'
@@ -173,8 +174,32 @@ test_implement_pushes_and_creates_pr() {
   assert_contains "$(git -C "$PROJECT" ls-remote --heads origin "$BRANCH")" "$BRANCH" "branch pushed to origin"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr list" "gh pr list ran in worktree"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr create" "gh pr create ran in worktree"
+  assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "- Spec: [$SPEC_REL]($SPEC_REL)" "fallback PR body links spec path"
+  assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "- Plan: [$PLAN_REL]($PLAN_REL)" "fallback PR body links plan path"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "pr ok status"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "final done contract"
+}
+
+test_implement_pr_body_links_spec_and_plan_to_github_head() {
+  make_sandbox
+  git -C "$PROJECT" config remote.origin.url "https://github.com/acme/widgets.git"
+  git -C "$PROJECT" config "url.$ORIGIN.insteadOf" "https://github.com/acme/widgets.git"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  local head
+  head="$(git -C "$wt" rev-parse HEAD)"
+  local gh_log
+  gh_log="$(cat "$SPEC2PR_TEST_GH/gh.log")"
+  assert_eq "0" "$RC" "github origin run exits 0 after PR create"
+  assert_contains "$gh_log" "Automated by spec2pr." "PR body has spec2pr header"
+  assert_contains "$gh_log" "- Spec: [$SPEC_REL](https://github.com/acme/widgets/blob/$head/$SPEC_REL)" "PR body links spec to head SHA"
+  assert_contains "$gh_log" "- Plan: [$PLAN_REL](https://github.com/acme/widgets/blob/$head/$PLAN_REL)" "PR body links plan to head SHA"
 }
 
 test_implement_blocked_halts() {
