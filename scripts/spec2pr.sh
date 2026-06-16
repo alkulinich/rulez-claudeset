@@ -154,7 +154,16 @@ require_dependency git
 mkdir -p "$SPEC2PR_HOME" "$SPEC2PR_WORKTREES"
 LOCK_TARGET="$SPEC2PR_HOME/$ID.lock"
 if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
-  halt "locked by another spec2pr run"
+  # Lock dir exists. Reclaim it only if the owning process is gone.
+  lock_pid="$(cat "$LOCK_TARGET/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    halt "locked by running spec2pr (pid=$lock_pid)"
+  fi
+  rm -rf "$LOCK_TARGET"
+  if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
+    halt "locked by another spec2pr run"
+  fi
+  status "OK" "reclaimed stale lock (owner pid=${lock_pid:-unknown} not running)"
 fi
 LOCK_DIR="$LOCK_TARGET"
 LOCK_PATH="$LOCK_DIR/pid"
