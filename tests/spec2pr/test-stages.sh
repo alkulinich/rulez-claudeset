@@ -92,6 +92,20 @@ EOF
   assert_contains "$OUT" "planner wrote unexpected path" "wrong path halt"
 }
 
+test_plan_schema_violation_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  enqueue 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
+printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "schema-invalid plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT plan: codex plan violated plan schema" "schema violation halt"
+}
+
 test_oversized_plan_splits() {
   make_sandbox
   queue_clean_spec_review 01-spec-review

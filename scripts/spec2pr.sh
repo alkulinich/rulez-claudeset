@@ -283,6 +283,63 @@ codex_call() {
     halt "codex $tag failed (stderr: $err)"
   fi
   jq -e . "$last" > /dev/null 2>&1 || halt "codex $tag returned invalid JSON ($last)"
+  validate_codex_output "$role" "$tag" "$last"
+}
+
+validate_codex_output() {
+  local role="$1" tag="$2" path="$3"
+  local filter
+
+  case "$role" in
+    review)
+      filter='
+        type == "object"
+        and (.blockers_found | type == "number" and . == floor and . >= 0)
+        and (.majors_found | type == "number" and . == floor and . >= 0)
+        and (.notes | type == "string")
+        and (.findings | type == "array")
+        and ([.findings[] | (
+          type == "object"
+          and ((keys_unsorted | sort) == ["artifact","evidence","severity","summary"])
+          and (.severity == "blocker" or .severity == "major")
+          and (.artifact | type == "string")
+          and (.summary | type == "string")
+          and (.evidence | type == "string")
+        )] | all)
+        and ((keys_unsorted | sort) == ["blockers_found","findings","majors_found","notes"])
+      '
+      ;;
+    plan)
+      filter='
+        type == "object"
+        and ((keys_unsorted | sort) == ["plan_path","summary"])
+        and (.plan_path | type == "string")
+        and (.summary | type == "string")
+      '
+      ;;
+    implement)
+      filter='
+        type == "object"
+        and ((keys_unsorted | sort) == ["blocked_reason","status","summary"])
+        and (.status == "done" or .status == "blocked")
+        and (.summary | type == "string")
+        and (.blocked_reason | type == "string")
+      '
+      ;;
+    pr-fix)
+      filter='
+        type == "object"
+        and ((keys_unsorted | sort) == ["summary"])
+        and (.summary | type == "string")
+      '
+      ;;
+    *)
+      halt "unknown codex schema role: $role"
+      ;;
+  esac
+
+  jq -e "$filter" "$path" > /dev/null 2>&1 \
+    || halt "codex $tag violated $role schema ($path)"
 }
 
 claude_json_attempt() {
