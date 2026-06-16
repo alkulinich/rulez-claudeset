@@ -187,16 +187,28 @@ require_dependency git
 mkdir -p "$SPEC2PR_HOME" "$SPEC2PR_WORKTREES"
 LOCK_TARGET="$SPEC2PR_HOME/$ID.lock"
 if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
-  # Lock dir exists. Reclaim it only if the owning process is gone.
+  # Lock dir exists. Decide whether the recorded owner is still alive.
   lock_pid="$(cat "$LOCK_TARGET/pid" 2>/dev/null || true)"
   if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
     halt "locked by running spec2pr (pid=$lock_pid)"
   fi
-  rm -rf "$LOCK_TARGET"
+  if [ -z "$lock_pid" ]; then
+    # No pid recorded: the owner is mid-acquire (between mkdir and the pid
+    # write) or the file is unreadable. Do not steal an initializing lock.
+    halt "locked by another spec2pr run (initializing)"
+  fi
+  # Recorded owner is gone. Atomically move the stale lock aside: rename is
+  # atomic, so of N racing reclaimers exactly one wins the move (the rest get
+  # ENOENT), and no process ever removes a lock another one is holding.
+  stale_dir="$LOCK_TARGET.stale.$$"
+  if mv "$LOCK_TARGET" "$stale_dir" 2>/dev/null; then
+    rm -rf "$stale_dir"
+  fi
+  # Contend for a fresh lock; mkdir is atomic, so a concurrent run may win it.
   if ! mkdir "$LOCK_TARGET" 2>/dev/null; then
     halt "locked by another spec2pr run"
   fi
-  status "OK" "reclaimed stale lock (owner pid=${lock_pid:-unknown} not running)"
+  status "OK" "reclaimed stale lock (owner pid=$lock_pid not running)"
 fi
 LOCK_DIR="$LOCK_TARGET"
 LOCK_PATH="$LOCK_DIR/pid"
