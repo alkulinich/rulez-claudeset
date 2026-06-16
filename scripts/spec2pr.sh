@@ -756,7 +756,12 @@ Make the necessary code, test, and documentation changes in this worktree.
 Do not push, do not create a PR. Your final message must be exactly the JSON
 required by the output schema.
 EOF
+  before_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   codex_call pr-fix "pr-review-r$round.fix" "$fix_prompt"
+  after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  if [ "$after_fix_head" != "$before_fix_head" ]; then
+    halt "pr-review fixer committed changes (contract violation)"
+  fi
   jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
   if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
     git -C "$WORKTREE" add -A

@@ -86,6 +86,32 @@ EOF
     "pr-fix schema violation halt"
 }
 
+test_pr_review_fix_self_commit_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review-a-review <<'EOF'
+printf '{"result":"MAJOR: missing review fix. Evidence: review-fix.txt absent."}'
+EOF
+  enqueue_claude 05-pr-review-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":1}}'
+EOF
+  enqueue 05-pr-review-fix <<'EOF'
+printf 'review fix\n' > review-fix.txt
+git add review-fix.txt
+git commit -q -m "codex self-committed pr fix"
+printf '{"summary":"fixed review finding"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "self-committing pr-fix exits 1"
+  assert_contains "$OUT" \
+    "SPEC2PR HALT pr-review: pr-review fixer committed changes (contract violation)" \
+    "self-committing pr-fix halt"
+}
+
 test_pr_review_reviewer_edit_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
