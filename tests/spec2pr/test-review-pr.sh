@@ -72,6 +72,18 @@ test_review_pr_dirty_round_pushes_to_head() {
   assert_eq "1" "$(codex_calls)" "one codex fix call"
 }
 
+test_review_pr_reclaims_unregistered_stale_worktree_dir() {
+  make_pr_sandbox
+  mkdir -p "$PR_WT"
+  printf 'stale\n' > "$PR_WT/stale.txt"
+  queue_clean_pr_review 01-pr
+  run_review_pr "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "stale unregistered worktree dir is replaced"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "reaches done after replacing stale dir"
+  assert_file_absent "$PR_WT/stale.txt" "stale unregistered directory content removed"
+}
+
 test_review_pr_cap_exits_dirty() {
   make_pr_sandbox
   local n
@@ -113,6 +125,7 @@ test_review_pr_live_lock_blocks() {
   printf '%s\n' "$live_pid" > "$SPEC2PR_HOME/project-pr-$PR_NUMBER.lock/pid"
   run_review_pr "$PR_NUMBER"
   kill "$live_pid" 2>/dev/null
+  wait "$live_pid" 2>/dev/null
 
   assert_eq "1" "$RC" "live lock exits 1"
   assert_contains "$OUT" "PRREVIEW HALT preflight: locked by running prreview (pid=$live_pid)" "live lock halts naming pid"

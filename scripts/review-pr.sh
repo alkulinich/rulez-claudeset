@@ -81,6 +81,9 @@ if git -C "$HOST_REPO" worktree list --porcelain 2>/dev/null | grep -Fq "worktre
   git -C "$HOST_REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
 fi
 git -C "$HOST_REPO" worktree prune 2>/dev/null || true
+if [ -e "$WORKTREE" ]; then
+  rm -rf "$WORKTREE"
+fi
 git -C "$HOST_REPO" branch -D "$BRANCH" 2>/dev/null || true
 git -C "$HOST_REPO" worktree add -q -b "$BRANCH" "$WORKTREE" "$HEAD_OID" \
   || halt "git worktree add failed"
