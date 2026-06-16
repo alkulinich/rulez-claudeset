@@ -30,6 +30,17 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1" needle="$2" msg="${3:-output should NOT contain: $2}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ "$haystack" != *"$needle"* ]]; then
+    printf '  ok: %s\n' "$msg"
+  else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    printf '  FAIL: %s\n    unexpectedly contained: %s\n' "$msg" "$needle"
+  fi
+}
+
 assert_file_exists() {
   local path="$1" msg="${2:-file should exist: $1}"
   TESTS_RUN=$((TESTS_RUN + 1))

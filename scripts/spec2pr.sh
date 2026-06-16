@@ -9,6 +9,8 @@ SPEC2PR_CLAUDE_BIN="${SPEC2PR_CLAUDE_BIN:-claude}"
 SPEC2PR_HOME="${SPEC2PR_HOME:-$HOME/.spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
+# Set to any non-empty value to echo review findings and stage summaries to stdout.
+SPEC2PR_VERBOSE="${SPEC2PR_VERBOSE:-}"
 
 STAGE="preflight"
 FINISHED=0
@@ -35,6 +37,27 @@ status() {
     mkdir -p "$(dirname "$STATUS_PATH")"
     printf '%s\n' "$line" >> "$STATUS_PATH"
   fi
+}
+
+# Verbose helpers: print to stdout only (the status file stays terse and
+# machine-parseable). No-ops unless SPEC2PR_VERBOSE is set; a jq hiccup never
+# breaks the run.
+show_findings() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  jq -r '
+    (.findings[]? | "    \(.severity)  \(.artifact)\n           \(.summary)\n           evidence: \(.evidence)"),
+    ((.notes // "") | select(. != "") | "    notes: \(.)")
+  ' "$1" 2>/dev/null || true
+}
+
+show_summary() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  jq -r '.summary // empty | select(. != "") | "    summary: \(.)"' "$1" 2>/dev/null || true
+}
+
+show_review() {
+  [ -n "$SPEC2PR_VERBOSE" ] || return 0
+  sed 's/^/    /' "$1" 2>/dev/null || true
 }
 
 finish() { # <exit-code> <contract-words...>
@@ -478,6 +501,7 @@ EOF
     fi
 
     status "OK" "$stage r$round blockers=$b majors=$m"
+    show_findings "$last"
     if [ -n "$(git -C "$WORKTREE" status --porcelain)" ]; then
       git -C "$WORKTREE" add -A
       git -C "$WORKTREE" commit -q -m "spec2pr: $stage review fixes r$round"
@@ -516,6 +540,7 @@ EOF
     git -C "$WORKTREE" commit -q -m "spec2pr: write plan" || halt "git commit plan failed"
   fi
   status "OK" "plan ok $WT_PLAN_REL"
+  show_summary "$META_DIR/plan.json"
 else
   status "OK" "plan exists $WT_PLAN_REL"
 fi
@@ -633,6 +658,7 @@ EOF
           printf '%s\n' "$after_impl_head" > "$META_DIR/implementation-head"
           implementation_ok_record "$before_impl_head" "$after_impl_head" > "$META_DIR/implementation-ok"
           status "OK" "implement ok $BRANCH"
+          show_summary "$META_DIR/implement.json"
           ;;
         *)
           halt "unexpected implement status: $impl_status"
@@ -754,6 +780,7 @@ EOF
   fi
 
   status "OK" "pr-review r$round blockers=$b majors=$m"
+  show_review "$review_file"
   fix_prompt="$META_DIR/pr-review-r$round.fix.prompt"
   cat > "$fix_prompt" <<EOF
 Fix the blocker and major findings from this fresh-eyes PR review.
