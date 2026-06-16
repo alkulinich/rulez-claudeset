@@ -57,11 +57,12 @@ assert_file_absent() {
 #   SANDBOX, SPEC (abs path to toy spec), PROJECT, ORIGIN, ID, BRANCH
 make_sandbox() {
   SANDBOX="$(mktemp -d -t spec2pr-test.XXXXXX)"
-  mkdir -p "$SANDBOX/bin" "$SANDBOX/fixtures" "$SANDBOX/gh" "$SANDBOX/home" "$SANDBOX/wt"
+  mkdir -p "$SANDBOX/bin" "$SANDBOX/fixtures" "$SANDBOX/claude-fixtures" "$SANDBOX/gh" "$SANDBOX/home" "$SANDBOX/wt"
 
   cp "$TESTS_DIR/stub-codex.sh" "$SANDBOX/bin/stub-codex"
+  cp "$TESTS_DIR/stub-claude.sh" "$SANDBOX/bin/stub-claude"
   cp "$TESTS_DIR/stub-gh.sh" "$SANDBOX/bin/gh"
-  chmod +x "$SANDBOX/bin/stub-codex" "$SANDBOX/bin/gh"
+  chmod +x "$SANDBOX/bin/stub-codex" "$SANDBOX/bin/stub-claude" "$SANDBOX/bin/gh"
   printf 'https://example.com/pr/1\n' > "$SANDBOX/gh/pr-create-url"
 
   ORIGIN="$SANDBOX/origin.git"
@@ -86,16 +87,22 @@ make_sandbox() {
   BRANCH="spec2pr/toy-spec"
 
   export SPEC2PR_TEST_FIXTURES="$SANDBOX/fixtures"
+  export SPEC2PR_TEST_CLAUDE_FIXTURES="$SANDBOX/claude-fixtures"
   export SPEC2PR_TEST_GH="$SANDBOX/gh"
   export SPEC2PR_HOME="$SANDBOX/home"
   export SPEC2PR_WORKTREES="$SANDBOX/wt"
   export SPEC2PR_CODEX_BIN="$SANDBOX/bin/stub-codex"
+  export SPEC2PR_CLAUDE_BIN="$SANDBOX/bin/stub-claude"
   export PATH="$SANDBOX/bin:$PATH"
 }
 
 # Queue a fixture: enqueue <NN-name> <<'EOF' ... EOF
 enqueue() {
   cat > "$SPEC2PR_TEST_FIXTURES/$1.sh"
+}
+
+enqueue_claude() {
+  cat > "$SPEC2PR_TEST_CLAUDE_FIXTURES/$1.sh"
 }
 
 # Run the script, capturing combined output and exit code into OUT / RC.
@@ -115,6 +122,14 @@ last_status_line() {
 codex_calls() {
   if [ -f "$SPEC2PR_TEST_FIXTURES/invocations.log" ]; then
     wc -l < "$SPEC2PR_TEST_FIXTURES/invocations.log" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
+claude_calls() {
+  if [ -f "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log" ]; then
+    wc -l < "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log" | tr -d ' '
   else
     echo 0
   fi
