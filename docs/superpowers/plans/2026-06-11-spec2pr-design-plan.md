@@ -40,17 +40,19 @@
 - `scripts/spec2pr.sh`
 - `tests/spec2pr/test-preflight.sh`
 
-- [ ] Start `scripts/spec2pr.sh` with `set -euo pipefail`, a `current_stage` variable, and a single `EXIT` trap that appends a `SPEC2PR HALT <stage>: unexpected exit` line if no contract line was printed.
+- [ ] Start `scripts/spec2pr.sh` with `set -euo pipefail`, a `current_stage` variable, and a single `EXIT` trap that prints and appends a `SPEC2PR HALT <stage>: unexpected exit` line if no contract line was printed, preserving the final-stdout-line contract even on unexpected exits.
 - [ ] Accept exactly one spec path. Reject missing args, extra args, missing files, files outside a git repository, and paths that cannot be resolved relative to the source repo root.
 - [ ] Resolve the source repo root, the spec-relative path, `raw_slug`, `raw_repo`, normalized `slug`, normalized `repo`, `id=<repo>-<slug>`, branch `spec2pr/<slug>`, worktree path, metadata dir, status file, and log dir.
 - [ ] Support env overrides: `SPEC2PR_HOME`, `SPEC2PR_WORKTREES`, `SPEC2PR_CODEX_BIN`, `SPEC2PR_CLAUDE_BIN`, `SPEC2PR_MAX_SPEC`, `SPEC2PR_MAX_PLAN`, and `SPEC2PR_MAX_DIFF`.
+- [ ] Set the spec's default size gates exactly when overrides are absent: `SPEC2PR_MAX_SPEC=32768`, `SPEC2PR_MAX_PLAN=65536`, and `SPEC2PR_MAX_DIFF=131072`.
 - [ ] Preflight `git`, `jq`, `gh`, `codex`, and `claude` using the binary override variables where applicable.
 - [ ] Enforce the spec size gate before any branch or worktree mutation. On failure, print and record `SPEC2PR SPLIT spec size=<n> limit=<n>` and exit 2.
 - [ ] Fetch `origin main`, resolve `base_sha=$(git rev-parse origin/main)`, and create or reuse branch `spec2pr/<slug>` and worktree `~/.worktrees/<id>/` from that exact base.
 - [ ] Add atomic locking with `mkdir ~/.spec2pr/<id>.lock`, a PID file, and cleanup only by the owning process. A concurrent invocation for the same id exits with `SPEC2PR HALT preflight: already running`.
+- [ ] Add a source hash helper for `source-sha256` that uses `shasum -a 256` when available and falls back to `sha256sum`; halt clearly if neither exists.
 - [ ] On first import, write metadata files `source-path`, `source-sha256`, and `base-sha` under `~/.spec2pr/<id>/`. On resume, halt if the source path or source hash does not match.
 - [ ] Copy the spec into the worktree at the same relative path and commit only that copied spec as `spec2pr: import spec`. Use an empty commit only if the source spec is already identical to a tracked file on the base branch and a commit is still needed to mark import.
-- [ ] Add tests for missing dependencies, split spec, slug normalization, identity metadata, path/hash mismatch, lock behavior, worktree creation, import commit, and resume reuse.
+- [ ] Add tests for missing dependencies, default and overridden size gates, split spec, slug normalization, identity metadata, source hash helper selection on the host, path/hash mismatch, lock behavior, worktree creation, import commit, and resume reuse.
 
 ## Task 3: Add Shared Codex Execution and Schemas
 
@@ -154,7 +156,7 @@
 - [ ] On clean PR-review exit, post one best-effort `gh pr comment` containing review rounds, final counts, and log path.
 - [ ] Treat PR comment failure as non-fatal: record it in status but still print `DONE`.
 - [ ] Print the worktree path in the `DONE` line and leave the worktree in place for human pre-merge testing.
-- [ ] Add full-pipeline happy path tests and tests that the status file always ends with the final contract line, including unexpected exits.
+- [ ] Add full-pipeline happy path tests and tests that stdout and the status file always end with the final contract line, including unexpected exits.
 
 ## Task 9: Add the Slash Command
 
