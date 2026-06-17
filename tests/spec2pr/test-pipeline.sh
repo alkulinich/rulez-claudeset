@@ -39,6 +39,7 @@ test_full_happy_path_done() {
   assert_eq "2" "$(claude_calls)" "happy path makes review and classify calls"
   assert_contains "$(last_status_line)" "SPEC2PR DONE" "status ends with done"
   assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "--approve" "spec2pr never self-approves its own PR"
 }
 
 test_pr_review_verbose_prints_clean_review() {

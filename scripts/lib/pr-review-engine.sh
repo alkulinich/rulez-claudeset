@@ -18,6 +18,8 @@ pr_review_engine_run() {
   local commit_prefix="${COMMIT_PREFIX:-spec2pr}"
   local done_comment_header="${DONE_COMMENT_HEADER:-spec2pr PR review complete.}"
   local push_refspec="${PUSH_REFSPEC:-$BRANCH}"
+  local pr_done_approve="${PR_DONE_APPROVE:-}"   # review-pr sets =1; spec2pr never (self-approval is rejected)
+  local pr_is_draft="${PR_IS_DRAFT:-}"           # "true" when the reviewed PR is a draft
 
   local spec_plan_line=""
   if [ -n "${WT_SPEC_REL:-}" ] && [ -n "${WT_PLAN_REL:-}" ]; then
@@ -168,6 +170,21 @@ EOF
   } > "$comment_body"
   if ! (cd "$WORKTREE" && gh pr comment "$PR_URL" --body-file "$comment_body") >/dev/null 2>"$META_DIR/pr-comment.stderr"; then
     status "OK" "pr comment failed $META_DIR/pr-comment.stderr"
+  fi
+  # Mark the PR reviewed (and ready, if a draft) when the caller opts in. Both
+  # are non-fatal: a finished review must not fail on a GitHub-state hiccup, and
+  # reviewing a self-authored PR (e.g. a spec2pr one) hits a self-approval 422.
+  if [ -n "$pr_done_approve" ]; then
+    if ! (cd "$WORKTREE" && gh pr review "$PR_URL" --approve --body "$done_comment_header") \
+        >/dev/null 2>"$META_DIR/pr-approve.stderr"; then
+      status "OK" "pr approve skipped $META_DIR/pr-approve.stderr"
+    fi
+    if [ "$pr_is_draft" = "true" ]; then
+      if ! (cd "$WORKTREE" && gh pr ready "$PR_URL") \
+          >/dev/null 2>"$META_DIR/pr-ready.stderr"; then
+        status "OK" "pr ready skipped $META_DIR/pr-ready.stderr"
+      fi
+    fi
   fi
   finish 0 "DONE pr=$PR_URL worktree=$WORKTREE"
 }

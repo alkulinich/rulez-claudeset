@@ -4,6 +4,8 @@
 #   pr-create-url - its content is the `pr create` output (URL)
 #   pr-view-json  - if present, its content is the `pr view --json` output
 #   pr-view-fail  - if present, `pr view` prints it to stderr and exits 9
+#   pr-review-fail / pr-ready-fail - if present, `pr review` / `pr ready`
+#                   print it to stderr and exit 9 (else echo ok)
 # Every invocation is appended to $SPEC2PR_TEST_GH/gh.log with cwd.
 set -uo pipefail
 dir="${SPEC2PR_TEST_GH:?SPEC2PR_TEST_GH not set}"
@@ -32,5 +34,19 @@ case "${1:-} ${2:-}" in
       exit 9
     fi
     echo "commented"
+    ;;
+  "pr review")
+    if [ -f "$dir/pr-review-fail" ]; then
+      cat "$dir/pr-review-fail" >&2
+      exit 9
+    fi
+    echo "reviewed"
+    ;;
+  "pr ready")
+    if [ -f "$dir/pr-ready-fail" ]; then
+      cat "$dir/pr-ready-fail" >&2
+      exit 9
+    fi
+    echo "ready"
     ;;
 esac
