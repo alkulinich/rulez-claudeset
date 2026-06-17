@@ -29,9 +29,9 @@ make_pr_sandbox() {
 }
 
 write_pr_view_json() {
-  local is_fork="$1"
+  local is_fork="$1" is_draft="${2:-false}"
   cat > "$SPEC2PR_TEST_GH/pr-view-json" <<EOF
-{"number":$PR_NUMBER,"url":"$PR_URL_VAL","headRefName":"$PR_HEAD_REF","headRefOid":"$PR_HEAD_OID","baseRefName":"$PR_BASE_REF","isCrossRepository":$is_fork}
+{"number":$PR_NUMBER,"url":"$PR_URL_VAL","headRefName":"$PR_HEAD_REF","headRefOid":"$PR_HEAD_OID","baseRefName":"$PR_BASE_REF","isCrossRepository":$is_fork,"isDraft":$is_draft}
 EOF
 }
 
@@ -54,6 +54,31 @@ test_review_pr_clean_done() {
   assert_eq "0" "$(codex_calls)" "clean path: no codex fix"
   assert_contains "$(tail -1 "$SPEC2PR_HOME/project-pr-$PR_NUMBER.status")" "PRREVIEW DONE" "status ends done"
   assert_file_absent "$SPEC2PR_HOME/project-pr-$PR_NUMBER.lock" "lock released"
+  assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "pr review" "clean done approves the PR"
+  assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "--approve" "approval uses --approve"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "pr ready" "non-draft PR is not marked ready"
+}
+
+test_review_pr_draft_marks_ready() {
+  make_pr_sandbox
+  write_pr_view_json "false" "true"
+  queue_clean_pr_review 01-pr
+  run_review_pr "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "draft clean review exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "draft reaches done"
+  assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "pr ready" "draft PR is marked ready on clean done"
+}
+
+test_review_pr_approve_failure_nonfatal() {
+  make_pr_sandbox
+  printf 'Can not approve your own pull request\n' > "$SPEC2PR_TEST_GH/pr-review-fail"
+  queue_clean_pr_review 01-pr
+  run_review_pr "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "approve failure is non-fatal (still exits 0)"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "reaches done despite approve failure"
+  assert_contains "$OUT" "pr approve skipped" "approve failure surfaced as a skipped status"
 }
 
 test_review_pr_dirty_round_pushes_to_head() {

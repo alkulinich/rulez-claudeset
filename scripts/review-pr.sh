@@ -16,6 +16,8 @@ CONTRACT_PREFIX="PRREVIEW"
 REVIEW_RUN_DESC="an automated PR review"
 COMMIT_PREFIX="review-pr"
 DONE_COMMENT_HEADER="review-pr automated review complete."
+# On a clean review, approve the PR and (if it's a draft) mark it ready.
+PR_DONE_APPROVE=1
 
 STAGE="preflight"
 
@@ -39,7 +41,7 @@ REPO_SLUG="$(sanitize "$(basename "$HOST_REPO")")"
 # Resolve the PR via gh.
 pr_json_file="$(mktemp -t review-pr-prview.XXXXXX)"
 if ! gh pr view "$PR_REF" \
-    --json number,url,headRefName,headRefOid,baseRefName,isCrossRepository \
+    --json number,url,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft \
     > "$pr_json_file" 2>/dev/null; then
   rm -f "$pr_json_file"
   halt "gh pr view failed for $PR_REF"
@@ -50,6 +52,7 @@ HEAD_REF="$(jq -r '.headRefName // empty' "$pr_json_file")"
 HEAD_OID="$(jq -r '.headRefOid // empty' "$pr_json_file")"
 BASE_REF="$(jq -r '.baseRefName // empty' "$pr_json_file")"
 IS_FORK="$(jq -r '.isCrossRepository // false' "$pr_json_file")"
+PR_IS_DRAFT="$(jq -r '.isDraft // false' "$pr_json_file")"
 rm -f "$pr_json_file"
 
 [ -n "$PR_NUMBER" ] || halt "could not resolve PR number for $PR_REF"
