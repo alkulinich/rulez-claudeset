@@ -51,9 +51,12 @@ fi
 echo -e "${YELLOW}Merging PR #${PR_NUMBER}: ${PR_BRANCH} → ${BASE_BRANCH}${NC}"
 echo ""
 
-# Step 1: Stash any local changes
+# Step 1: Stash any local changes. Only consider TRACKED changes — plain
+# `git stash` ignores untracked files, so counting them here would set
+# STASHED=true without anything actually being stashed, and the step-5 pop
+# would then fail with "No stash entries found".
 STASHED=false
-if [[ -n $(git status --porcelain) ]]; then
+if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
     echo -e "${GREEN}[1/5]${NC} Stashing local changes"
     rtk git stash
     STASHED=true
