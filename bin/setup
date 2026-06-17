@@ -113,4 +113,6 @@ else
   log "@RULEZ.md already in ~/.claude/CLAUDE.md"
 fi
 
+$QUIET || bash "$SKILL_DIR/scripts/check-deps.sh" || true
+
 log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
