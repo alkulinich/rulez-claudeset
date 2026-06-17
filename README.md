@@ -128,6 +128,30 @@ When you're ready, run `/rulez:punts-triage`. It enriches any regex-only rows vi
 
 The same markdown is also written to `~/.claude/what-have-i-done/<today>.md`. Re-running on the same day overwrites that file. Projects with no activity on a given date are omitted (today included); date headings disappear entirely when nothing under them has bullets.
 
+## spec2pr & review-pr
+
+Two unattended pipelines that drive `codex` and `claude -p` from spec to merged PR.
+
+**`scripts/spec2pr.sh <spec.md>`** — run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.spec2pr/<id>/`) and runs: spec-review loop → plan → plan-review loop → implement → push + open a GitHub PR → diff gate → PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
+
+**`scripts/review-pr.sh <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, `claude` reviews the diff, `codex` fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
+
+Requires `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **context7** MCP for up-to-date library docs when available. `bin/setup` warns if any of these (or context7) are missing — register context7 once: `claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'`.
+
+### Run several at once
+
+State is namespaced per spec as `<repo>-<spec-slug>` — lock, worktree, branch and PR are all distinct — so runs don't collide as long as each spec's filename stem is unique. Example: three at once, one spec for `project1` and two for `project2`, each in its own tmux window:
+
+```bash
+S=~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh
+tmux new-session -d -s spec2pr -c ~/project1 "bash $S docs/superpowers/specs/feature-a.md; read"
+tmux new-window     -t spec2pr -c ~/project2 "bash $S docs/superpowers/specs/feature-b.md; read"
+tmux new-window     -t spec2pr -c ~/project2 "bash $S docs/superpowers/specs/feature-c.md; read"
+tmux attach -t spec2pr
+```
+
+The two `project2` runs are safe because `feature-b` and `feature-c` are different slugs → different worktrees, branches and PRs. Set `SPEC2PR_VERBOSE=1` to print per-round findings.
+
 ## Utility Scripts
 
 | Script | Description | Usage |
