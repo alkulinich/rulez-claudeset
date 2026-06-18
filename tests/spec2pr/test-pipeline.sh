@@ -348,13 +348,23 @@ test_verbose_begin_markers_go_to_output_not_status_contract() {
   queue_implementation_commit 04-implement
   queue_clean_pr_review 05-pr-review
 
-  SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
+  local out_file="$SANDBOX/verbose.out"
+  local err_file="$SANDBOX/verbose.err"
+  local ERR
+
+  set +e
+  SPEC2PR_VERBOSE=1 bash "$SPEC2PR" "$SPEC" >"$out_file" 2>"$err_file"
+  RC=$?
+  OUT="$(cat "$out_file")"
+  ERR="$(cat "$err_file")"
 
   assert_eq "0" "$RC" "verbose progress marker path exits 0"
-  assert_contains "$OUT" "... spec-review: running codex spec-review-r1" "codex begin marker printed"
-  assert_contains "$OUT" "... pr-review: running claude pr-review-r1" "claude review begin marker printed"
-  assert_contains "$OUT" "... pr-review: running claude pr-review-r1.classify-a1" "claude classify begin marker printed"
+  assert_contains "$ERR" "... spec-review: running codex spec-review-r1" "codex begin marker printed on stderr"
+  assert_contains "$ERR" "... pr-review: running claude pr-review-r1" "claude review begin marker printed on stderr"
+  assert_contains "$ERR" "... pr-review: running claude pr-review-r1.classify-a1" "claude classify begin marker printed on stderr"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$SPEC2PR_WORKTREES/$ID" "final stdout contract still present"
+  assert_not_contains "$OUT" "... spec-review: running codex" "codex begin marker not printed on stdout"
+  assert_not_contains "$OUT" "... pr-review: running claude" "claude begin marker not printed on stdout"
   assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "... spec-review: running codex" "begin marker never enters status file"
   assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "... pr-review: running claude" "claude begin marker never enters status file"
   assert_contains "$(last_status_line)" "SPEC2PR DONE" "status still ends with done contract"
