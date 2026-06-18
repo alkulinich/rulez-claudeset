@@ -1,79 +1,72 @@
 # Handoff
 
 ## Task
-Split spec2pr's PR-review loop into a standalone tool that can review **any**
-GitHub PR (not just spec2pr-generated ones), reusing the same review→fix→repeat
-engine via a shared library rather than a copy-paste fork.
+Several related threads on the rulez-claudeset repo:
+1. Add **progress visibility** to spec2pr/review-pr — runs look "stuck" because long
+   codex/claude steps produce no output until they finish. (Designed + spec'd; the
+   implementation was done by another agent and merged as PR #8.)
+2. Merge PR #8 (the progress-visibility implementation).
+3. Retire the abandoned `feat/auto-pipeline` branch (auto-generated "monstroid";
+   superseded by the curated spec2pr on `main`) and move the live install off it.
 
 ## Current State
-- All work is **merged to `main`** (`e15ad64`, squash of PR #4). Working tree is
-  clean (only untracked `tmp/` and `docs/research-auto-handoff-at-context-threshold.md`).
-- Full suite green: `bash tests/spec2pr/run-tests.sh` → **222 passed, 0 failed**.
-  punts (34) and codex (19) suites also green.
-- Shipped on `main`:
-  - `scripts/lib/spec2pr-runtime.sh` — shared lifecycle (`status`/`finish`/`halt`/
-    `split`/`dirty`/`on_exit`), verbose helpers, utils, codex/claude model layer
-    (`codex_call`/`validate_codex_output`/`claude_json_attempt`/`run_claude_json`/
-    `extract_json_object`/`changed_paths`), `write_schemas`, and a shared
-    race-safe `acquire_lock`. Adds lazy `CONTRACT_PREFIX` (default `SPEC2PR`).
-  - `scripts/lib/pr-review-engine.sh` — `pr_review_engine_run` (diff-gate →
-    review → classify → fix → commit/push → DONE/DIRTY). Knobs: `REVIEW_RUN_DESC`,
-    `COMMIT_PREFIX`, `DONE_COMMENT_HEADER`, `PUSH_REFSPEC`, optional spec/plan
-    sentence — all defaulted to spec2pr's current values.
-  - `scripts/spec2pr.sh` — sources both libs; tail is just `pr_review_engine_run`.
-    480 → 344 lines, byte-identical behavior.
-  - `scripts/review-pr.sh <pr-number|pr-url>` — standalone tool. `PRREVIEW`
-    contract lines.
-  - `tests/spec2pr/test-review-pr.sh` (8 tests) + `stub-gh.sh` `pr view` case.
-- **Not yet deployed** to the dogfood server `rulez@5.9.78.28` (still on branch
-  `feat/spec2pr-cross-review`).
+- Branch: `main`, in sync with `origin/main`.
+- **PR #8 merged** to main (8 files, +1175/−10) — includes `tests/spec2pr/test-watch.sh`,
+  `scripts/spec2pr-watch.sh`, and the progress-visibility work per the design spec
+  `docs/superpowers/specs/2026-06-18-spec2pr-progress-visibility-design.md`.
+- **Live install** `~/.claude/skills/rulez-claudeset` is now on `main` (was on the
+  deleted `feat/auto-pipeline`). Tracks `origin/main`, auto-update works normally.
+  `git-merge-pr.sh` there has the `--untracked-files=no` stash fix → `/rulez:merge-pr`
+  works live again. `/rulez:auto-pipeline` + `/rulez:gate` are gone (intended).
+- **`feat/auto-pipeline` deleted** — remote + both local repos, tracking refs pruned.
+  Was `c30c305` (v1.6.0 tip). Hard delete, no archive (user's call). Recoverable only
+  from local reflog for a few weeks.
+- Memory cleaned: removed the stale "stack work on feat/auto-pipeline" note from
+  `~/.claude/projects/.../memory/` + its MEMORY.md pointer.
 
 ## What Worked
-- Extraction done in two behavior-preserving phases, each gated by the spec2pr
-  suite staying green (baseline was 195, not the stale "188" from an earlier
-  branch). Final tree = 222 after adding review-pr tests.
-- `review-pr.sh` flow: `require_*` deps → `gh pr view --json
-  number,url,headRefName,headRefOid,baseRefName,isCrossRepository` → fork HALT →
-  `acquire_lock` → fetch head+base → fresh throwaway worktree at the PR head on a
-  local `reviewpr/<head>-pr-<n>` branch → `BASE_SHA = merge-base(origin/base, HEAD)`
-  → `write_schemas` → `pr_review_engine_run`. Fixes push to the PR head ref via
-  `PUSH_REFSPEC="HEAD:refs/heads/<headRefName>"`. A pre-existing unregistered
-  worktree dir is `rm -rf`'d (covered by a test) since the lock guarantees no
-  live owner.
-- macOS bash 3.2 safety: lowercasing in `acquire_lock` uses `tr`, not `${x,,}`.
-- Tests reuse the existing harness (autodiscovery, `stub-claude`/`stub-codex`/
-  `stub-gh`, and `queue_clean_pr_review`/`queue_dirty_pr_review` from
-  test-pipeline.sh). `make_pr_sandbox` builds an origin with a pushed head branch
-  and writes canned `gh pr view` JSON whose `headRefOid` = the branch tip.
+- `bash scripts/git-merge-pr.sh 8 merge` from the **dev repo** (its copy has the stash
+  fix). NOTE: had to bypass the install clone's script earlier because it still carried
+  the old bug until the cutover.
+- Install cutover: `git -C ~/.claude/skills/rulez-claudeset checkout main && pull --ff-only`
+  (FF'd 29 commits) + `bin/setup -q`.
+- Branch delete: `git push origin --delete feat/auto-pipeline`, `git branch -D` in both
+  repos, `git fetch --prune`.
+- Verified at each step (grep for the fix, ls commands dir, branch listings).
 
 ## What Didn't Work
-- Adding `# shellcheck source=lib/...` directives made shellcheck noisier (it
-  then flagged the libs' own intentional env-default vars as SC2034), so they
-  were reverted. shellcheck is **not** a CI gate here; remaining SC1091/SC2034
-  are inherent false positives from dynamic `source "$(dirname "$0")/..."`.
-- My first `Write` of `spec2pr.sh` dropped its exec bit (755→644); fixed with
-  `chmod 755` + `git commit --amend`. Watch for this when rewriting scripts.
+- The install clone's `git-merge-pr.sh` (on the old `feat/auto-pipeline`) had the
+  pre-fix `git status --porcelain` at line 59 → would spuriously stash nothing then
+  fail the step-5 pop on a tree with untracked files. Fixed by the cutover to main.
+- A couple of Bash blocks showed **truncated stdout** (output cut after the first
+  command in a multi-line block). Re-ran the remaining checks separately each time;
+  no real failure, just display truncation.
 
 ## Next Steps
-1. **Deploy to the dogfood box** `rulez@5.9.78.28`: its `~/rulez-claudeset` is on
-   `feat/spec2pr-cross-review`, so a plain `git pull` won't fast-forward — needs
-   a checkout/merge of `main`. Then `review-pr.sh` + `SPEC2PR_VERBOSE` are live.
-2. **Manual smoke** there: `SPEC2PR_VERBOSE=1 bash scripts/review-pr.sh <pr-url>`
-   on a small throwaway PR — confirm fetch→worktree, per-round findings printed,
-   a fix commit pushed to the head branch, ending on `PRREVIEW DONE`.
-3. **Optional** `/rulez:review-pr` command wrapper (`commands/rulez/review-pr.md`)
-   so it's invokable from a session — deliberately deferred (script-first v1).
+1. **Spec-visibility implementation review (optional):** PR #8 was merged sight-unseen
+   in this session ("another agent done implementing"). If you want, review what landed
+   on main vs the design spec — especially `scripts/spec2pr-watch.sh` (the glob-by-
+   encoded-path watcher) and the `progress()` begin-marker in `scripts/lib/spec2pr-runtime.sh`.
+2. **Stale local feature branches** in the dev repo — likely safe to prune (their PRs
+   merged): `feat/spec2pr-progress-visibility` (spec on main, PR #8 merged),
+   `feat/spec2pr-check-deps`, `feat/spec2pr-context7-prompts`, `feat/spec2pr-pr-body-links`,
+   `feat/spec2pr-cross-review`, `feat/spec2pr`, `feat/context-meter`. Confirm each is
+   merged (`git branch --merged main`) before deleting. NOT done — left for the user.
+3. Untracked, intentionally left alone: `tmp/`, `docs/research-auto-handoff-at-context-threshold.md`.
 
 ## Key Decisions
-- **Shared library, not a fork** — explicit user choice. Rationale: we just paid
-  for divergence (the stale-lock fix stranded on a branch + `MAX_FIX_ROUNDS=3`
-  regression). One engine, two thin frontends.
-- **Reused the `SPEC2PR_*` env namespace + home dir** for review-pr (one config
-  for the family); distinguished only by `CONTRACT_PREFIX=PRREVIEW`.
-- **Fork PRs HALT in v1** — fixes push to the PR head branch, which a fork
-  doesn't allow.
-- **`PUSH_REFSPEC` knob** lets review-pr push a throwaway local branch back to
-  the PR's real head ref without the engine assuming `local branch == remote ref`
-  (true for spec2pr, not here).
-- Do **not** edit `docs/superpowers/specs/2026-06-11-spec2pr-design.md` (resume
-  SHA guard for the merged dogfood source).
+- **Did NOT migrate claude to `--output-format stream-json`.** Research (3 agents) found
+  a documented minefield: exit-0-with-is_error, empty/missing `result`, byte-boundary
+  truncation, hang-after-result, and stream-json still block-buffers when stdout isn't a
+  TTY (`stdbuf` no-op on Node; needs a PTY). Chose a read-only side-channel instead:
+  watcher tails codex meta `<tag>.stdout` (streams) + claude's live session transcript
+  `~/.claude/projects/<encoded-worktree-path>/<session-id>.jsonl`. Empirically verified
+  the headless transcript exists and uses the **physical** path (`/private/tmp/...`).
+- **Glob-by-encoded-path** for transcript discovery (not session_id capture) to keep the
+  engine's parse path byte-for-byte unchanged. Begin-marker is plain stderr gated behind
+  `SPEC2PR_VERBOSE` (no new flag). Watcher shipped standalone (`spec2pr-watch.sh <token>`),
+  works for both frontends (token = spec slug, or `pr-N` for review-pr).
+- **Retire feat/auto-pipeline only after** repointing the live install to main — deleting
+  remote-first would strand the install and break auto-update's `pull --ff-only`.
+- The install clone had accumulated 2 local-only cherry-picks (statusline + stash fix);
+  both are already on main, so the cutover lost nothing.
