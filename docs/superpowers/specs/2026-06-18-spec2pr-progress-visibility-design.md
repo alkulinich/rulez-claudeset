@@ -97,10 +97,13 @@ Factored into pure, testable functions plus a thin loop:
 - `discover_transcript_dir <id>` → `encode_cwd_path` of
   `${SPEC2PR_WORKTREES:-$HOME/.worktrees}/<id>` →
   `~/.claude/projects/<enc>/`.
-- `render_once <id>` → pick the freshest of `{meta/*.stdout, meta/*.stderr,
-  transcript/*.jsonl}`. If a `.jsonl`, render assistant text (tail last N) via the
-  verified jq filter; otherwise raw `tail -n N`. Header shows the current step (the
-  freshest file's basename, e.g. `pr-review-r1`).
+- `render_once <id>` → pick the freshest render source from `{meta/*.stdout,
+  meta/*.stderr, transcript/*.jsonl}`. If a `.jsonl`, render assistant text (tail
+  last N) via the verified jq filter; otherwise raw `tail -n N`. The header's step
+  label is derived separately from the freshest metadata file basename
+  (`*.stdout`/`*.stderr`, extension stripped), because a Claude transcript basename
+  is only its `session_id`, not the pipeline tag. This keeps a live Claude
+  transcript body labeled with the real current step, e.g. `pr-review-r1`.
 
 The only untested code is the `sleep` / `clear` loop wrapping those functions.
 
