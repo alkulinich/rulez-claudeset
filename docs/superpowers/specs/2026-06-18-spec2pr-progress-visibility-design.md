@@ -84,10 +84,18 @@ Factored into pure, testable functions plus a thin loop:
 
 - `encode_cwd_path <path>` → `realpath` (or `cd … && pwd -P`) then
   `sed 's/[^a-zA-Z0-9]/-/g'`. Matches the verified `-private-tmp-…` form.
-- `discover_meta_dir <token>` → freshest `~/.spec2pr/*<token>*/`; derives
-  `ID = basename`. If several match, pick the most recently modified and print which
-  `ID` it locked onto.
-- `discover_transcript_dir <id>` → `encode_cwd_path` of `~/.worktrees/<id>` →
+- `discover_meta_dir <token>` → scans run metadata directories under
+  `$SPEC2PR_HOME` (default `~/.spec2pr`), explicitly excluding `*.lock` and
+  non-directories. Matching is suffix-aware:
+  - If `token` is an exact metadata directory basename, use that exact run.
+  - If `token` is `pr-N`, match only basenames ending in `-pr-N` (so `pr-7`
+    does not match `pr-70`).
+  - Otherwise match only basenames ending in `-$token`, which is the spec2pr
+    `repo-slug` + `spec-slug` ID shape.
+  If several valid runs still match, pick the most recently modified metadata
+  directory and print which `ID` it locked onto.
+- `discover_transcript_dir <id>` → `encode_cwd_path` of
+  `${SPEC2PR_WORKTREES:-$HOME/.worktrees}/<id>` →
   `~/.claude/projects/<enc>/`.
 - `render_once <id>` → pick the freshest of `{meta/*.stdout, meta/*.stderr,
   transcript/*.jsonl}`. If a `.jsonl`, render assistant text (tail last N) via the
@@ -136,7 +144,8 @@ No IPC, no shared mutable state. The watcher is a separate process that only rea
 - Watcher never exits on missing files: run not started yet → "waiting for `<token>`…",
   keep polling. Empty globs tolerated under `set -u`.
 - Truncated final jsonl line → `jq … 2>/dev/null || true`; keep the last good frame.
-- Token matches several runs → pick freshest, print the chosen `ID`.
+- Token matches several valid run metadata directories → pick freshest, print the
+  chosen `ID`. Lock directories (`*.lock`) are never candidates.
 - Watcher is interactive-only (uses `clear`); documented as a terminal/tmux-pane tool.
 - The begin marker can never change exit code or contract output (stderr, flag-gated).
 
