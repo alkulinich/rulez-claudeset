@@ -6,6 +6,17 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.6.1 — from v1.6.0
+
+**Action:** None.
+
+**Caveat:** New `bin/hard-upgrade.sh` — a standalone clone-or-force-update
+for remote machines, installable in one line:
+`curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/hard-upgrade.sh | bash`.
+It refreshes both adapters (`bin/setup` always; `bin/setup-codex` only when
+`~/.codex` exists). Unlike the background `auto-update.sh`, it can clone a
+missing install and is run by hand or cron.
+
 ## To v1.6.0 — from v1.5.x
 
 **Action:** None. `/rulez:spec2pr` is available after auto-update.
