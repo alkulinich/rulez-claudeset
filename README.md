@@ -138,6 +138,30 @@ Two unattended pipelines that drive `codex` and `claude -p` from spec to merged 
 
 Requires `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **context7** MCP for up-to-date library docs when available. `bin/setup` warns if any of these (or context7) are missing — register context7 once: `claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'`.
 
+### Watching progress
+
+Long Codex and Claude steps write their detailed output to run metadata and Claude transcript files. Keep the main pane for the pipeline contract lines, and use a second pane for a live read-only view:
+
+```bash
+S=~/.claude/skills/rulez-claudeset/scripts
+tmux new-session -d -s spec2pr -c ~/project "SPEC2PR_VERBOSE=1 bash $S/spec2pr.sh docs/superpowers/specs/feature-a.md; read"
+tmux split-window  -t spec2pr -c ~/project "bash $S/spec2pr-watch.sh feature-a"
+tmux select-layout -t spec2pr even-vertical
+tmux attach -t spec2pr
+```
+
+For `review-pr.sh`, pass the `pr-N` watcher token:
+
+```bash
+S=~/.claude/skills/rulez-claudeset/scripts
+tmux new-session -d -s review-pr -c ~/project "SPEC2PR_VERBOSE=1 bash $S/review-pr.sh 7; read"
+tmux split-window  -t review-pr -c ~/project "bash $S/spec2pr-watch.sh pr-7"
+tmux select-layout -t review-pr even-vertical
+tmux attach -t review-pr
+```
+
+Use `tmux set -g mouse on` if you want mouse scrolling in the watcher pane.
+
 ### Run several at once
 
 State is namespaced per spec as `<repo>-<spec-slug>` — lock, worktree, branch and PR are all distinct — so runs don't collide as long as each spec's filename stem is unique. Example: three at once, one spec for `project1` and two for `project2`, each in its own tmux window:

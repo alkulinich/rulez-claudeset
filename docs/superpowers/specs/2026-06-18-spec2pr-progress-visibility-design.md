@@ -84,15 +84,26 @@ Factored into pure, testable functions plus a thin loop:
 
 - `encode_cwd_path <path>` → `realpath` (or `cd … && pwd -P`) then
   `sed 's/[^a-zA-Z0-9]/-/g'`. Matches the verified `-private-tmp-…` form.
-- `discover_meta_dir <token>` → freshest `~/.spec2pr/*<token>*/`; derives
-  `ID = basename`. If several match, pick the most recently modified and print which
-  `ID` it locked onto.
-- `discover_transcript_dir <id>` → `encode_cwd_path` of `~/.worktrees/<id>` →
+- `discover_meta_dir <token>` → scans run metadata directories under
+  `$SPEC2PR_HOME` (default `~/.spec2pr`), explicitly excluding `*.lock` and
+  non-directories. Matching is suffix-aware:
+  - If `token` is an exact metadata directory basename, use that exact run.
+  - If `token` is `pr-N`, match only basenames ending in `-pr-N` (so `pr-7`
+    does not match `pr-70`).
+  - Otherwise match only basenames ending in `-$token`, which is the spec2pr
+    `repo-slug` + `spec-slug` ID shape.
+  If several valid runs still match, pick the most recently modified metadata
+  directory and print which `ID` it locked onto.
+- `discover_transcript_dir <id>` → `encode_cwd_path` of
+  `${SPEC2PR_WORKTREES:-$HOME/.worktrees}/<id>` →
   `~/.claude/projects/<enc>/`.
-- `render_once <id>` → pick the freshest of `{meta/*.stdout, meta/*.stderr,
-  transcript/*.jsonl}`. If a `.jsonl`, render assistant text (tail last N) via the
-  verified jq filter; otherwise raw `tail -n N`. Header shows the current step (the
-  freshest file's basename, e.g. `pr-review-r1`).
+- `render_once <id>` → pick the freshest render source from `{meta/*.stdout,
+  meta/*.stderr, transcript/*.jsonl}`. If a `.jsonl`, render assistant text (tail
+  last N) via the verified jq filter; otherwise raw `tail -n N`. The header's step
+  label is derived separately from the freshest metadata file basename
+  (`*.stdout`/`*.stderr`, extension stripped), because a Claude transcript basename
+  is only its `session_id`, not the pipeline tag. This keeps a live Claude
+  transcript body labeled with the real current step, e.g. `pr-review-r1`.
 
 The only untested code is the `sleep` / `clear` loop wrapping those functions.
 
@@ -136,7 +147,8 @@ No IPC, no shared mutable state. The watcher is a separate process that only rea
 - Watcher never exits on missing files: run not started yet → "waiting for `<token>`…",
   keep polling. Empty globs tolerated under `set -u`.
 - Truncated final jsonl line → `jq … 2>/dev/null || true`; keep the last good frame.
-- Token matches several runs → pick freshest, print the chosen `ID`.
+- Token matches several valid run metadata directories → pick freshest, print the
+  chosen `ID`. Lock directories (`*.lock`) are never candidates.
 - Watcher is interactive-only (uses `clear`); documented as a terminal/tmux-pane tool.
 - The begin marker can never change exit code or contract output (stderr, flag-gated).
 
@@ -144,7 +156,11 @@ No IPC, no shared mutable state. The watcher is a separate process that only rea
 
 - New `tests/spec2pr/test-watch.sh`: unit-test the pure functions against a fake
   `$SPEC2PR_HOME` + fake `~/.claude/projects` tree.
-  - `encode_cwd_path` matches the verified `/private/…` physical form.
+  - `encode_cwd_path` encodes the physical path, not the caller's logical path:
+    build the fixture through a symlink and assert the encoded result matches
+    `pwd -P` / `realpath` output. Do not hard-code macOS `/private/…` in the
+    test; that verified form is an implementation clue for macOS, not a portable
+    CI expectation.
   - `discover_meta_dir` / `discover_transcript_dir` pick the freshest match and derive
     the right `ID` / encoded dir.
   - `render_once` extracts assistant text from a fixture jsonl and skips the

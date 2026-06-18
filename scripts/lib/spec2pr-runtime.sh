@@ -47,6 +47,11 @@ status() {
   fi
 }
 
+progress() {
+  [ -n "${SPEC2PR_VERBOSE:-}" ] || return 0
+  printf '... %s: %s\n' "$STAGE" "$1" >&2 || true
+}
+
 # Verbose helpers: print to stdout only (the status file stays terse and
 # machine-parseable). No-ops unless SPEC2PR_VERBOSE is set; a jq hiccup never
 # breaks the run.
@@ -262,6 +267,7 @@ codex_call() {
   local last="$META_DIR/$tag.json"
   local err="$META_DIR/$tag.stderr"
 
+  progress "running codex $tag"
   if ! "$SPEC2PR_CODEX_BIN" exec --cd "$WORKTREE" \
       --output-schema "$TMP_DIR/$role.json" \
       --output-last-message "$last" \
@@ -332,6 +338,7 @@ claude_json_attempt() {
   local tag="$1" prompt_file="$2" out="$3"
   local err="$META_DIR/$tag.stderr"
 
+  progress "running claude $tag"
   if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" -p --output-format json \
       --dangerously-skip-permissions \
       < "$prompt_file" > "$out" 2> "$err"); then
