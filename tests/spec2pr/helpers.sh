@@ -69,6 +69,7 @@ assert_file_absent() {
 make_sandbox() {
   SANDBOX="$(mktemp -d -t spec2pr-test.XXXXXX)"
   mkdir -p "$SANDBOX/bin" "$SANDBOX/fixtures" "$SANDBOX/claude-fixtures" "$SANDBOX/gh" "$SANDBOX/home" "$SANDBOX/wt"
+  export HOME="$SANDBOX/home"
 
   cp "$TESTS_DIR/stub-codex.sh" "$SANDBOX/bin/stub-codex"
   cp "$TESTS_DIR/stub-claude.sh" "$SANDBOX/bin/stub-claude"
