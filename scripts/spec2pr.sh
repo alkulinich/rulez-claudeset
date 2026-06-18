@@ -159,18 +159,29 @@ review_loop() {
       halt "dirty worktree before $stage review round"
     fi
     pf="$META_DIR/$stage-r$round.prompt"
+    local scope_clause=""
+    if [ -n "$allowed_path" ]; then
+      scope_clause="You may edit ONLY this file: $allowed_path
+Every other file is read-only reference context. If you spot a problem in any
+other file, it is OUT OF SCOPE for this round: record it in \"notes\" only,
+never edit it, and never count it as a blocker or major finding. A finding is
+in scope only if editing $allowed_path alone fully fixes it.
+
+"
+    fi
     cat > "$pf" <<EOF
 You are one fresh review round in an automated pipeline. No earlier review
 context exists; judge only what you can see now.
 
 Artifact under review: $artifact_desc
 
-1. FIRST, before changing anything, list every blocker and major finding you
-   can see right now. Severity mapping: critical->blocker, high->major,
-   medium->major. Minor/low/nit observations go into "notes" only, never
-   into findings.
-2. THEN fix every blocker and major finding by editing files in this
-   worktree. Do not push, do not commit, do not create branches or PRs.
+${scope_clause}1. FIRST, before changing anything, list every in-scope blocker and major
+   finding you can see right now. Severity mapping: critical->blocker,
+   high->major, medium->major. Minor/low/nit observations go into "notes"
+   only, never into findings.
+2. THEN fix every blocker and major finding by editing the allowed file
+   only. Do not edit, create, or delete any other file. Do not push, do not
+   commit, do not create branches or PRs.
 3. Your final message must be exactly the JSON required by the output
    schema. blockers_found and majors_found are the counts from step 1
    (before your fixes) and must equal the findings array by severity.
