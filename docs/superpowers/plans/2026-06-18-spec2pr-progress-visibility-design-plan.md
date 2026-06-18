@@ -14,6 +14,7 @@
 
 - Create `scripts/spec2pr-watch.sh` - standalone read-only progress tailer with pure functions plus a thin polling loop.
 - Create `tests/spec2pr/test-watch.sh` - shell unit tests for watcher path encoding, run discovery, transcript discovery, and rendering behavior.
+- Modify `tests/spec2pr/helpers.sh` - sandbox `HOME` so watcher transcript tests never touch the developer's real `~/.claude/projects`.
 - Modify `scripts/lib/spec2pr-runtime.sh` - add `progress()` and call it at the start of `codex_call` and `claude_json_attempt`.
 - Modify `tests/spec2pr/test-pipeline.sh` - add one verbose pipeline assertion that begin markers appear on stderr while stdout/status contracts remain unchanged.
 - Modify `README.md` - add the two-pane tmux pattern under the existing `spec2pr & review-pr` section.
@@ -22,10 +23,20 @@
 
 **Files:**
 - Create: `tests/spec2pr/test-watch.sh`
-- Read: `tests/spec2pr/helpers.sh`
+- Modify: `tests/spec2pr/helpers.sh`
 - Read: `tests/spec2pr/run-tests.sh`
 
-- [ ] **Step 1: Write the failing watcher unit test file**
+- [ ] **Step 1: Isolate HOME in the spec2pr test sandbox**
+
+In `tests/spec2pr/helpers.sh`, inside `make_sandbox()` after the `mkdir -p "$SANDBOX/bin" ... "$SANDBOX/home" "$SANDBOX/wt"` line and before any tests can derive Claude transcript paths, add:
+
+```bash
+  export HOME="$SANDBOX/home"
+```
+
+This keeps watcher tests from creating or reading the developer's real `~/.claude/projects` tree when `discover_transcript_dir()` derives Claude's transcript directory.
+
+- [ ] **Step 2: Write the failing watcher unit test file**
 
 Create `tests/spec2pr/test-watch.sh` with these tests. They source the future watcher with `SPEC2PR_WATCH_TESTING=1`, build sandbox state using existing helpers, and assert only pure function output.
 
@@ -174,7 +185,7 @@ test_watch_render_once_waits_before_logs_exist() {
 }
 ```
 
-- [ ] **Step 2: Run the new tests and verify they fail**
+- [ ] **Step 3: Run the new tests and verify they fail**
 
 Run:
 
@@ -184,10 +195,10 @@ tests/spec2pr/run-tests.sh
 
 Expected: FAIL entries from `tests/spec2pr/test-watch.sh` because `scripts/spec2pr-watch.sh` does not exist yet or does not define the sourced functions.
 
-- [ ] **Step 3: Commit the failing tests**
+- [ ] **Step 4: Commit the failing tests**
 
 ```bash
-git add tests/spec2pr/test-watch.sh
+git add tests/spec2pr/helpers.sh tests/spec2pr/test-watch.sh
 git commit -m "test: cover spec2pr progress watcher"
 ```
 
@@ -607,6 +618,7 @@ git commit -m "docs: document spec2pr progress watcher"
 **Files:**
 - Verify: `scripts/spec2pr-watch.sh`
 - Verify: `scripts/lib/spec2pr-runtime.sh`
+- Verify: `tests/spec2pr/helpers.sh`
 - Verify: `tests/spec2pr/test-watch.sh`
 - Verify: `tests/spec2pr/test-pipeline.sh`
 - Verify: `README.md`
@@ -640,6 +652,7 @@ Run:
 ```bash
 bash -n scripts/spec2pr-watch.sh
 bash -n scripts/lib/spec2pr-runtime.sh
+bash -n tests/spec2pr/helpers.sh
 bash -n tests/spec2pr/test-watch.sh
 bash -n tests/spec2pr/test-pipeline.sh
 ```
@@ -679,6 +692,7 @@ Expected changed files are exactly:
 ```text
  M README.md
  M scripts/lib/spec2pr-runtime.sh
+ M tests/spec2pr/helpers.sh
  M tests/spec2pr/test-pipeline.sh
 ?? scripts/spec2pr-watch.sh
 ?? tests/spec2pr/test-watch.sh
@@ -691,12 +705,13 @@ If commits were made after each task, expected output is clean.
 Run:
 
 ```bash
-git diff -- scripts/lib/spec2pr-runtime.sh scripts/spec2pr-watch.sh tests/spec2pr/test-watch.sh tests/spec2pr/test-pipeline.sh README.md
+git diff -- scripts/lib/spec2pr-runtime.sh scripts/spec2pr-watch.sh tests/spec2pr/helpers.sh tests/spec2pr/test-watch.sh tests/spec2pr/test-pipeline.sh README.md
 ```
 
 Expected:
 
 - `claude_json_attempt` still uses `--output-format json`.
+- `tests/spec2pr/helpers.sh` exports `HOME="$SANDBOX/home"` from `make_sandbox()` so watcher tests use a fake `~/.claude/projects` tree.
 - No code reads or rewrites `.result` parsing in `scripts/lib/pr-review-engine.sh`.
 - `status()` and `finish()` behavior is unchanged.
 - `progress()` writes only to stderr and is gated by `SPEC2PR_VERBOSE`.
@@ -705,7 +720,7 @@ Expected:
 - [ ] **Step 7: Final commit if changes are not already committed**
 
 ```bash
-git add README.md scripts/lib/spec2pr-runtime.sh scripts/spec2pr-watch.sh tests/spec2pr/test-pipeline.sh tests/spec2pr/test-watch.sh
+git add README.md scripts/lib/spec2pr-runtime.sh scripts/spec2pr-watch.sh tests/spec2pr/helpers.sh tests/spec2pr/test-pipeline.sh tests/spec2pr/test-watch.sh
 git commit -m "feat: add spec2pr progress visibility"
 ```
 
