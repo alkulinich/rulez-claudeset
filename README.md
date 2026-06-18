@@ -2,7 +2,15 @@
 
 Shared Claude Code commands, permissions, and status line for GitHub Flow workflow.
 
-## Install (global)
+## Install (one line)
+
+Clone-or-update, both adapters, on any machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/hard-upgrade.sh | bash
+```
+
+## Install (claude)
 
 ```bash
 git clone https://github.com/alkulinich/rulez-claudeset ~/.claude/skills/rulez-claudeset
