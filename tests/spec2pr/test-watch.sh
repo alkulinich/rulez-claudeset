@@ -130,6 +130,31 @@ JSONL
   assert_not_contains "$rendered" "skip prompt" "render skips last-prompt noise"
 }
 
+test_watch_render_once_skips_malformed_jsonl_records() {
+  make_sandbox
+  source_watcher
+  mkdir -p "$SPEC2PR_HOME/$ID" "$SPEC2PR_WORKTREES/$ID"
+  printf '' > "$SPEC2PR_HOME/$ID/pr-review-r1.stderr"
+  local transcript_dir
+  transcript_dir="$(discover_transcript_dir "$ID")"
+  mkdir -p "$transcript_dir"
+  cat > "$transcript_dir/session-1.jsonl" <<'JSONL'
+{"type":"assistant","message":{"content":[{"type":"text","text":"before malformed"}]}}
+{"type":"assistant","message":
+{"type":"assistant","message":{"content":[{"type":"text","text":"after malformed"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"trailing truncated"}]}
+JSONL
+  sleep 1
+  touch "$transcript_dir/session-1.jsonl"
+
+  local rendered
+  rendered="$(render_once "$ID" 20)"
+
+  assert_contains "$rendered" "before malformed" "render includes assistant text before malformed jsonl"
+  assert_contains "$rendered" "after malformed" "render includes assistant text after malformed jsonl"
+  assert_not_contains "$rendered" "trailing truncated" "render skips trailing truncated jsonl"
+}
+
 test_watch_render_once_waits_before_logs_exist() {
   make_sandbox
   source_watcher

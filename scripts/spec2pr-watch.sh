@@ -113,7 +113,9 @@ freshest_render_source() {
 
 render_jsonl_text() {
   local file="$1" lines="$2"
-  jq -r '
+  jq -Rr '
+    fromjson?
+    |
     select(.type == "assistant")
     | .message.content[]?
     | select(.type == "text")
