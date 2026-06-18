@@ -156,7 +156,11 @@ No IPC, no shared mutable state. The watcher is a separate process that only rea
 
 - New `tests/spec2pr/test-watch.sh`: unit-test the pure functions against a fake
   `$SPEC2PR_HOME` + fake `~/.claude/projects` tree.
-  - `encode_cwd_path` matches the verified `/private/…` physical form.
+  - `encode_cwd_path` encodes the physical path, not the caller's logical path:
+    build the fixture through a symlink and assert the encoded result matches
+    `pwd -P` / `realpath` output. Do not hard-code macOS `/private/…` in the
+    test; that verified form is an implementation clue for macOS, not a portable
+    CI expectation.
   - `discover_meta_dir` / `discover_transcript_dir` pick the freshest match and derive
     the right `ID` / encoded dir.
   - `render_once` extracts assistant text from a fixture jsonl and skips the
