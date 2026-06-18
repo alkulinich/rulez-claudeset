@@ -49,7 +49,7 @@ status() {
 
 progress() {
   [ -n "${SPEC2PR_VERBOSE:-}" ] || return 0
-  printf '... %s: %s\n' "$STAGE" "$1" >&2
+  printf '... %s: %s\n' "$STAGE" "$1" >&2 || true
 }
 
 # Verbose helpers: print to stdout only (the status file stays terse and
