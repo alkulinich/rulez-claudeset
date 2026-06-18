@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hard-upgrade.sh — first-install or force-update rulez-claudeset on a machine.
+# install.sh — first-install or force-update rulez-claudeset on a machine.
 #
 # Standalone bootstrap you run by hand or from cron. Unlike bin/auto-update.sh
 # (background, throttled, Claude-only, runs from *inside* the clone it updates),
@@ -12,9 +12,9 @@
 # One clone feeds both adapters: setup-codex symlinks out of this same checkout.
 #
 # Usage:
-#   bash bin/hard-upgrade.sh
+#   bash bin/install.sh
 # Remote one-shot:
-#   curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/hard-upgrade.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/install.sh | bash
 set -euo pipefail
 
 REPO_URL="https://github.com/alkulinich/rulez-claudeset"

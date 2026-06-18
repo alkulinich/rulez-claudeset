@@ -7,7 +7,7 @@ Shared Claude Code commands, permissions, and status line for GitHub Flow workfl
 Clone-or-update, both adapters, on any machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/hard-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/install.sh | bash
 ```
 
 ## Install (claude)

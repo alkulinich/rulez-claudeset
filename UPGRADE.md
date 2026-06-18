@@ -10,9 +10,9 @@ verbatim — anyone arriving from a pre-1.0 install needs them.
 
 **Action:** None.
 
-**Caveat:** New `bin/hard-upgrade.sh` — a standalone clone-or-force-update
+**Caveat:** New `bin/install.sh` — a standalone clone-or-force-update
 for remote machines, installable in one line:
-`curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/hard-upgrade.sh | bash`.
+`curl -fsSL https://raw.githubusercontent.com/alkulinich/rulez-claudeset/main/bin/install.sh | bash`.
 It refreshes both adapters (`bin/setup` always; `bin/setup-codex` only when
 `~/.codex` exists). Unlike the background `auto-update.sh`, it can clone a
 missing install and is run by hand or cron.
