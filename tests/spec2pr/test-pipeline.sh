@@ -339,3 +339,23 @@ EOF
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "open PR resume finishes"
   assert_eq "7" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
 }
+
+test_verbose_begin_markers_go_to_output_not_status_contract() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+
+  SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "verbose progress marker path exits 0"
+  assert_contains "$OUT" "... spec-review: running codex spec-review-r1" "codex begin marker printed"
+  assert_contains "$OUT" "... pr-review: running claude pr-review-r1" "claude review begin marker printed"
+  assert_contains "$OUT" "... pr-review: running claude pr-review-r1.classify-a1" "claude classify begin marker printed"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$SPEC2PR_WORKTREES/$ID" "final stdout contract still present"
+  assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "... spec-review: running codex" "begin marker never enters status file"
+  assert_not_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "... pr-review: running claude" "claude begin marker never enters status file"
+  assert_contains "$(last_status_line)" "SPEC2PR DONE" "status still ends with done contract"
+}
