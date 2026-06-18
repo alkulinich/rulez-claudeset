@@ -143,17 +143,19 @@ Requires `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **c
 Long Codex and Claude steps write their detailed output to run metadata and Claude transcript files. Keep the main pane for the pipeline contract lines, and use a second pane for a live read-only view:
 
 ```bash
-tmux new-session -d -s spec2pr -c ~/project "SPEC2PR_VERBOSE=1 scripts/spec2pr.sh docs/superpowers/specs/feature-a.md; read"
-tmux split-window  -t spec2pr -c ~/project "scripts/spec2pr-watch.sh feature-a"
+S=~/.claude/skills/rulez-claudeset/scripts
+tmux new-session -d -s spec2pr -c ~/project "SPEC2PR_VERBOSE=1 bash $S/spec2pr.sh docs/superpowers/specs/feature-a.md; read"
+tmux split-window  -t spec2pr -c ~/project "bash $S/spec2pr-watch.sh feature-a"
 tmux select-layout -t spec2pr even-vertical
 tmux attach -t spec2pr
 ```
 
-For `review-pr.sh`, pass the precise PR token:
+For `review-pr.sh`, pass the `pr-N` watcher token:
 
 ```bash
-tmux new-session -d -s review-pr -c ~/project "SPEC2PR_VERBOSE=1 scripts/review-pr.sh 7; read"
-tmux split-window  -t review-pr -c ~/project "scripts/spec2pr-watch.sh pr-7"
+S=~/.claude/skills/rulez-claudeset/scripts
+tmux new-session -d -s review-pr -c ~/project "SPEC2PR_VERBOSE=1 bash $S/review-pr.sh 7; read"
+tmux split-window  -t review-pr -c ~/project "bash $S/spec2pr-watch.sh pr-7"
 tmux select-layout -t review-pr even-vertical
 tmux attach -t review-pr
 ```
