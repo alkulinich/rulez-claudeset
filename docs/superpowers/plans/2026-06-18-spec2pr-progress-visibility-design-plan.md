@@ -57,11 +57,11 @@ test_watch_encode_cwd_path_uses_physical_path() {
 test_watch_discover_meta_dir_prefers_exact_basename() {
   make_sandbox
   source_watcher
-  mkdir -p "$SPEC2PR_HOME/older-project-toy-spec" "$SPEC2PR_HOME/project-toy-spec"
+  mkdir -p "$SPEC2PR_HOME/project-toy-spec" "$SPEC2PR_HOME/newer-project-toy-spec"
   mkdir -p "$SPEC2PR_HOME/project-toy-spec.lock"
-  touch "$SPEC2PR_HOME/older-project-toy-spec/.stamp"
-  sleep 1
   touch "$SPEC2PR_HOME/project-toy-spec/.stamp"
+  sleep 1
+  touch "$SPEC2PR_HOME/newer-project-toy-spec/.stamp"
 
   local meta
   meta="$(discover_meta_dir "project-toy-spec")"
@@ -227,6 +227,10 @@ discover_meta_dir() {
   local newest="" newest_mtime=0 mtime
 
   [ -d "$SPEC2PR_HOME" ] || return 0
+  if [ -d "$SPEC2PR_HOME/$token" ]; then
+    printf '%s' "$SPEC2PR_HOME/$token"
+    return 0
+  fi
 
   for candidate in "$SPEC2PR_HOME"/*; do
     [ -d "$candidate" ] || continue
@@ -235,9 +239,7 @@ discover_meta_dir() {
     esac
     base="$(basename "$candidate")"
     match=0
-    if [ "$base" = "$token" ]; then
-      match=1
-    elif [[ "$token" == pr-[0-9]* ]] && [[ "$base" == *-"$token" ]]; then
+    if [[ "$token" == pr-[0-9]* ]] && [[ "$base" == *-"$token" ]]; then
       match=1
     elif [[ "$base" == *-"$token" ]]; then
       match=1
@@ -289,9 +291,7 @@ freshest_render_source() {
   local transcript_dir
   local file newest="" newest_mtime=0 mtime
 
-  transcript_dir="$(discover_transcript_dir "$id")"
-
-  for file in "$meta_dir"/*.stdout "$meta_dir"/*.stderr "$transcript_dir"/*.jsonl; do
+  for file in "$meta_dir"/*.stdout "$meta_dir"/*.stderr; do
     [ -f "$file" ] || continue
     mtime="$(file_mtime "$file")"
     if [ "$mtime" -ge "$newest_mtime" ]; then
@@ -299,6 +299,18 @@ freshest_render_source() {
       newest_mtime="$mtime"
     fi
   done
+
+  transcript_dir="$(discover_transcript_dir "$id")"
+  if [ -n "$transcript_dir" ] && [ -d "$transcript_dir" ]; then
+    for file in "$transcript_dir"/*.jsonl; do
+      [ -f "$file" ] || continue
+      mtime="$(file_mtime "$file")"
+      if [ "$mtime" -ge "$newest_mtime" ]; then
+        newest="$file"
+        newest_mtime="$mtime"
+      fi
+    done
+  fi
 
   printf '%s' "$newest"
 }
