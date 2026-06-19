@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+assert_symlink() {
+  local path="$1" msg="${2:-path should be a symlink}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [ -L "$path" ]; then
+    printf '  ok: %s\n' "$msg"
+  else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    printf '  FAIL: %s\n    not a symlink: %s\n' "$msg" "$path"
+  fi
+}
+
 test_setup_symlinks_mctl_and_warns_when_local_bin_missing_from_path() {
   make_sandbox
   local claude_dir="$SANDBOX/claude"
@@ -16,5 +27,7 @@ test_setup_symlinks_mctl_and_warns_when_local_bin_missing_from_path() {
 
   assert_eq "0" "$RC" "setup exits 0"
   assert_file_exists "$local_bin/mctl" "mctl symlink created"
+  assert_symlink "$local_bin/mctl" "mctl is a symlink"
+  assert_eq "$REPO_ROOT/scripts/mctl.sh" "$(readlink "$local_bin/mctl")" "mctl symlink target"
   assert_contains "$OUT" "~/.local/bin is not on PATH" "PATH warning"
 }
