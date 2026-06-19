@@ -176,6 +176,14 @@ run_mctl() {
   RC=$?
 }
 
+run_mctl_in_dir() {
+  local cwd="$1"
+  shift
+  set +e
+  OUT="$(cd "$cwd" && "${BASH:-bash}" "$MCTL" "$@" 2>&1)"
+  RC=$?
+}
+
 run_mctl_with_stubs_only() {
   local saved_path="$PATH"
   PATH="$SANDBOX/bin"
@@ -467,7 +475,7 @@ test_add_spec2pr_writes_registry_metadata_and_brief_log() {
 
 test_add_review_pr_writes_repo_qualified_pr_metadata() {
   make_sandbox
-  (cd "$REPO" && run_mctl add review-pr 7)
+  run_mctl_in_dir "$REPO" add review-pr 7
 
   local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
   assert_eq "0" "$RC" "add review-pr exits 0"
@@ -484,12 +492,12 @@ test_add_refuses_missing_spec_non_numeric_pr_and_outside_repo() {
   assert_eq "1" "$RC" "missing spec exits 1"
   assert_contains "$OUT" "spec not found" "missing spec message"
 
-  (cd "$REPO" && run_mctl add review-pr abc)
+  run_mctl_in_dir "$REPO" add review-pr abc
   assert_eq "1" "$RC" "non-numeric pr exits 1"
   assert_contains "$OUT" "pr number must be numeric" "non-numeric pr message"
 
   mkdir -p "$SANDBOX/notrepo"
-  (cd "$SANDBOX/notrepo" && run_mctl add review-pr 7)
+  run_mctl_in_dir "$SANDBOX/notrepo" add review-pr 7
   assert_eq "1" "$RC" "review-pr outside repo exits 1"
   assert_contains "$OUT" "not inside a git repository" "outside repo message"
 }
@@ -696,7 +704,7 @@ test_add_launches_tmux_session_with_script_wrapper_and_verbose_env() {
 
 test_add_review_pr_launches_review_runner_from_repo_root() {
   make_sandbox
-  (cd "$REPO" && run_mctl add review-pr 7)
+  run_mctl_in_dir "$REPO" add review-pr 7
 
   local log
   log="$(cat "$SANDBOX/tmux.log")"
