@@ -46,7 +46,8 @@ All state lives under one home, overridable by `RULEZ_CLAUDESET_HOME`
 
 ```
 $RULEZ_CLAUDESET_HOME/mctl/<name>/
-  meta        # KV lines: kind, token, session, repo, started
+  meta        # KV lines: kind, token, session, repo, started,
+              # spec2pr_home, spec2pr_worktrees
   brief.log   # script-captured pipeline console (the "brief" pane tails this)
   exit        # written after the pipeline exits: rc plus finished timestamp
 ```
@@ -86,8 +87,12 @@ lifting is reused:
 
 Decoupling: mctl never reaches into spec2pr's `~/.spec2pr/<id>/` internals. It
 stores the watch **token** at add time and lets `spec2pr-watch.sh` resolve the
-rest. Discovery is `ls $RULEZ_CLAUDESET_HOME/mctl/*/`; run state comes from
-mctl's own wrapper marker, not raw tmux liveness:
+rest. Because `SPEC2PR_HOME` and `SPEC2PR_WORKTREES` are supported overrides in
+the underlying scripts, mctl stores their effective values in `meta` at launch
+time and exports those same values when it starts the details pane. The
+dashboard must not rely on whatever watcher environment happens to be present
+in the later shell. Discovery is `ls $RULEZ_CLAUDESET_HOME/mctl/*/`; run state
+comes from mctl's own wrapper marker, not raw tmux liveness:
 
 - `exit` missing + tmux session `mctl-<name>` exists = `running`
 - `exit` present = `done` (the tmux session may still exist because it is kept
@@ -103,6 +108,10 @@ mctl's own wrapper marker, not raw tmux liveness:
   mctl then invokes `$script_dir/spec2pr.sh`, `$script_dir/review-pr.sh`, and
   `$script_dir/spec2pr-watch.sh` by absolute path; it never assumes the user ran
   it from the rulez-claudeset repo.
+- Runtime dependencies are checked at command start with one-line failures:
+  `tmux` for commands that query or create sessions, `script` for `add`, and
+  `fzf` for the dashboard. `tail`, `sed`, `awk`, and other POSIX-ish shell
+  utilities are assumed available on the target Linux/macOS machines.
 
 ## Data flow
 
@@ -128,13 +137,16 @@ mctl's own wrapper marker, not raw tmux liveness:
    `done`.
 3. Capture the target repo dir as an absolute physical path: the spec file's
    git root for `spec2pr`, or `pwd`'s git root for `review-pr`.
-4. Create `brief.log` and write `meta`.
+4. Resolve and store the effective watcher environment in `meta`:
+   `spec2pr_home=${SPEC2PR_HOME:-$HOME/.spec2pr}` and
+   `spec2pr_worktrees=${SPEC2PR_WORKTREES:-$HOME/.worktrees}`. Create
+   `brief.log` and write the rest of `meta`.
 5. `tmux new-session -d -s mctl-<name>` running a small wrapper that:
-   - runs `script --flush --return … "cd <repo> && SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>"`;
+   - runs `script --flush --return … "cd <repo> && SPEC2PR_HOME=<meta value> SPEC2PR_WORKTREES=<meta value> SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>"`;
    - shell-quotes every generated command argument (`repo`, `runner-abs`, the
-     canonical spec path or PR number, `brief.log`, and `exit`) before embedding
-     it in the tmux/script wrapper; no raw user path is interpolated into shell
-     code;
+     canonical spec path or PR number, `brief.log`, `exit`, `SPEC2PR_HOME`, and
+     `SPEC2PR_WORKTREES`) before embedding it in the tmux/script wrapper; no raw
+     user path is interpolated into shell code;
    - records the resulting exit code and finished timestamp to
      `$RULEZ_CLAUDESET_HOME/mctl/<name>/exit`;
    - then prompts and `read`s.
@@ -151,7 +163,8 @@ mctl's own wrapper marker, not raw tmux liveness:
 2. Left pane runs `fzf` over `mctl ls`. On cursor move, a binding re-targets the
    two right panes via `tmux respawn-pane -k`:
    - brief → `tail -F <brief.log>`
-   - details → `bash <script-dir>/spec2pr-watch.sh <token>`
+   - details →
+     `SPEC2PR_HOME=<meta spec2pr_home> SPEC2PR_WORKTREES=<meta spec2pr_worktrees> bash <script-dir>/spec2pr-watch.sh <token>`
 3. Empty state: show `no runs — mctl add spec2pr <spec>`.
 
 **ls:**
@@ -165,9 +178,11 @@ columns: name, kind, state, started.
 Personal-tool grade — best-effort, loud-but-simple:
 
 - `add`: one-line refusal on missing spec, non-numeric pr#, existing tmux
-  session, or existing registry dir. No retries and no implicit cleanup.
+  session, existing registry dir, or missing required dependency. No retries
+  and no implicit cleanup.
 - dashboard: empty-state message when no runs exist; existing `mctl-dash`
-  attaches instead of failing with a duplicate-session error.
+  attaches instead of failing with a duplicate-session error; missing `fzf` or
+  `tmux` fails before creating a partial dashboard session.
 - approve/attach/kill are out of scope, so no error surface there.
 
 ## Cross-platform note
@@ -184,12 +199,17 @@ Light, matching the repo's existing stub pattern (`tests/spec2pr/stub-*`):
 - `add` creates `$RULEZ_CLAUDESET_HOME/mctl/<name>/meta` and invokes
   `tmux new-session` (tmux stubbed); refuses a duplicate live session or
   existing registry dir, including a completed dir with `exit`.
+- `add` records the effective `SPEC2PR_HOME` and `SPEC2PR_WORKTREES`, passes
+  them into the runner wrapper, and the dashboard details pane exports the same
+  values before invoking `spec2pr-watch.sh`.
 - `add spec2pr` launched from outside the spec repo still records the spec
   repo root in `meta` and runs the pipeline from that repo.
 - `add` creates `brief.log` before launching the wrapper, and dashboard brief
   panes use `tail -F`.
 - `mctl` attaches to an existing `mctl-dash` session instead of trying to create
   a duplicate.
+- Missing `tmux`, `script`, or dashboard-only `fzf` dependency is a clean
+  one-line failure; `bin/setup` warns for those commands.
 - Installed-path smoke test: invoking the symlinked `mctl` from outside the
   rulez-claudeset repo still records absolute runner/watch paths from the real
   `scripts/` directory.
@@ -202,8 +222,9 @@ Light, matching the repo's existing stub pattern (`tests/spec2pr/stub-*`):
 Unlike the existing scripts (called by full path from slash commands), `mctl` is
 a command the user types in a shell, so it must be on `PATH`. `bin/setup`
 symlinks `scripts/mctl.sh` → `~/.local/bin/mctl` and warns if `~/.local/bin`
-isn't on `PATH`. Fallback: call `scripts/mctl.sh` by path, or alias it. (The
-target dir is the one steerable install detail; `~/.local/bin` is the default.)
+isn't on `PATH`. It also warns if `tmux`, `script`, or `fzf` is missing.
+Fallback: call `scripts/mctl.sh` by path, or alias it. (The target dir is the
+one steerable install detail; `~/.local/bin` is the default.)
 
 ## Files
 
