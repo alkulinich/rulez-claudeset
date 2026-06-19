@@ -21,6 +21,7 @@ This will:
 1. Symlink commands to `~/.claude/commands/rulez/` (available as `/rulez:start-issue`, etc.)
 2. Merge permissions into `~/.claude/settings.json`
 3. Install a SessionStart hook for auto-updates
+4. Symlink `scripts/mctl.sh` to `~/.local/bin/mctl` when `bin/setup` runs
 
 Auto-updates run in the background on every Claude Code session (1-hour throttle, ff-only pull).
 
@@ -144,9 +145,33 @@ Two unattended pipelines that drive `codex` and `claude -p` from spec to merged 
 
 **`scripts/review-pr.sh <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, `claude` reviews the diff, `codex` fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
 
+### mctl mission control
+
+`mctl` launches unattended runs in detached tmux sessions and opens one dashboard
+for all active and completed runs:
+
+```bash
+mctl add spec2pr docs/superpowers/specs/feature-a.md
+mctl add review-pr 7
+mctl
+mctl ls
+```
+
+State lives under `${RULEZ_CLAUDESET_HOME:-~/.rulez-claudeset}/mctl/<name>/`.
+Run names are repo-qualified, such as `my-repo-feature-a` and `my-repo-pr-7`.
+The dashboard has a task list on the left, the captured pipeline console on the
+top right, and `spec2pr-watch.sh` details on the bottom right.
+
+Use tmux directly for operations not built into the first cut:
+
+```bash
+tmux attach -t mctl-my-repo-feature-a
+tmux kill-session -t mctl-my-repo-feature-a
+```
+
 Requires `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **context7** MCP for up-to-date library docs when available. `bin/setup` warns if any of these (or context7) are missing — register context7 once: `claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'`.
 
-### Watching progress
+### Manual tmux fallback
 
 Long Codex and Claude steps write their detailed output to run metadata and Claude transcript files. Keep the main pane for the pipeline contract lines, and use a second pane for a live read-only view:
 
