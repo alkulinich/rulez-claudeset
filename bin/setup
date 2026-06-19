@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
 
-SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 QUIET=false
 
-[[ "$1" == "-q" ]] && QUIET=true
+[[ "${1:-}" == "-q" ]] && QUIET=true
 
 log() { $QUIET || echo "$@"; }
+warn() { echo "$@" >&2; }
 
 ask_replace() {
   # In quiet mode (auto-update), always skip
@@ -18,131 +19,269 @@ ask_replace() {
   [[ "$answer" =~ ^[Yy]$ ]]
 }
 
-if ! command -v jq &>/dev/null; then
-  echo "Error: jq is required (brew install jq)"
-  exit 1
-fi
+spec2pr_home_same_filesystem() {
+  local legacy="$1" rulez_home="$2"
+  local legacy_dev rulez_dev
+  legacy_dev="$(stat -c %d "$legacy" 2>/dev/null || stat -f %d "$legacy" 2>/dev/null || true)"
+  rulez_dev="$(stat -c %d "$rulez_home" 2>/dev/null || stat -f %d "$rulez_home" 2>/dev/null || true)"
+  [ -n "$legacy_dev" ] && [ "$legacy_dev" = "$rulez_dev" ]
+}
 
-# 1. Symlink commands
-mkdir -p "$CLAUDE_DIR/commands"
-ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
-log "Linked commands → ~/.claude/commands/rulez"
+spec2pr_target_symlink_points_to_legacy() {
+  local target="$1" legacy="$2"
+  [ -L "$target" ] && [ "$(readlink "$target")" = "$legacy" ]
+}
 
-# Symlink mctl into a user PATH location for shell use.
-LOCAL_BIN="$HOME/.local/bin"
-MCTL_LINK="$LOCAL_BIN/mctl"
-MCTL_TARGET="$SKILL_DIR/scripts/mctl.sh"
-mkdir -p "$LOCAL_BIN"
-if [ -L "$MCTL_LINK" ]; then
-  if [ "$(readlink "$MCTL_LINK")" = "$MCTL_TARGET" ]; then
-    ln -sfn "$MCTL_TARGET" "$MCTL_LINK"
-    log "Linked mctl -> ~/.local/bin/mctl"
+spec2pr_dir_is_empty() {
+  local dir="$1"
+  [ -d "$dir" ] || return 1
+  [ -z "$(find "$dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]
+}
+
+spec2pr_link_target_to_legacy() {
+  local target="$1" legacy="$2" reason="$3" link_warning="$4" empty_warning="$5"
+  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    if ln -s "$legacy" "$target"; then
+      log "linked $target to existing ~/.spec2pr ($reason; not moved)"
+      return 0
+    fi
+    warn "$link_warning"
+    return 0
+  fi
+
+  if spec2pr_dir_is_empty "$target"; then
+    if rmdir "$target" && ln -s "$legacy" "$target"; then
+      log "linked $target to existing ~/.spec2pr ($reason; not moved)"
+      return 0
+    fi
+    warn "$empty_warning"
+    return 0
+  fi
+
+  if [ "$reason" = "active run" ]; then
+    warn "warning: active ~/.spec2pr run and target is not empty; leaving both unchanged"
   else
+    warn "warning: cannot atomically migrate ~/.spec2pr to $target and target is not empty; leaving both unchanged"
+  fi
+  return 0
+}
+
+migrate_spec2pr_home() {
+  local legacy="$HOME/.spec2pr"
+  local rulez_home="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
+  local target="$rulez_home/spec2pr"
+  local active_lock=false
+
+  [ -d "$legacy" ] || return 0
+  [ ! -L "$legacy" ] || return 0
+
+  if ! mkdir -p "$rulez_home"; then
+    warn "warning: cannot create $rulez_home; leaving ~/.spec2pr unchanged"
+    return 0
+  fi
+
+  if find "$legacy" -mindepth 1 -maxdepth 1 -type d -name '*.lock' -print -quit | grep -q .; then
+    active_lock=true
+  fi
+
+  if spec2pr_target_symlink_points_to_legacy "$target" "$legacy"; then
+    if [ "$active_lock" = true ]; then
+      return 0
+    fi
+
+    if ! spec2pr_home_same_filesystem "$legacy" "$rulez_home"; then
+      return 0
+    fi
+
+    if ! rm "$target"; then
+      warn "warning: cannot remove $target symlink to complete ~/.spec2pr migration; leaving ~/.spec2pr unchanged"
+      return 0
+    fi
+  fi
+
+  if [ "$active_lock" = true ]; then
+    spec2pr_link_target_to_legacy \
+      "$target" \
+      "$legacy" \
+      "active run" \
+      "warning: cannot link $target to active ~/.spec2pr; leaving ~/.spec2pr unchanged" \
+      "warning: cannot replace empty $target with symlink; leaving active ~/.spec2pr unchanged"
+    return 0
+  fi
+
+  if ! spec2pr_home_same_filesystem "$legacy" "$rulez_home"; then
+    spec2pr_link_target_to_legacy \
+      "$target" \
+      "$legacy" \
+      "cross-filesystem" \
+      "warning: cannot link $target to ~/.spec2pr; leaving ~/.spec2pr unchanged" \
+      "warning: cannot replace empty $target with symlink; leaving ~/.spec2pr unchanged"
+    return 0
+  fi
+
+  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    if mv "$legacy" "$target"; then
+      if ln -s "$target" "$legacy"; then
+        log "migrated ~/.spec2pr to $target (left a symlink)"
+      else
+        warn "warning: migrated ~/.spec2pr to $target but could not create legacy symlink"
+      fi
+    else
+      warn "warning: cannot migrate ~/.spec2pr to $target; leaving it unchanged"
+    fi
+    return 0
+  fi
+
+  if spec2pr_dir_is_empty "$target"; then
+    if rmdir "$target" && mv "$legacy" "$target"; then
+      if ln -s "$target" "$legacy"; then
+        log "migrated ~/.spec2pr to $target (left a symlink)"
+      else
+        warn "warning: migrated ~/.spec2pr to $target but could not create legacy symlink"
+      fi
+    else
+      warn "warning: cannot replace empty $target with migrated ~/.spec2pr; leaving it unchanged"
+    fi
+    return 0
+  fi
+
+  warn "warning: both ~/.spec2pr and $target exist; leaving them unchanged"
+  return 0
+}
+
+main() {
+  if ! command -v jq &>/dev/null; then
+    echo "Error: jq is required (brew install jq)"
+    exit 1
+  fi
+
+  migrate_spec2pr_home
+
+  # 1. Symlink commands
+  mkdir -p "$CLAUDE_DIR/commands"
+  ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
+  log "Linked commands → ~/.claude/commands/rulez"
+
+  # Symlink mctl into a user PATH location for shell use.
+  LOCAL_BIN="$HOME/.local/bin"
+  MCTL_LINK="$LOCAL_BIN/mctl"
+  MCTL_TARGET="$SKILL_DIR/scripts/mctl.sh"
+  mkdir -p "$LOCAL_BIN"
+  if [ -L "$MCTL_LINK" ]; then
+    if [ "$(readlink "$MCTL_LINK")" = "$MCTL_TARGET" ]; then
+      ln -sfn "$MCTL_TARGET" "$MCTL_LINK"
+      log "Linked mctl -> ~/.local/bin/mctl"
+    else
+      echo "Warning: ~/.local/bin/mctl already exists and was not replaced"
+    fi
+  elif [ -e "$MCTL_LINK" ]; then
     echo "Warning: ~/.local/bin/mctl already exists and was not replaced"
+  else
+    ln -s "$MCTL_TARGET" "$MCTL_LINK"
+    log "Linked mctl -> ~/.local/bin/mctl"
   fi
-elif [ -e "$MCTL_LINK" ]; then
-  echo "Warning: ~/.local/bin/mctl already exists and was not replaced"
-else
-  ln -s "$MCTL_TARGET" "$MCTL_LINK"
-  log "Linked mctl -> ~/.local/bin/mctl"
-fi
 
-case ":$PATH:" in
-  *":$LOCAL_BIN:"*) ;;
-  *) log "Warning: ~/.local/bin is not on PATH; add it or run scripts/mctl.sh directly" ;;
-esac
+  case ":$PATH:" in
+    *":$LOCAL_BIN:"*) ;;
+    *) log "Warning: ~/.local/bin is not on PATH; add it or run scripts/mctl.sh directly" ;;
+  esac
 
-for dep in tmux script fzf; do
-  if ! command -v "$dep" >/dev/null 2>&1; then
-    log "Warning: $dep is required for mctl"
-  fi
-done
+  for dep in tmux script fzf; do
+    if ! command -v "$dep" >/dev/null 2>&1; then
+      log "Warning: $dep is required for mctl"
+    fi
+  done
 
-# 2. Merge settings into ~/.claude/settings.json
-SETTINGS_SRC="$SKILL_DIR/settings.json"
-SETTINGS_DST="$CLAUDE_DIR/settings.json"
+  # 2. Merge settings into ~/.claude/settings.json
+  SETTINGS_SRC="$SKILL_DIR/settings.json"
+  SETTINGS_DST="$CLAUDE_DIR/settings.json"
 
-if [ ! -f "$SETTINGS_DST" ]; then
-  cp "$SETTINGS_SRC" "$SETTINGS_DST"
-  log "Installed ~/.claude/settings.json"
-else
-  # Always merge permissions (additive, deduplicated)
-  merged="$(jq -s '
-    .[0] as $existing | .[1] as $new |
-    $existing * {
-      permissions: {
-        allow: (($existing.permissions.allow // []) + ($new.permissions.allow // []) | unique)
+  if [ ! -f "$SETTINGS_DST" ]; then
+    cp "$SETTINGS_SRC" "$SETTINGS_DST"
+    log "Installed ~/.claude/settings.json"
+  else
+    # Always merge permissions (additive, deduplicated)
+    merged="$(jq -s '
+      .[0] as $existing | .[1] as $new |
+      $existing * {
+        permissions: {
+          allow: (($existing.permissions.allow // []) + ($new.permissions.allow // []) | unique)
+        }
       }
-    }
-  ' "$SETTINGS_DST" "$SETTINGS_SRC")"
+    ' "$SETTINGS_DST" "$SETTINGS_SRC")"
 
-  # statusLine: skip if already set, ask in interactive mode
-  has_statusline=$(echo "$merged" | jq -e '.statusLine' &>/dev/null && echo yes || echo no)
-  if [ "$has_statusline" = "no" ]; then
-    merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
-    log "Added statusLine"
-  elif ask_replace "statusLine"; then
-    merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
-    log "Replaced statusLine"
-  else
-    log "Kept existing statusLine"
-  fi
+    # statusLine: skip if already set, ask in interactive mode
+    has_statusline=$(echo "$merged" | jq -e '.statusLine' &>/dev/null && echo yes || echo no)
+    if [ "$has_statusline" = "no" ]; then
+      merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
+      log "Added statusLine"
+    elif ask_replace "statusLine"; then
+      merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
+      log "Replaced statusLine"
+    else
+      log "Kept existing statusLine"
+    fi
 
-  # SessionStart hook: skip if rulez-claudeset hook already present
-  has_hook=$(echo "$merged" | jq -e '.hooks.SessionStart | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
-  if [ "$has_hook" = "no" ]; then
-    merged="$(echo "$merged" | jq '
-      .hooks.SessionStart //= [] |
-      .hooks.SessionStart += [{
-        "matcher": "",
-        "hooks": [{
-          "type": "command",
-          "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+    # SessionStart hook: skip if rulez-claudeset hook already present
+    has_hook=$(echo "$merged" | jq -e '.hooks.SessionStart | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
+    if [ "$has_hook" = "no" ]; then
+      merged="$(echo "$merged" | jq '
+        .hooks.SessionStart //= [] |
+        .hooks.SessionStart += [{
+          "matcher": "",
+          "hooks": [{
+            "type": "command",
+            "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+          }]
         }]
-      }]
-    ')"
-    log "Added SessionStart auto-update hook"
-  else
-    log "SessionStart hook already present"
-  fi
+      ')"
+      log "Added SessionStart auto-update hook"
+    else
+      log "SessionStart hook already present"
+    fi
 
-  # Stop hook: skip if rulez-claudeset hook already present.
-  has_stop_hook=$(echo "$merged" | jq -e '.hooks.Stop | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
-  if [ "$has_stop_hook" = "no" ]; then
-    merged="$(echo "$merged" | jq '
-      .hooks.Stop //= [] |
-      .hooks.Stop += [{
-        "matcher": "",
-        "hooks": [{
-          "type": "command",
-          "command": "bash ~/.claude/skills/rulez-claudeset/scripts/punts-detect.sh"
+    # Stop hook: skip if rulez-claudeset hook already present.
+    has_stop_hook=$(echo "$merged" | jq -e '.hooks.Stop | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
+    if [ "$has_stop_hook" = "no" ]; then
+      merged="$(echo "$merged" | jq '
+        .hooks.Stop //= [] |
+        .hooks.Stop += [{
+          "matcher": "",
+          "hooks": [{
+            "type": "command",
+            "command": "bash ~/.claude/skills/rulez-claudeset/scripts/punts-detect.sh"
+          }]
         }]
-      }]
-    ')"
-    log "Added Stop hook (punts detection)"
-  else
-    log "Stop hook already present"
+      ')"
+      log "Added Stop hook (punts detection)"
+    else
+      log "Stop hook already present"
+    fi
+
+    printf '%s\n' "$merged" > "$SETTINGS_DST"
+    log "Merged ~/.claude/settings.json"
   fi
 
-  printf '%s\n' "$merged" > "$SETTINGS_DST"
-  log "Merged ~/.claude/settings.json"
+  # 3. Symlink RULEZ.md and add @RULEZ.md to CLAUDE.md
+  ln -sfn "$SKILL_DIR/RULEZ.md" "$CLAUDE_DIR/RULEZ.md"
+  log "Linked RULEZ.md → ~/.claude/RULEZ.md"
+
+  CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+  if [ ! -f "$CLAUDE_MD" ]; then
+    echo "@RULEZ.md" > "$CLAUDE_MD"
+    log "Created ~/.claude/CLAUDE.md with @RULEZ.md"
+  elif ! grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
+    echo "@RULEZ.md" >> "$CLAUDE_MD"
+    log "Added @RULEZ.md to ~/.claude/CLAUDE.md"
+  else
+    log "@RULEZ.md already in ~/.claude/CLAUDE.md"
+  fi
+
+  $QUIET || bash "$SKILL_DIR/scripts/check-deps.sh" || true
+
+  log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
+}
+
+if [ "${RULEZ_SETUP_TESTING:-}" != "1" ]; then
+  main "$@"
 fi
-
-# 3. Symlink RULEZ.md and add @RULEZ.md to CLAUDE.md
-ln -sfn "$SKILL_DIR/RULEZ.md" "$CLAUDE_DIR/RULEZ.md"
-log "Linked RULEZ.md → ~/.claude/RULEZ.md"
-
-CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
-if [ ! -f "$CLAUDE_MD" ]; then
-  echo "@RULEZ.md" > "$CLAUDE_MD"
-  log "Created ~/.claude/CLAUDE.md with @RULEZ.md"
-elif ! grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
-  echo "@RULEZ.md" >> "$CLAUDE_MD"
-  log "Added @RULEZ.md to ~/.claude/CLAUDE.md"
-else
-  log "@RULEZ.md already in ~/.claude/CLAUDE.md"
-fi
-
-$QUIET || bash "$SKILL_DIR/scripts/check-deps.sh" || true
-
-log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
