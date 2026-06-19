@@ -26,6 +26,20 @@ assert_symlink_target() {
   fi
 }
 
+assert_path_absent() {
+  local path="$1" msg="${2:-should not exist: $1}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    printf '  ok: %s\n' "$msg"
+  else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    printf '  FAIL: %s\n' "$msg"
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      printf '    actual: %s\n' "$(ls -ld "$path")"
+    fi
+  fi
+}
+
 write_legacy_meta() {
   local legacy="$HOME/.spec2pr"
   mkdir -p "$legacy/project-toy-spec"
@@ -248,5 +262,5 @@ test_spec2pr_setup_testing_mode_does_not_run_installer_body() {
   RULEZ_SETUP_TESTING=1 source "$SETUP" -- || true
   set +e
 
-  assert_file_absent "$HOME/.claude/commands/rulez" "testing mode does not symlink Claude commands"
+  assert_path_absent "$HOME/.claude/commands/rulez" "testing mode does not symlink Claude commands"
 }
