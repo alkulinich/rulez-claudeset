@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
 
-SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 QUIET=false
 
-[[ "$1" == "-q" ]] && QUIET=true
+[[ "${1:-}" == "-q" ]] && QUIET=true
 
 log() { $QUIET || echo "$@"; }
+warn() { echo "$@" >&2; }
 
 ask_replace() {
   # In quiet mode (auto-update), always skip
@@ -18,101 +19,107 @@ ask_replace() {
   [[ "$answer" =~ ^[Yy]$ ]]
 }
 
-if ! command -v jq &>/dev/null; then
-  echo "Error: jq is required (brew install jq)"
-  exit 1
-fi
+main() {
+  if ! command -v jq &>/dev/null; then
+    echo "Error: jq is required (brew install jq)"
+    exit 1
+  fi
 
-# 1. Symlink commands
-mkdir -p "$CLAUDE_DIR/commands"
-ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
-log "Linked commands → ~/.claude/commands/rulez"
+  # 1. Symlink commands
+  mkdir -p "$CLAUDE_DIR/commands"
+  ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
+  log "Linked commands → ~/.claude/commands/rulez"
 
-# 2. Merge settings into ~/.claude/settings.json
-SETTINGS_SRC="$SKILL_DIR/settings.json"
-SETTINGS_DST="$CLAUDE_DIR/settings.json"
+  # 2. Merge settings into ~/.claude/settings.json
+  SETTINGS_SRC="$SKILL_DIR/settings.json"
+  SETTINGS_DST="$CLAUDE_DIR/settings.json"
 
-if [ ! -f "$SETTINGS_DST" ]; then
-  cp "$SETTINGS_SRC" "$SETTINGS_DST"
-  log "Installed ~/.claude/settings.json"
-else
-  # Always merge permissions (additive, deduplicated)
-  merged="$(jq -s '
-    .[0] as $existing | .[1] as $new |
-    $existing * {
-      permissions: {
-        allow: (($existing.permissions.allow // []) + ($new.permissions.allow // []) | unique)
+  if [ ! -f "$SETTINGS_DST" ]; then
+    cp "$SETTINGS_SRC" "$SETTINGS_DST"
+    log "Installed ~/.claude/settings.json"
+  else
+    # Always merge permissions (additive, deduplicated)
+    merged="$(jq -s '
+      .[0] as $existing | .[1] as $new |
+      $existing * {
+        permissions: {
+          allow: (($existing.permissions.allow // []) + ($new.permissions.allow // []) | unique)
+        }
       }
-    }
-  ' "$SETTINGS_DST" "$SETTINGS_SRC")"
+    ' "$SETTINGS_DST" "$SETTINGS_SRC")"
 
-  # statusLine: skip if already set, ask in interactive mode
-  has_statusline=$(echo "$merged" | jq -e '.statusLine' &>/dev/null && echo yes || echo no)
-  if [ "$has_statusline" = "no" ]; then
-    merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
-    log "Added statusLine"
-  elif ask_replace "statusLine"; then
-    merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
-    log "Replaced statusLine"
-  else
-    log "Kept existing statusLine"
-  fi
+    # statusLine: skip if already set, ask in interactive mode
+    has_statusline=$(echo "$merged" | jq -e '.statusLine' &>/dev/null && echo yes || echo no)
+    if [ "$has_statusline" = "no" ]; then
+      merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
+      log "Added statusLine"
+    elif ask_replace "statusLine"; then
+      merged="$(echo "$merged" | jq --argjson sl "$(jq '.statusLine' "$SETTINGS_SRC")" '.statusLine = $sl')"
+      log "Replaced statusLine"
+    else
+      log "Kept existing statusLine"
+    fi
 
-  # SessionStart hook: skip if rulez-claudeset hook already present
-  has_hook=$(echo "$merged" | jq -e '.hooks.SessionStart | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
-  if [ "$has_hook" = "no" ]; then
-    merged="$(echo "$merged" | jq '
-      .hooks.SessionStart //= [] |
-      .hooks.SessionStart += [{
-        "matcher": "",
-        "hooks": [{
-          "type": "command",
-          "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+    # SessionStart hook: skip if rulez-claudeset hook already present
+    has_hook=$(echo "$merged" | jq -e '.hooks.SessionStart | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
+    if [ "$has_hook" = "no" ]; then
+      merged="$(echo "$merged" | jq '
+        .hooks.SessionStart //= [] |
+        .hooks.SessionStart += [{
+          "matcher": "",
+          "hooks": [{
+            "type": "command",
+            "command": "bash ~/.claude/skills/rulez-claudeset/bin/auto-update.sh &"
+          }]
         }]
-      }]
-    ')"
-    log "Added SessionStart auto-update hook"
-  else
-    log "SessionStart hook already present"
-  fi
+      ')"
+      log "Added SessionStart auto-update hook"
+    else
+      log "SessionStart hook already present"
+    fi
 
-  # Stop hook: skip if rulez-claudeset hook already present.
-  has_stop_hook=$(echo "$merged" | jq -e '.hooks.Stop | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
-  if [ "$has_stop_hook" = "no" ]; then
-    merged="$(echo "$merged" | jq '
-      .hooks.Stop //= [] |
-      .hooks.Stop += [{
-        "matcher": "",
-        "hooks": [{
-          "type": "command",
-          "command": "bash ~/.claude/skills/rulez-claudeset/scripts/punts-detect.sh"
+    # Stop hook: skip if rulez-claudeset hook already present.
+    has_stop_hook=$(echo "$merged" | jq -e '.hooks.Stop | map(select(.hooks[]?.command | test("rulez-claudeset"))) | length > 0' 2>/dev/null && echo yes || echo no)
+    if [ "$has_stop_hook" = "no" ]; then
+      merged="$(echo "$merged" | jq '
+        .hooks.Stop //= [] |
+        .hooks.Stop += [{
+          "matcher": "",
+          "hooks": [{
+            "type": "command",
+            "command": "bash ~/.claude/skills/rulez-claudeset/scripts/punts-detect.sh"
+          }]
         }]
-      }]
-    ')"
-    log "Added Stop hook (punts detection)"
-  else
-    log "Stop hook already present"
+      ')"
+      log "Added Stop hook (punts detection)"
+    else
+      log "Stop hook already present"
+    fi
+
+    printf '%s\n' "$merged" > "$SETTINGS_DST"
+    log "Merged ~/.claude/settings.json"
   fi
 
-  printf '%s\n' "$merged" > "$SETTINGS_DST"
-  log "Merged ~/.claude/settings.json"
+  # 3. Symlink RULEZ.md and add @RULEZ.md to CLAUDE.md
+  ln -sfn "$SKILL_DIR/RULEZ.md" "$CLAUDE_DIR/RULEZ.md"
+  log "Linked RULEZ.md → ~/.claude/RULEZ.md"
+
+  CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+  if [ ! -f "$CLAUDE_MD" ]; then
+    echo "@RULEZ.md" > "$CLAUDE_MD"
+    log "Created ~/.claude/CLAUDE.md with @RULEZ.md"
+  elif ! grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
+    echo "@RULEZ.md" >> "$CLAUDE_MD"
+    log "Added @RULEZ.md to ~/.claude/CLAUDE.md"
+  else
+    log "@RULEZ.md already in ~/.claude/CLAUDE.md"
+  fi
+
+  $QUIET || bash "$SKILL_DIR/scripts/check-deps.sh" || true
+
+  log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
+}
+
+if [ "${RULEZ_SETUP_TESTING:-}" != "1" ]; then
+  main "$@"
 fi
-
-# 3. Symlink RULEZ.md and add @RULEZ.md to CLAUDE.md
-ln -sfn "$SKILL_DIR/RULEZ.md" "$CLAUDE_DIR/RULEZ.md"
-log "Linked RULEZ.md → ~/.claude/RULEZ.md"
-
-CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
-if [ ! -f "$CLAUDE_MD" ]; then
-  echo "@RULEZ.md" > "$CLAUDE_MD"
-  log "Created ~/.claude/CLAUDE.md with @RULEZ.md"
-elif ! grep -qF '@RULEZ.md' "$CLAUDE_MD"; then
-  echo "@RULEZ.md" >> "$CLAUDE_MD"
-  log "Added @RULEZ.md to ~/.claude/CLAUDE.md"
-else
-  log "@RULEZ.md already in ~/.claude/CLAUDE.md"
-fi
-
-$QUIET || bash "$SKILL_DIR/scripts/check-deps.sh" || true
-
-log "Done! Commands available as /rulez:start-issue, /rulez:create-pr, etc."
