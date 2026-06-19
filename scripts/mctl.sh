@@ -242,6 +242,59 @@ cmd_ls() {
   done | sort
 }
 
+build_empty_command() {
+  printf '%s' "printf '%s\n' 'no runs - mctl add spec2pr <spec>'"
+}
+
+first_run_dir() {
+  [ -d "$MCTL_HOME" ] || return 1
+  find "$MCTL_HOME" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1
+}
+
+run_dir_for_name() {
+  local name="$1"
+  [ -n "$name" ] || return 1
+  [ -d "$MCTL_HOME/$name" ] || return 1
+  printf '%s\n' "$MCTL_HOME/$name"
+}
+
+build_brief_command() {
+  local run_dir="$1"
+  printf 'tail -F %s' "$(shell_quote "$run_dir/brief.log")"
+}
+
+build_details_command() {
+  local run_dir="$1" meta spec_home wt_home token
+  meta="$run_dir/meta"
+  spec_home="$(meta_get "$meta" spec2pr_home)"
+  wt_home="$(meta_get "$meta" spec2pr_worktrees)"
+  token="$(meta_get "$meta" token)"
+  printf 'SPEC2PR_HOME=%s SPEC2PR_WORKTREES=%s bash %s %s' \
+    "$(shell_quote "$spec_home")" \
+    "$(shell_quote "$wt_home")" \
+    "$(shell_quote "$WATCH_SCRIPT")" \
+    "$(shell_quote "$token")"
+}
+
+build_list_command() {
+  printf 'while :; do clear; bash %s ls; sleep 2; done' "$(shell_quote "$SCRIPT_DIR/mctl.sh")"
+}
+
+build_fzf_command() {
+  local list_cmd reload focus refresh_driver start_bind
+  list_cmd="bash $(shell_quote "$SCRIPT_DIR/mctl.sh") ls"
+  reload="ctrl-r:reload($list_cmd)"
+  focus="focus:execute-silent(bash $(shell_quote "$SCRIPT_DIR/mctl.sh") __retarget {1})"
+  refresh_driver="while tmux has-session -t $(shell_quote "$DASH_SESSION") 2>/dev/null; do sleep 2; tmux send-keys -t $(shell_quote "$DASH_SESSION:0.0") C-r; done >/dev/null 2>&1 &"
+  start_bind="start:execute-silent($refresh_driver)+reload($list_cmd)"
+  printf '%s | fzf --ansi --no-sort --disabled --track --id-nth 1 --bind %s --bind %s --bind %s --header %s' \
+    "$list_cmd" \
+    "$(shell_quote "$start_bind")" \
+    "$(shell_quote "$reload")" \
+    "$(shell_quote "$focus")" \
+    "$(shell_quote "mctl runs")"
+}
+
 main() {
   case "${1:-}" in
     add)
