@@ -17,7 +17,8 @@ On normal same-filesystem installs, existing `~/.spec2pr/` is moved there
 and the old path becomes a deletable symlink after no local scripts still
 reference it. With a cross-filesystem custom `RULEZ_CLAUDESET_HOME`, or
 while a legacy run is locked, the new default may be a symlink back to the
-old path until you manually migrate the state.
+old path until setup is rerun after the lock clears, or until you manually
+migrate the state.
 
 ## To v1.6.1 — from v1.6.0
 

@@ -13,7 +13,7 @@ spec-review → plan → plan-review → implement → PR-review → "PR ready".
 If the argument is `status`:
 
 1. Run:
-   `for f in ~/.rulez-claudeset/spec2pr/*.status; do [ -f "$f" ] && printf '%s -> %s\n' "$(basename "$f" .status)" "$(tail -1 "$f")"; done`
+   `RULEZ_CLAUDESET_HOME="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"; SPEC2PR_HOME="${SPEC2PR_HOME:-$RULEZ_CLAUDESET_HOME/spec2pr}"; for f in "$SPEC2PR_HOME"/*.status; do [ -f "$f" ] && printf '%s -> %s\n' "$(basename "$f" .status)" "$(tail -1 "$f")"; done`
 2. Present the result as-is. Stop.
 
 Otherwise the argument is a spec path:
@@ -36,4 +36,4 @@ output and react:
 - `DIRTY <stage> ... log=<path>` — review cap hit; show the findings from the
   log file.
 - `HALT <stage>: <reason>` — show the reason and point at the log dir
-  `~/.rulez-claudeset/spec2pr/<id>/`.
+  `$SPEC2PR_HOME/<id>/` (default `~/.rulez-claudeset/spec2pr/<id>/`).
