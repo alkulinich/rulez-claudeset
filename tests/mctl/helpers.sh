@@ -128,3 +128,7 @@ meta_value() {
   local file="$1" key="$2"
   awk -F= -v k="$key" '$1 == k {print substr($0, length(k) + 2)}' "$file"
 }
+
+shell_escape_for_test() {
+  printf '%s' "$1"
+}

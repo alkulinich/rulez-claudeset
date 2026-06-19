@@ -103,10 +103,63 @@ ensure_new_run_slot() {
   fi
 }
 
+runner_for_kind() {
+  case "$1" in
+    spec2pr) printf '%s\n' "$SPEC2PR_SCRIPT" ;;
+    review-pr) printf '%s\n' "$REVIEW_PR_SCRIPT" ;;
+    *) return 1 ;;
+  esac
+}
+
+build_inner_runner_command() {
+  local run_dir="$1" meta="$run_dir/meta"
+  local kind repo target spec_home wt_home runner exit_path
+  kind="$(meta_get "$meta" kind)"
+  repo="$(meta_get "$meta" repo)"
+  target="$(meta_get "$meta" target)"
+  spec_home="$(meta_get "$meta" spec2pr_home)"
+  wt_home="$(meta_get "$meta" spec2pr_worktrees)"
+  runner="$(runner_for_kind "$kind")"
+  exit_path="$run_dir/exit"
+
+  printf 'cd %s && SPEC2PR_HOME=%s SPEC2PR_WORKTREES=%s SPEC2PR_VERBOSE=1 bash %s %s; rc=$?; printf %s "$rc" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" > %s; exit "$rc"' \
+    "$(shell_quote "$repo")" \
+    "$(shell_quote "$spec_home")" \
+    "$(shell_quote "$wt_home")" \
+    "$(shell_quote "$runner")" \
+    "$(shell_quote "$target")" \
+    "$(shell_quote $'rc=%s\nfinished=%s\n')" \
+    "$(shell_quote "$exit_path")"
+}
+
+build_script_command() {
+  local inner="$1" brief="$2" os_name
+  os_name="$(uname -s)"
+  case "$os_name" in
+    Linux)
+      if script --help 2>&1 | grep -q -- '--return'; then
+        printf 'script --flush --return -c %s %s' "$(shell_quote "$inner")" "$(shell_quote "$brief")"
+      else
+        printf 'script --flush -c %s %s' "$(shell_quote "$inner")" "$(shell_quote "$brief")"
+      fi
+      ;;
+    Darwin|FreeBSD|OpenBSD|NetBSD)
+      printf 'script -F -q %s /bin/sh -c %s' "$(shell_quote "$brief")" "$(shell_quote "$inner")"
+      ;;
+    *)
+      printf 'script --flush -c %s %s' "$(shell_quote "$inner")" "$(shell_quote "$brief")"
+      ;;
+  esac
+}
+
 launch_run() {
-  local run_dir="$1" meta="$run_dir/meta" session
+  local run_dir="$1" meta="$run_dir/meta" session brief inner script_cmd tmux_cmd
   session="$(meta_get "$meta" session)"
-  tmux new-session -d -s "$session" "printf '%s\n' mctl launch pending; read -r _"
+  brief="$run_dir/brief.log"
+  inner="$(build_inner_runner_command "$run_dir")"
+  script_cmd="$(build_script_command "$inner" "$brief")"
+  tmux_cmd="$script_cmd; printf '\n[mctl] run finished; press Enter to close this pane... '; read -r _"
+  tmux new-session -d -s "$session" "$tmux_cmd"
 }
 
 cmd_add() {

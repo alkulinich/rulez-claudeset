@@ -84,3 +84,65 @@ test_add_refuses_existing_registry_dir_without_removing_it() {
   assert_contains "$OUT" "completed run exists" "completed registry refusal"
   assert_file_exists "$run_dir/exit" "existing exit marker remains"
 }
+
+test_add_launches_tmux_session_with_script_wrapper_and_verbose_env() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC"
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_contains "$log" "tmux [new-session] [-d] [-s] [mctl-repo-foo-bar]" "tmux new-session created"
+  assert_contains "$log" "SPEC2PR_VERBOSE=1" "runner exports verbose mode"
+  assert_contains "$log" "$REPO_ROOT/scripts/spec2pr.sh" "runner uses absolute spec2pr path"
+  assert_contains "$log" "$SPEC" "runner uses canonical spec path"
+  assert_contains "$log" "$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar/brief.log" "script writes brief log"
+  assert_contains "$log" "$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar/exit" "runner writes exit marker"
+}
+
+test_add_review_pr_launches_review_runner_from_repo_root() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr 7
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_contains "$log" "$REPO_ROOT/scripts/review-pr.sh" "runner uses absolute review-pr path"
+  assert_contains "$log" "'7'" "runner passes quoted PR number"
+  assert_contains "$log" "$(shell_escape_for_test "$REPO")" "runner cd command mentions repo root"
+}
+
+test_add_quotes_paths_with_spaces_in_runner_command() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC"
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_contains "$log" "'$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar/brief.log'" "brief path with spaces is quoted"
+  assert_contains "$log" "'$SPEC2PR_HOME'" "SPEC2PR_HOME with spaces is quoted"
+  assert_contains "$log" "'$SPEC2PR_WORKTREES'" "SPEC2PR_WORKTREES with spaces is quoted"
+}
+
+test_inner_runner_records_child_rc_in_exit_marker() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC"
+  source_mctl
+
+  local fake_runner run_dir inner inner_rc
+  fake_runner="$SANDBOX/fake-spec2pr.sh"
+  cat > "$fake_runner" <<'FAKE'
+#!/usr/bin/env bash
+exit 37
+FAKE
+  chmod +x "$fake_runner"
+
+  SPEC2PR_SCRIPT="$fake_runner"
+  run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  inner="$(build_inner_runner_command "$run_dir")"
+
+  set +e
+  bash -c "$inner" >/dev/null 2>&1
+  inner_rc=$?
+
+  assert_eq "37" "$inner_rc" "inner runner returns child rc"
+  assert_file_exists "$run_dir/exit" "exit marker written by inner command"
+  assert_eq "37" "$(meta_value "$run_dir/exit" rc)" "exit marker records child rc"
+}
