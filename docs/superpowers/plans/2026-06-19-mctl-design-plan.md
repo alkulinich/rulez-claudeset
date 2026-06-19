@@ -715,6 +715,32 @@ test_add_quotes_paths_with_spaces_in_runner_command() {
   assert_contains "$log" "'$SPEC2PR_HOME'" "SPEC2PR_HOME with spaces is quoted"
   assert_contains "$log" "'$SPEC2PR_WORKTREES'" "SPEC2PR_WORKTREES with spaces is quoted"
 }
+
+test_inner_runner_records_child_rc_in_exit_marker() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC"
+  source_mctl
+
+  local fake_runner run_dir inner inner_rc
+  fake_runner="$SANDBOX/fake-spec2pr.sh"
+  cat > "$fake_runner" <<'FAKE'
+#!/usr/bin/env bash
+exit 37
+FAKE
+  chmod +x "$fake_runner"
+
+  SPEC2PR_SCRIPT="$fake_runner"
+  run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  inner="$(build_inner_runner_command "$run_dir")"
+
+  set +e
+  bash -c "$inner" >/dev/null 2>&1
+  inner_rc=$?
+
+  assert_eq "37" "$inner_rc" "inner runner returns child rc"
+  assert_file_exists "$run_dir/exit" "exit marker written by inner command"
+  assert_eq "37" "$(meta_value "$run_dir/exit" rc)" "exit marker records child rc"
+}
 ```
 
 Add this helper to `tests/mctl/helpers.sh`:
