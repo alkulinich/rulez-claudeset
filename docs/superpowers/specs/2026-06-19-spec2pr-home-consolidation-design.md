@@ -91,7 +91,12 @@ target="$rulez_home/spec2pr"
 if  $legacy exists  AND is a real directory (not a symlink):
     mkdir -p "$rulez_home"
 
-    if $legacy and $rulez_home are not on the same filesystem:
+    if $target is a symlink pointing at $legacy:
+        # Cross-filesystem migration already installed the new default as a
+        # compatibility symlink back to the legacy tree.
+        do nothing
+
+    else if $legacy and $rulez_home are not on the same filesystem:
         if $target does not exist:
             ln -s "$legacy" "$target"
             echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
@@ -119,10 +124,12 @@ if  $legacy exists  AND is a real directory (not a symlink):
         echo "warning: both ~/.spec2pr and $target exist; leaving them unchanged"
 ```
 
-Idempotent: a re-run sees `~/.spec2pr` is already a symlink and does nothing.
-If the destination already has data, setup refuses to merge two state trees
-silently; it leaves both paths untouched and prints the warning above so the
-user can reconcile by hand. Safe mid-run on two grounds:
+Idempotent: a same-filesystem re-run sees `~/.spec2pr` is already a symlink and
+does nothing; a cross-filesystem re-run sees `$target` is already a symlink to
+the legacy real directory and does nothing. If the destination already has data,
+setup refuses to merge two state trees silently; it leaves both paths untouched
+and prints the warning above so the user can reconcile by hand. Safe mid-run on
+two grounds:
 
 1. The migration first verifies that `~/.spec2pr` and `RULEZ_CLAUDESET_HOME`
    are on the same filesystem, so `mv` is an atomic `rename(2)`; open file
@@ -176,9 +183,10 @@ Light, matching the repo's stub/sandbox style:
   Cross-filesystem behavior can be covered by stubbing the helper that compares
   device IDs, asserting it does not call `mv`, leaves `~/.spec2pr` as the real
   directory, and creates `~/.rulez-claudeset/spec2pr` as a symlink to it when
-  the destination is absent or empty. To keep this testable, the migration block
-  should be a small function (or a sourceable snippet) rather than inline-only
-  in `bin/setup`'s main flow.
+  the destination is absent or empty. Assert a second cross-filesystem run is a
+  no-op when that target symlink already points at the legacy tree. To keep this
+  testable, the migration block should be a small function (or a sourceable
+  snippet) rather than inline-only in `bin/setup`'s main flow.
 - **Default resolution** — add direct assertions in the same test file (or a
   second small `test-*.sh`) that, with `SPEC2PR_HOME` unset in a sandboxed
   `HOME`, both `scripts/lib/spec2pr-runtime.sh` and `scripts/spec2pr-watch.sh`
@@ -193,6 +201,8 @@ Light, matching the repo's stub/sandbox style:
 - **edit** `scripts/spec2pr-watch.sh` — same default change (kept in lockstep).
 - **edit** `bin/setup` — guarded auto-migration + compat symlink.
 - **edit** `README.md` — update path references to `~/.rulez-claudeset/spec2pr`.
+- **edit** `commands/rulez/spec2pr.md` — update user-facing status/log path
+  references to the new default.
 - **edit** `VERSION` — bump.
 - **edit** `UPGRADE.md` — one tight section (Action: None; Caveat: state dir moved,
   old path is now a deletable symlink).
