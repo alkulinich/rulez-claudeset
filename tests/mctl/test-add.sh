@@ -85,6 +85,53 @@ test_add_refuses_existing_registry_dir_without_removing_it() {
   assert_file_exists "$run_dir/exit" "existing exit marker remains"
 }
 
+test_add_refuses_existing_tmux_session() {
+  make_sandbox
+  printf 'mctl-repo-foo-bar\n' > "$SANDBOX/tmux-sessions"
+
+  run_mctl add spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "existing tmux session exits 1"
+  assert_contains "$OUT" "session already exists: mctl-repo-foo-bar" "existing tmux session refusal"
+  assert_file_absent "$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar" "registry dir is not created after session refusal"
+}
+
+test_add_refuses_existing_live_or_lost_registry_dir_without_removing_it() {
+  make_sandbox
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  mkdir -p "$run_dir"
+  : > "$run_dir/brief.log"
+
+  run_mctl add spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "existing live or lost registry exits 1"
+  assert_contains "$OUT" "live or lost run exists" "live or lost registry refusal"
+  assert_file_exists "$run_dir/brief.log" "existing live or lost registry remains"
+}
+
+test_runner_helpers_work_under_nounset_when_sourced() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC"
+  source_mctl
+
+  local helper_run_dir inner helper_rc
+  helper_run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  unset run_dir meta
+
+  set +e
+  (
+    set -u
+    build_inner_runner_command "$helper_run_dir" >/dev/null
+    launch_run "$helper_run_dir" >/dev/null
+  )
+  helper_rc=$?
+  set -e
+
+  assert_eq "0" "$helper_rc" "runner helpers tolerate nounset when sourced"
+  inner="$(build_inner_runner_command "$helper_run_dir")"
+  assert_contains "$inner" "$helper_run_dir/exit" "inner runner still uses requested run dir"
+}
+
 test_add_launches_tmux_session_with_script_wrapper_and_verbose_env() {
   make_sandbox
   run_mctl add spec2pr "$SPEC"

@@ -112,7 +112,9 @@ runner_for_kind() {
 }
 
 build_inner_runner_command() {
-  local run_dir="$1" meta="$run_dir/meta"
+  local run_dir meta
+  run_dir="$1"
+  meta="$run_dir/meta"
   local kind repo target spec_home wt_home runner exit_path
   kind="$(meta_get "$meta" kind)"
   repo="$(meta_get "$meta" repo)"
@@ -153,7 +155,9 @@ build_script_command() {
 }
 
 launch_run() {
-  local run_dir="$1" meta="$run_dir/meta" session brief inner script_cmd tmux_cmd
+  local run_dir meta session brief inner script_cmd tmux_cmd
+  run_dir="$1"
+  meta="$run_dir/meta"
   session="$(meta_get "$meta" session)"
   brief="$run_dir/brief.log"
   inner="$(build_inner_runner_command "$run_dir")"
@@ -277,14 +281,17 @@ build_details_command() {
 }
 
 build_list_command() {
-  printf 'while :; do clear; bash %s ls; sleep 2; done' "$(shell_quote "$SCRIPT_DIR/mctl.sh")"
+  printf 'while :; do clear; RULEZ_CLAUDESET_HOME=%s bash %s ls; sleep 2; done' \
+    "$(shell_quote "$RULEZ_CLAUDESET_HOME")" \
+    "$(shell_quote "$SCRIPT_DIR/mctl.sh")"
 }
 
 build_fzf_command() {
-  local list_cmd reload focus refresh_driver start_bind
-  list_cmd="bash $(shell_quote "$SCRIPT_DIR/mctl.sh") ls"
+  local mctl_cmd list_cmd reload focus refresh_driver start_bind
+  mctl_cmd="RULEZ_CLAUDESET_HOME=$(shell_quote "$RULEZ_CLAUDESET_HOME") bash $(shell_quote "$SCRIPT_DIR/mctl.sh")"
+  list_cmd="$mctl_cmd ls"
   reload="ctrl-r:reload($list_cmd)"
-  focus="focus:execute-silent(bash $(shell_quote "$SCRIPT_DIR/mctl.sh") __retarget {1})"
+  focus="focus:execute-silent($mctl_cmd __retarget {1})"
   refresh_driver="while tmux has-session -t $(shell_quote "$DASH_SESSION") 2>/dev/null; do sleep 2; tmux send-keys -t $(shell_quote "$DASH_SESSION:0.0") C-r; done >/dev/null 2>&1 &"
   start_bind="start:execute-silent($refresh_driver)+reload($list_cmd)"
   printf '%s | fzf --ansi --no-sort --disabled --track --id-nth 1 --bind %s --bind %s --bind %s --header %s' \

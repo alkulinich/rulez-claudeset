@@ -52,6 +52,21 @@ test_dashboard_fzf_command_reloads_every_two_seconds() {
   assert_contains "$cmd" "--id-nth 1" "fzf tracks by stable run name, not the changing state row"
 }
 
+test_dashboard_fzf_subprocesses_preserve_registry_home() {
+  make_sandbox
+  source_mctl
+
+  local cmd export_prefix
+  cmd="$(build_fzf_command)"
+  export_prefix="RULEZ_CLAUDESET_HOME='$(printf "%s" "$RULEZ_CLAUDESET_HOME")'"
+
+  assert_contains "$cmd" "$export_prefix bash '$REPO_ROOT/scripts/mctl.sh' ls" "fzf input command preserves registry home"
+  assert_contains "$cmd" "reload(RULEZ_CLAUDESET_HOME=" "fzf reload includes registry home assignment"
+  assert_contains "$cmd" "execute-silent(RULEZ_CLAUDESET_HOME=" "fzf focus retarget includes registry home assignment"
+  assert_contains "$cmd" "$RULEZ_CLAUDESET_HOME" "fzf subprocess commands include active registry home path"
+  assert_contains "$cmd" "__retarget {1}" "fzf focus still retargets the selected run"
+}
+
 test_dashboard_attaches_existing_session() {
   make_sandbox
   printf 'mctl-dash\n' > "$SANDBOX/tmux-sessions"
