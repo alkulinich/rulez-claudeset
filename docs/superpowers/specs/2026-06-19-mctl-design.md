@@ -75,12 +75,14 @@ mctl is glue. It owns a thin per-run registry and a tmux layout; the heavy
 lifting is reused:
 
 - **Details pane** = `spec2pr-watch.sh <token>`, verbatim. No new watch code.
-- **Brief pane** = `tail -f $RULEZ_CLAUDESET_HOME/mctl/<name>/brief.log`, fed by
+- **Brief pane** = `tail -F $RULEZ_CLAUDESET_HOME/mctl/<name>/brief.log`, fed by
   `script --flush` wrapping the pipeline. mctl runs the pipeline with
   `SPEC2PR_VERBOSE=1` so the captured console includes begin/progress markers,
   not only final contract lines. `script` runs the pipeline under a PTY, so
   output stays line-buffered and colorized instead of block-buffered — which is
-  also the root-cause fix for the "looks stuck" feeling.
+  also the root-cause fix for the "looks stuck" feeling. `add` creates
+  `brief.log` before starting tmux, and the dashboard uses `tail -F` so a pane
+  survives log rotation or a race with the first writer.
 
 Decoupling: mctl never reaches into spec2pr's `~/.spec2pr/<id>/` internals. It
 stores the watch **token** at add time and lets `spec2pr-watch.sh` resolve the
@@ -112,8 +114,10 @@ mctl's own wrapper marker, not raw tmux liveness:
    and `spec-slug` from the spec filename stem, and use
    `<repo-slug>-<spec-slug>` for both `<name>` and `<token>`. Store the
    canonical absolute spec path for the runner, so launching from a subdirectory
-   and specs with spaces keep working. For `review-pr`, derive `repo-slug` from
-   `pwd`'s repo root and use `<repo-slug>-pr-<n>`.
+   and specs with spaces keep working. The target repo for a `spec2pr` run is
+   the spec file's git root, regardless of the shell's current directory. For
+   `review-pr`, derive `repo-slug` from `pwd`'s repo root and use
+   `<repo-slug>-pr-<n>`.
 2. Validate: spec file exists, or pr# is numeric. Refuse if session
    `mctl-<name>` already exists or if the registry dir
    `$RULEZ_CLAUDESET_HOME/mctl/<name>/` already exists. If `exit` is absent,
@@ -122,9 +126,9 @@ mctl's own wrapper marker, not raw tmux liveness:
    killed/removed before reusing the same name. mctl does not silently delete an
    old registry dir, because a stale `exit` marker would make a new run appear
    `done`.
-3. Capture the current repo dir (`pwd -P`) after validating it is inside the
-   relevant git repository.
-4. Write `meta`.
+3. Capture the target repo dir as an absolute physical path: the spec file's
+   git root for `spec2pr`, or `pwd`'s git root for `review-pr`.
+4. Create `brief.log` and write `meta`.
 5. `tmux new-session -d -s mctl-<name>` running a small wrapper that:
    - runs `script --flush --return … "cd <repo> && SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>"`;
    - shell-quotes every generated command argument (`repo`, `runner-abs`, the
@@ -141,11 +145,12 @@ mctl's own wrapper marker, not raw tmux liveness:
 
 **dashboard (`mctl`, no args):**
 
-1. Build tmux session `mctl-dash` with three panes: left (task list), and a
-   right column split into brief (top) and details (bottom).
+1. If tmux session `mctl-dash` already exists, attach to it. Otherwise build it
+   with three panes: left (task list), and a right column split into brief (top)
+   and details (bottom).
 2. Left pane runs `fzf` over `mctl ls`. On cursor move, a binding re-targets the
    two right panes via `tmux respawn-pane -k`:
-   - brief → `tail -f <brief.log>`
+   - brief → `tail -F <brief.log>`
    - details → `bash <script-dir>/spec2pr-watch.sh <token>`
 3. Empty state: show `no runs — mctl add spec2pr <spec>`.
 
@@ -161,7 +166,8 @@ Personal-tool grade — best-effort, loud-but-simple:
 
 - `add`: one-line refusal on missing spec, non-numeric pr#, existing tmux
   session, or existing registry dir. No retries and no implicit cleanup.
-- dashboard: empty-state message when no runs exist.
+- dashboard: empty-state message when no runs exist; existing `mctl-dash`
+  attaches instead of failing with a duplicate-session error.
 - approve/attach/kill are out of scope, so no error surface there.
 
 ## Cross-platform note
@@ -178,6 +184,12 @@ Light, matching the repo's existing stub pattern (`tests/spec2pr/stub-*`):
 - `add` creates `$RULEZ_CLAUDESET_HOME/mctl/<name>/meta` and invokes
   `tmux new-session` (tmux stubbed); refuses a duplicate live session or
   existing registry dir, including a completed dir with `exit`.
+- `add spec2pr` launched from outside the spec repo still records the spec
+  repo root in `meta` and runs the pipeline from that repo.
+- `add` creates `brief.log` before launching the wrapper, and dashboard brief
+  panes use `tail -F`.
+- `mctl` attaches to an existing `mctl-dash` session instead of trying to create
+  a duplicate.
 - Installed-path smoke test: invoking the symlinked `mctl` from outside the
   rulez-claudeset repo still records absolute runner/watch paths from the real
   `scripts/` directory.
