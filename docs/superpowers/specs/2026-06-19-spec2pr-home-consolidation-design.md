@@ -43,7 +43,8 @@ $RULEZ_CLAUDESET_HOME/                 (default ~/.rulez-claudeset)
     <id>/ …                            meta, per-step stdout/stderr
     <id>.status  <id>.lock
   mctl/                                ← mctl design (already specced)
-  worktrees/                           ← NOT moved; stays at ~/.worktrees
+
+~/.worktrees/                          ← NOT moved; remains outside RULEZ_CLAUDESET_HOME
 ```
 
 `RULEZ_CLAUDESET_HOME` (data home, default `~/.rulez-claudeset`) is distinct from
