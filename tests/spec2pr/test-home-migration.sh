@@ -248,8 +248,8 @@ test_spec2pr_setup_mv_failure_returns_success_with_warning() {
   output="$(
     set -e
     mv() { return 1; }
-    migrate_spec2pr_home
-  2>&1)"
+    migrate_spec2pr_home 2>&1
+  )"
   rc=$?
 
   assert_eq "0" "$rc" "migration helper returns success when mv fails"
