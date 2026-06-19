@@ -91,7 +91,17 @@ if  $legacy exists  AND is a real directory (not a symlink):
     mkdir -p "$rulez_home"
 
     if $legacy and $rulez_home are not on the same filesystem:
-        echo "warning: cannot atomically migrate ~/.spec2pr to $target; leaving it unchanged"
+        if $target does not exist:
+            ln -s "$legacy" "$target"
+            echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+
+        else if $target exists AND is an empty directory:
+            rmdir "$target"
+            ln -s "$legacy" "$target"
+            echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+
+        else:
+            echo "warning: cannot atomically migrate ~/.spec2pr to $target and target is not empty; leaving both unchanged"
 
     else if $target does not exist:
         mv "$legacy" "$target"
@@ -116,8 +126,9 @@ user can reconcile by hand. Safe mid-run on two grounds:
 1. The migration first verifies that `~/.spec2pr` and `RULEZ_CLAUDESET_HOME`
    are on the same filesystem, so `mv` is an atomic `rename(2)`; open file
    descriptors and the live `flock` follow the inode. If a custom
-   `RULEZ_CLAUDESET_HOME` crosses filesystems, setup warns and leaves the
-   legacy tree in place instead of doing a recursive copy.
+   `RULEZ_CLAUDESET_HOME` crosses filesystems, setup does not recursively copy;
+   it links the new default path back to the legacy tree when the destination
+   is absent or empty, preserving runtime access without a non-atomic move.
 2. A running pipeline resolved `META_DIR="$SPEC2PR_HOME/$ID"` once into a shell
    variable at startup; the compat symlink keeps even that old absolute path
    resolving.
@@ -137,15 +148,17 @@ a hardcoded `~/.spec2pr`; all go through the `SPEC2PR_HOME` variable.
 Personal-tool grade. The migration is best-effort and guarded:
 
 - Guard conditions prevent clobbering an existing new dir or re-moving a symlink.
-- If `mv` fails (e.g. a cross-device edge case), `bin/setup` continues — setup
-  must not abort over the migration. The next consumer falls back to the new
-  default, which is empty; the user still has their data at `~/.spec2pr` and can
-  move it by hand. (We do not attempt cross-device copy logic — out of scope.)
+- If `mv` fails despite the same-device guard, `bin/setup` continues — setup
+  must not abort over the migration. The user still has their data at
+  `~/.spec2pr` and can move or link it by hand. (We do not attempt
+  cross-device copy logic — out of scope.)
 - If both the legacy dir and a non-empty destination exist, setup warns and
   leaves both trees unchanged rather than guessing at a merge.
 - If the legacy dir and destination parent are on different filesystems, setup
-  warns and leaves the legacy tree untouched rather than performing a
-  non-atomic recursive move.
+  leaves the legacy tree untouched and, when safe, creates `$target` as a
+  symlink to `~/.spec2pr` so the new default still sees the existing state. If a
+  non-empty `$target` already exists, setup warns and leaves both trees
+  unchanged rather than guessing at a merge.
 
 ## Testing
 
@@ -160,9 +173,11 @@ Light, matching the repo's stub/sandbox style:
   `~/.rulez-claudeset/spec2pr` is replaced by the legacy tree, and (e) a
   non-empty destination produces a warning and leaves both trees untouched.
   Cross-filesystem behavior can be covered by stubbing the helper that compares
-  device IDs, asserting it warns and does not call `mv`. To keep this testable,
-  the migration block should be a small function (or a sourceable snippet)
-  rather than inline-only in `bin/setup`'s main flow.
+  device IDs, asserting it does not call `mv`, leaves `~/.spec2pr` as the real
+  directory, and creates `~/.rulez-claudeset/spec2pr` as a symlink to it when
+  the destination is absent or empty. To keep this testable, the migration block
+  should be a small function (or a sourceable snippet) rather than inline-only
+  in `bin/setup`'s main flow.
 - **Default resolution** — add direct assertions in the same test file (or a
   second small `test-*.sh`) that, with `SPEC2PR_HOME` unset in a sandboxed
   `HOME`, both `scripts/lib/spec2pr-runtime.sh` and `scripts/spec2pr-watch.sh`
