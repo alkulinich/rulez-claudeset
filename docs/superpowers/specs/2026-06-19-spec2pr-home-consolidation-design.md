@@ -99,8 +99,29 @@ if  $legacy exists  AND is a real directory (not a symlink):
 
     if $target is a symlink pointing at $legacy:
         # Cross-filesystem migration already installed the new default as a
-        # compatibility symlink back to the legacy tree.
+        # compatibility symlink back to the legacy tree, or setup previously
+        # ran while a legacy run was active.
         do nothing
+
+    else if $legacy contains any *.lock directory:
+        # Avoid moving the tree out from under a running or initializing
+        # spec2pr/review-pr process. The old process has already captured
+        # absolute paths under ~/.spec2pr; new processes need the new default
+        # to see the same state.
+        if $target does not exist:
+            if ln -s "$legacy" "$target" succeeds:
+                echo "linked $target to existing ~/.spec2pr (active run; not moved)"
+            else:
+                echo "warning: cannot link $target to active ~/.spec2pr; leaving ~/.spec2pr unchanged"
+
+        else if $target exists AND is an empty directory:
+            if rmdir "$target" succeeds AND ln -s "$legacy" "$target" succeeds:
+                echo "linked $target to existing ~/.spec2pr (active run; not moved)"
+            else:
+                echo "warning: cannot replace empty $target with symlink; leaving active ~/.spec2pr unchanged"
+
+        else:
+            echo "warning: active ~/.spec2pr run and target is not empty; leaving both unchanged"
 
     else if $legacy and $rulez_home are not on the same filesystem:
         if $target does not exist:
@@ -141,29 +162,35 @@ if  $legacy exists  AND is a real directory (not a symlink):
 ```
 
 Idempotent: a same-filesystem re-run sees `~/.spec2pr` is already a symlink and
-does nothing; a cross-filesystem re-run sees `$target` is already a symlink to
-the legacy real directory and does nothing. If the destination already has data,
-setup refuses to merge two state trees silently; it leaves both paths untouched
-and prints the warning above so the user can reconcile by hand. Safe mid-run on
-two grounds:
+does nothing; a cross-filesystem or active-run re-run sees `$target` is already
+a symlink to the legacy real directory and does nothing. If the destination
+already has data, setup refuses to merge two state trees silently; it leaves
+both paths untouched and prints the warning above so the user can reconcile by
+hand. Safe around live runs on three grounds:
 
-1. The migration first verifies that `~/.spec2pr` and `RULEZ_CLAUDESET_HOME`
-   are on the same filesystem, so `mv` is an atomic `rename(2)`; open file
-   descriptors and the live `flock` follow the inode. If a custom
-   `RULEZ_CLAUDESET_HOME` crosses filesystems, setup does not recursively copy;
-   it links the new default path back to the legacy tree when the destination
-   is absent or empty, preserving runtime access without a non-atomic move.
-2. A running pipeline resolved `META_DIR="$SPEC2PR_HOME/$ID"` once into a shell
-   variable at startup; the compat symlink keeps even that old absolute path
-   resolving.
+1. Before any move, setup checks for legacy `*.lock` directories. If one exists,
+   setup does not move `~/.spec2pr`; when safe, it links the new default path
+   back to the legacy tree so both old already-captured paths and new default
+   resolution see the same state. This intentionally treats stale or
+   initializing locks conservatively.
+2. When no legacy locks exist, setup verifies that `~/.spec2pr` and
+   `RULEZ_CLAUDESET_HOME` are on the same filesystem, so `mv` is an atomic
+   `rename(2)`. If a custom `RULEZ_CLAUDESET_HOME` crosses filesystems, setup
+   does not recursively copy; it links the new default path back to the legacy
+   tree when the destination is absent or empty, preserving runtime access
+   without a non-atomic move.
+3. A running pipeline resolved `META_DIR="$SPEC2PR_HOME/$ID"` once into a shell
+   variable at startup; because active locked runs are not moved, those old
+   absolute paths keep resolving during the run.
 
 On same-filesystem migrations, the legacy `~/.spec2pr` symlink is a convenience
 shim (muscle-memory `ls ~/.spec2pr`, plus belt-and-suspenders for any captured
 absolute path). The user can delete that legacy shim anytime after confirming no
 local scripts still reference it. On cross-filesystem fallback, the symlink goes
 the other direction (`$target` → `~/.spec2pr`) so the new default can still see
-the existing state; do not describe that target symlink as deletable until the
-state has been manually migrated.
+the existing state; the active-run guard uses that same target-to-legacy
+direction. Do not describe that target symlink as deletable until the state has
+been manually migrated.
 
 ## Data flow
 
@@ -186,6 +213,11 @@ Personal-tool grade. The migration is best-effort and guarded:
   `set -e` terminate setup.
 - If both the legacy dir and a non-empty destination exist, setup warns and
   leaves both trees unchanged rather than guessing at a merge.
+- If the legacy dir contains any `*.lock` directory, setup treats it as
+  potentially active and does not move it. When the destination is absent or an
+  empty directory, setup creates `$target` as a symlink back to `~/.spec2pr`; if
+  a non-empty `$target` already exists, setup warns and leaves both trees
+  unchanged.
 - If the legacy dir and destination parent are on different filesystems, setup
   leaves the legacy tree untouched and, when safe, creates `$target` as a
   symlink to `~/.spec2pr` so the new default still sees the existing state. If a
@@ -208,12 +240,14 @@ Light, matching the repo's stub/sandbox style:
   device IDs, asserting it does not call `mv`, leaves `~/.spec2pr` as the real
   directory, and creates `~/.rulez-claudeset/spec2pr` as a symlink to it when
   the destination is absent or empty. Assert a second cross-filesystem run is a
-  no-op when that target symlink already points at the legacy tree. To keep this
-  testable, the migration block should be a small function (or a sourceable
-  snippet) rather than inline-only in `bin/setup`'s main flow. Include at least
-  one injected failure case under `set -e` (for example a stubbed `mv` or
-  unwritable destination parent) and assert setup/migration still returns
-  success after printing a warning.
+  no-op when that target symlink already points at the legacy tree. Cover the
+  active-run guard by creating `~/.spec2pr/<id>.lock`, asserting the legacy tree
+  is not moved, and asserting the new default becomes a symlink to it when the
+  destination is absent or empty. To keep this testable, the migration block
+  should be a small function (or a sourceable snippet) rather than inline-only
+  in `bin/setup`'s main flow. Include at least one injected failure case under
+  `set -e` (for example a stubbed `mv` or unwritable destination parent) and
+  assert setup/migration still returns success after printing a warning.
 - **Default resolution** — add direct assertions in the same test file (or a
   second small `test-*.sh`) that, with `SPEC2PR_HOME` unset in a sandboxed
   `HOME`, both `scripts/lib/spec2pr-runtime.sh` and `scripts/spec2pr-watch.sh`
