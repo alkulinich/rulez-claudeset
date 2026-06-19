@@ -76,9 +76,11 @@ lifting is reused:
 
 - **Details pane** = `spec2pr-watch.sh <token>`, verbatim. No new watch code.
 - **Brief pane** = `tail -f $RULEZ_CLAUDESET_HOME/mctl/<name>/brief.log`, fed by
-  `script --flush` wrapping the pipeline. `script` runs the pipeline under a PTY,
-  so output stays line-buffered and colorized instead of block-buffered — which
-  is also the root-cause fix for the "looks stuck" feeling.
+  `script --flush` wrapping the pipeline. mctl runs the pipeline with
+  `SPEC2PR_VERBOSE=1` so the captured console includes begin/progress markers,
+  not only final contract lines. `script` runs the pipeline under a PTY, so
+  output stays line-buffered and colorized instead of block-buffered — which is
+  also the root-cause fix for the "looks stuck" feeling.
 
 Decoupling: mctl never reaches into spec2pr's `~/.spec2pr/<id>/` internals. It
 stores the watch **token** at add time and lets `spec2pr-watch.sh` resolve the
@@ -108,8 +110,10 @@ mctl's own wrapper marker, not raw tmux liveness:
    using the repo-qualified rules above. For `spec2pr`, validate that the spec
    is inside a git repository, derive `repo-slug` from the repo root basename
    and `spec-slug` from the spec filename stem, and use
-   `<repo-slug>-<spec-slug>` for both `<name>` and `<token>`. For `review-pr`,
-   derive `repo-slug` from `pwd`'s repo root and use `<repo-slug>-pr-<n>`.
+   `<repo-slug>-<spec-slug>` for both `<name>` and `<token>`. Store the
+   canonical absolute spec path for the runner, so launching from a subdirectory
+   and specs with spaces keep working. For `review-pr`, derive `repo-slug` from
+   `pwd`'s repo root and use `<repo-slug>-pr-<n>`.
 2. Validate: spec file exists, or pr# is numeric. Refuse if session
    `mctl-<name>` already exists or if the registry dir
    `$RULEZ_CLAUDESET_HOME/mctl/<name>/` already exists. If `exit` is absent,
@@ -118,10 +122,15 @@ mctl's own wrapper marker, not raw tmux liveness:
    killed/removed before reusing the same name. mctl does not silently delete an
    old registry dir, because a stale `exit` marker would make a new run appear
    `done`.
-3. Capture the current repo dir (`pwd`).
+3. Capture the current repo dir (`pwd -P`) after validating it is inside the
+   relevant git repository.
 4. Write `meta`.
 5. `tmux new-session -d -s mctl-<name>` running a small wrapper that:
-   - runs `script --flush --return … "cd <repo> && bash <runner-abs> <arg>"`;
+   - runs `script --flush --return … "cd <repo> && SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>"`;
+   - shell-quotes every generated command argument (`repo`, `runner-abs`, the
+     canonical spec path or PR number, `brief.log`, and `exit`) before embedding
+     it in the tmux/script wrapper; no raw user path is interpolated into shell
+     code;
    - records the resulting exit code and finished timestamp to
      `$RULEZ_CLAUDESET_HOME/mctl/<name>/exit`;
    - then prompts and `read`s.
