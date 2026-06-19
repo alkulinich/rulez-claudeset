@@ -83,7 +83,7 @@ This copies commands into the repo's `.claude/` with paths rewritten for the sub
 rm -rf ~/.claude/skills/rulez-claudeset
 ```
 
-This removes the commands symlink, the SessionStart hook, the rulez permissions, the status line, and the `@RULEZ.md` import. It does not touch `~/.claude/what-have-i-done/` or `.claude/punts/` data in your projects.
+This removes the commands symlink, the SessionStart hook, the rulez permissions, the status line, and the `@RULEZ.md` import. It does not remove `~/.local/bin/mctl`, or touch `~/.claude/what-have-i-done/` or `.claude/punts/` data in your projects.
 
 ## Uninstall (Codex)
 
@@ -169,7 +169,7 @@ tmux attach -t mctl-my-repo-feature-a
 tmux kill-session -t mctl-my-repo-feature-a
 ```
 
-Requires `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **context7** MCP for up-to-date library docs when available. `bin/setup` warns if any of these (or context7) are missing — register context7 once: `claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'`.
+Requires `tmux`, `script`, `fzf`, `codex`, `claude`, `gh`, `jq`, `git`; the PR reviewer also uses the **context7** MCP for up-to-date library docs when available. `bin/setup` warns if any of these (or context7) are missing — register context7 once: `claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'`.
 
 ### Manual tmux fallback
 

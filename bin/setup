@@ -30,9 +30,22 @@ log "Linked commands → ~/.claude/commands/rulez"
 
 # Symlink mctl into a user PATH location for shell use.
 LOCAL_BIN="$HOME/.local/bin"
+MCTL_LINK="$LOCAL_BIN/mctl"
+MCTL_TARGET="$SKILL_DIR/scripts/mctl.sh"
 mkdir -p "$LOCAL_BIN"
-ln -sfn "$SKILL_DIR/scripts/mctl.sh" "$LOCAL_BIN/mctl"
-log "Linked mctl -> ~/.local/bin/mctl"
+if [ -L "$MCTL_LINK" ]; then
+  if [ "$(readlink "$MCTL_LINK")" = "$MCTL_TARGET" ]; then
+    ln -sfn "$MCTL_TARGET" "$MCTL_LINK"
+    log "Linked mctl -> ~/.local/bin/mctl"
+  else
+    echo "Warning: ~/.local/bin/mctl already exists and was not replaced"
+  fi
+elif [ -e "$MCTL_LINK" ]; then
+  echo "Warning: ~/.local/bin/mctl already exists and was not replaced"
+else
+  ln -s "$MCTL_TARGET" "$MCTL_LINK"
+  log "Linked mctl -> ~/.local/bin/mctl"
+fi
 
 case ":$PATH:" in
   *":$LOCAL_BIN:"*) ;;
