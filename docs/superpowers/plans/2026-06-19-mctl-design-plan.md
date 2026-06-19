@@ -69,6 +69,12 @@ printf '\n%d tests run, %d failed\n' "$TESTS_RUN" "$TESTS_FAILED"
 [ "$TESTS_FAILED" -eq 0 ]
 ```
 
+Make it executable before any direct invocation:
+
+```bash
+chmod +x tests/mctl/run-tests.sh
+```
+
 - [ ] **Step 2: Create shared test helpers**
 
 Create `tests/mctl/helpers.sh`:
@@ -429,6 +435,13 @@ main() {
 }
 
 main "$@"
+```
+
+Set the executable bit explicitly so the later `~/.local/bin/mctl` symlink can
+be invoked as a command:
+
+```bash
+chmod +x scripts/mctl.sh
 ```
 
 - [ ] **Step 4: Run helper tests**
