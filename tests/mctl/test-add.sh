@@ -5,6 +5,8 @@ test_mctl_sanitize_matches_spec2pr_family() {
   source_mctl
 
   assert_eq "foo-bar" "$(sanitize " Foo!!Bar ")" "sanitize replaces invalid runs and trims"
+  assert_eq "foo-bar" "$(sanitize "Foo - Bar")" "sanitize collapses punctuation dashes"
+  assert_eq "foo-bar" "$(sanitize "Foo--Bar")" "sanitize collapses repeated dashes"
   assert_eq "my_repo-7" "$(sanitize "My_Repo-7")" "sanitize keeps underscore and dash"
 }
 
@@ -41,6 +43,21 @@ test_add_spec2pr_writes_registry_metadata_and_brief_log() {
   assert_eq "$REPO" "$(meta_value "$run_dir/meta" repo)" "spec2pr repo root comes from spec"
   assert_eq "$SPEC2PR_HOME" "$(meta_value "$run_dir/meta" spec2pr_home)" "meta stores effective SPEC2PR_HOME"
   assert_eq "$SPEC2PR_WORKTREES" "$(meta_value "$run_dir/meta" spec2pr_worktrees)" "meta stores effective SPEC2PR_WORKTREES"
+}
+
+test_add_spec2pr_collapses_spec_slug_dashes_for_registry_token() {
+  make_sandbox
+  local spaced_spec="$REPO/docs/superpowers/specs/Foo - Bar.md"
+  printf '# Foo - Bar\n' > "$spaced_spec"
+
+  run_mctl add spec2pr "$spaced_spec"
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  assert_eq "0" "$RC" "add spec2pr with spaced punctuation exits 0"
+  assert_contains "$OUT" "repo-foo-bar" "add prints collapsed run name"
+  assert_file_exists "$run_dir/meta" "collapsed slug meta file created"
+  assert_eq "repo-foo-bar" "$(meta_value "$run_dir/meta" token)" "meta token uses collapsed slug"
+  assert_eq "mctl-repo-foo-bar" "$(meta_value "$run_dir/meta" session)" "session uses collapsed slug"
 }
 
 test_add_review_pr_writes_repo_qualified_pr_metadata() {

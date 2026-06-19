@@ -26,7 +26,7 @@ DASH_SESSION="mctl-dash"
 sanitize() {
   printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
-    | sed -E 's/[^a-z0-9_-]+/-/g; s/^-+//; s/-+$//'
+    | sed -E 's/[^a-z0-9_-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'
 }
 
 shell_quote() {
