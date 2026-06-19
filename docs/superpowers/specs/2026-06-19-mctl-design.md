@@ -166,8 +166,11 @@ comes from mctl's own wrapper marker, not raw tmux liveness:
 1. If tmux session `mctl-dash` already exists, attach to it. Otherwise build it
    with three panes: left (task list), and a right column split into brief (top)
    and details (bottom).
-2. Left pane runs `fzf` over `mctl ls`. On cursor move, a binding re-targets the
-   two right panes via `tmux respawn-pane -k`:
+2. Left pane runs `fzf` over a refreshed `mctl ls` view, not a one-time
+   snapshot. It reloads the list at least every two seconds and preserves the
+   selected run by name when that run still exists, so `running` / `done` /
+   `lost` state changes become visible while the dashboard is open. On cursor
+   move, a binding re-targets the two right panes via `tmux respawn-pane -k`:
    - brief → `tail -F <brief.log>`
    - details →
      `SPEC2PR_HOME=<meta spec2pr_home> SPEC2PR_WORKTREES=<meta spec2pr_worktrees> bash <script-dir>/spec2pr-watch.sh <token>`
@@ -223,6 +226,9 @@ Light, matching the repo's existing stub pattern (`tests/spec2pr/stub-*`):
   spaces is covered by the test.
 - `mctl` attaches to an existing `mctl-dash` session instead of trying to create
   a duplicate.
+- Dashboard task list refreshes `mctl ls` while open, preserving the selected
+  run by name across refreshes when possible, so a stubbed run can transition
+  from `running` to `done` without restarting the dashboard.
 - Missing `tmux`, `script`, or dashboard-only `fzf` dependency is a clean
   one-line failure; `bin/setup` warns for those commands.
 - Installed-path smoke test: invoking the symlinked `mctl` from outside the
