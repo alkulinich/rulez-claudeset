@@ -211,6 +211,37 @@ cmd_add() {
   printf '%s\n' "$name"
 }
 
+run_state() {
+  local run_dir="$1" session="$2"
+  if [ -f "$run_dir/exit" ]; then
+    printf 'done\n'
+  elif tmux has-session -t "$session" 2>/dev/null; then
+    printf 'running\n'
+  else
+    printf 'lost\n'
+  fi
+}
+
+cmd_ls() {
+  [ "$#" -eq 0 ] || die "usage: mctl ls"
+  require_cmd tmux
+
+  [ -d "$MCTL_HOME" ] || return 0
+
+  local run_dir meta name kind session started state
+  for run_dir in "$MCTL_HOME"/*; do
+    [ -d "$run_dir" ] || continue
+    meta="$run_dir/meta"
+    [ -f "$meta" ] || continue
+    name="$(basename "$run_dir")"
+    kind="$(meta_get "$meta" kind)"
+    session="$(meta_get "$meta" session)"
+    started="$(meta_get "$meta" started)"
+    state="$(run_state "$run_dir" "$session")"
+    printf '%s %s %s %s\n' "$name" "$kind" "$state" "$started"
+  done | sort
+}
+
 main() {
   case "${1:-}" in
     add)
