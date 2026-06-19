@@ -48,6 +48,7 @@ All state lives under one home, overridable by `RULEZ_CLAUDESET_HOME`
 $RULEZ_CLAUDESET_HOME/mctl/<name>/
   meta        # KV lines: kind, token, session, repo, started
   brief.log   # script-captured pipeline console (the "brief" pane tails this)
+  exit        # written after the pipeline exits: rc plus finished timestamp
 ```
 
 - `<name>` is repo-qualified and uses the same sanitization as the existing
@@ -81,8 +82,13 @@ lifting is reused:
 
 Decoupling: mctl never reaches into spec2pr's `~/.spec2pr/<id>/` internals. It
 stores the watch **token** at add time and lets `spec2pr-watch.sh` resolve the
-rest. Discovery is `ls $RULEZ_CLAUDESET_HOME/mctl/*/`; liveness is "does tmux
-session `mctl-<name>` exist."
+rest. Discovery is `ls $RULEZ_CLAUDESET_HOME/mctl/*/`; run state comes from
+mctl's own wrapper marker, not raw tmux liveness:
+
+- `exit` missing + tmux session `mctl-<name>` exists = `running`
+- `exit` present = `done` (the tmux session may still exist because it is kept
+  attachable for inspection)
+- `exit` missing + tmux session absent = `lost`
 
 ### Components
 
@@ -100,13 +106,19 @@ session `mctl-<name>` exist."
    `<repo-slug>-<spec-slug>` for both `<name>` and `<token>`. For `review-pr`,
    derive `repo-slug` from `pwd`'s repo root and use `<repo-slug>-pr-<n>`.
 2. Validate: spec file exists, or pr# is numeric. Refuse if session
-   `mctl-<name>` is already live.
+   `mctl-<name>` already exists; if `exit` is absent, say the run is live, and
+   if `exit` is present, say the completed attachable session must be killed or
+   cleaned before reusing the same name.
 3. Capture the current repo dir (`pwd`).
 4. Write `meta`.
-5. `tmux new-session -d -s mctl-<name>` running
-   `script --flush --return … "cd <repo> && bash <runner> <arg>"; read`.
+5. `tmux new-session -d -s mctl-<name>` running a small wrapper that:
+   - runs `script --flush --return … "cd <repo> && bash <runner> <arg>"`;
+   - records the resulting exit code and finished timestamp to
+     `$RULEZ_CLAUDESET_HOME/mctl/<name>/exit`;
+   - then prompts and `read`s.
    The trailing `read` keeps the session (and its final contract line)
-   attachable after the run ends.
+   attachable after the run ends, while the `exit` file lets `mctl ls`
+   distinguish a still-attachable completed run from an active pipeline.
 6. Return immediately, printing the run name.
 
 **dashboard (`mctl`, no args):**
@@ -121,8 +133,9 @@ session `mctl-<name>` exist."
 
 **ls:**
 
-List each `$RULEZ_CLAUDESET_HOME/mctl/*/`, joined with `tmux has-session` for
-state (running / done). Plain columns: name, kind, state, started.
+List each `$RULEZ_CLAUDESET_HOME/mctl/*/`, joined with `tmux has-session` and
+the per-run `exit` marker for state (`running` / `done` / `lost`). Plain
+columns: name, kind, state, started.
 
 ## Error handling
 
