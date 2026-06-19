@@ -141,8 +141,13 @@ two grounds:
    variable at startup; the compat symlink keeps even that old absolute path
    resolving.
 
-The symlink is a convenience shim (muscle-memory `ls ~/.spec2pr`, plus belt-and-
-suspenders for any captured absolute path). The user can delete it anytime.
+On same-filesystem migrations, the legacy `~/.spec2pr` symlink is a convenience
+shim (muscle-memory `ls ~/.spec2pr`, plus belt-and-suspenders for any captured
+absolute path). The user can delete that legacy shim anytime after confirming no
+local scripts still reference it. On cross-filesystem fallback, the symlink goes
+the other direction (`$target` → `~/.spec2pr`) so the new default can still see
+the existing state; do not describe that target symlink as deletable until the
+state has been manually migrated.
 
 ## Data flow
 
@@ -204,8 +209,10 @@ Light, matching the repo's stub/sandbox style:
 - **edit** `commands/rulez/spec2pr.md` — update user-facing status/log path
   references to the new default.
 - **edit** `VERSION` — bump.
-- **edit** `UPGRADE.md` — one tight section (Action: None; Caveat: state dir moved,
-  old path is now a deletable symlink).
+- **edit** `UPGRADE.md` — one tight section (Action: None; Caveat: state dir moved;
+  on normal same-filesystem installs, old path is now a deletable symlink; on
+  cross-filesystem custom `RULEZ_CLAUDESET_HOME`, the new default may be a
+  symlink back to the old path until manually migrated).
 - **new** `tests/spec2pr/test-home-migration.sh` — migration and default
   resolution smoke tests (run by the existing `run-tests.sh` glob).
 
