@@ -83,7 +83,9 @@ lifting is reused:
   output stays line-buffered and colorized instead of block-buffered — which is
   also the root-cause fix for the "looks stuck" feeling. `add` creates
   `brief.log` before starting tmux, and the dashboard uses `tail -F` so a pane
-  survives log rotation or a race with the first writer.
+  survives log rotation or a race with the first writer. Any command mctl hands
+  to tmux is built from shell-quoted argv pieces; this applies to dashboard
+  respawn commands as well as the add-time runner wrapper.
 
 Decoupling: mctl never reaches into spec2pr's `~/.spec2pr/<id>/` internals. It
 stores the watch **token** at add time and lets `spec2pr-watch.sh` resolve the
@@ -142,13 +144,17 @@ comes from mctl's own wrapper marker, not raw tmux liveness:
    `spec2pr_worktrees=${SPEC2PR_WORKTREES:-$HOME/.worktrees}`. Create
    `brief.log` and write the rest of `meta`.
 5. `tmux new-session -d -s mctl-<name>` running a small wrapper that:
-   - runs `script --flush --return … "cd <repo> && SPEC2PR_HOME=<meta value> SPEC2PR_WORKTREES=<meta value> SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>"`;
+   - runs `script` around an inner shell command equivalent to:
+     `cd <repo>; SPEC2PR_HOME=<meta value> SPEC2PR_WORKTREES=<meta value> SPEC2PR_VERBOSE=1 bash <runner-abs> <arg>; rc=$?; printf 'rc=%s\nfinished=%s\n' "$rc" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > <exit>; exit "$rc"`;
    - shell-quotes every generated command argument (`repo`, `runner-abs`, the
      canonical spec path or PR number, `brief.log`, `exit`, `SPEC2PR_HOME`, and
      `SPEC2PR_WORKTREES`) before embedding it in the tmux/script wrapper; no raw
      user path is interpolated into shell code;
-   - records the resulting exit code and finished timestamp to
-     `$RULEZ_CLAUDESET_HOME/mctl/<name>/exit`;
+   - records the pipeline exit code from inside the child command, not from
+     `script`'s process status. Linux still uses util-linux `script --return`
+     where available so the tmux wrapper itself sees the child rc, but the
+     `exit` marker is authoritative on every platform, including BSD/macOS
+     `script`;
    - then prompts and `read`s.
    The trailing `read` keeps the session (and its final contract line)
    attachable after the run ends, while the `exit` file lets `mctl ls`
@@ -165,6 +171,10 @@ comes from mctl's own wrapper marker, not raw tmux liveness:
    - brief → `tail -F <brief.log>`
    - details →
      `SPEC2PR_HOME=<meta spec2pr_home> SPEC2PR_WORKTREES=<meta spec2pr_worktrees> bash <script-dir>/spec2pr-watch.sh <token>`
+   The respawn commands use the same shell-quoting helper as `add` for
+   `brief.log`, `SPEC2PR_HOME`, `SPEC2PR_WORKTREES`, `script-dir`, and `token`.
+   `RULEZ_CLAUDESET_HOME` may be overridden to a path with spaces; the dashboard
+   must still work and must not interpolate raw metadata into shell code.
 3. Empty state: show `no runs — mctl add spec2pr <spec>`.
 
 **ls:**
@@ -202,10 +212,15 @@ Light, matching the repo's existing stub pattern (`tests/spec2pr/stub-*`):
 - `add` records the effective `SPEC2PR_HOME` and `SPEC2PR_WORKTREES`, passes
   them into the runner wrapper, and the dashboard details pane exports the same
   values before invoking `spec2pr-watch.sh`.
+- `add` records the child pipeline rc in `exit` even when the child exits
+  non-zero; the test should not rely on `script` propagating the child status.
 - `add spec2pr` launched from outside the spec repo still records the spec
   repo root in `meta` and runs the pipeline from that repo.
 - `add` creates `brief.log` before launching the wrapper, and dashboard brief
   panes use `tail -F`.
+- Dashboard `respawn-pane` commands shell-quote log paths, watcher paths,
+  watcher environment values, and tokens; a `RULEZ_CLAUDESET_HOME` containing
+  spaces is covered by the test.
 - `mctl` attaches to an existing `mctl-dash` session instead of trying to create
   a duplicate.
 - Missing `tmux`, `script`, or dashboard-only `fzf` dependency is a clean
