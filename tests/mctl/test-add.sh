@@ -160,3 +160,23 @@ test_add_missing_tmux_or_script_fails_cleanly() {
   assert_eq "1" "$RC" "missing script exits 1"
   assert_contains "$OUT" "missing dependency: script" "missing script message"
 }
+
+test_symlinked_mctl_resolves_companion_scripts_from_real_path() {
+  make_sandbox
+  mkdir -p "$SANDBOX/local-bin"
+  ln -s "$MCTL" "$SANDBOX/local-bin/mctl"
+
+  MCTL_TESTING=1 source "$SANDBOX/local-bin/mctl"
+  assert_eq "$REPO_ROOT/scripts/spec2pr.sh" "$SPEC2PR_SCRIPT" "symlinked mctl resolves spec2pr path"
+  assert_eq "$REPO_ROOT/scripts/review-pr.sh" "$REVIEW_PR_SCRIPT" "symlinked mctl resolves review-pr path"
+  assert_eq "$REPO_ROOT/scripts/spec2pr-watch.sh" "$WATCH_SCRIPT" "symlinked mctl resolves watch path"
+
+  set +e
+  OUT="$(cd "$SANDBOX" && PATH="$SANDBOX/local-bin:$PATH" "${BASH:-bash}" "$SANDBOX/local-bin/mctl" add spec2pr "$SPEC" 2>&1)"
+  RC=$?
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "symlinked mctl add exits 0"
+  assert_contains "$log" "$REPO_ROOT/scripts/spec2pr.sh" "symlinked mctl uses real spec2pr path"
+}
