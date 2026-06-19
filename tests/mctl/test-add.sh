@@ -146,6 +146,28 @@ test_add_launches_tmux_session_with_script_wrapper_and_verbose_env() {
   assert_contains "$log" "$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar/exit" "runner writes exit marker"
 }
 
+test_build_script_command_wraps_harmless_inner_command() {
+  make_sandbox
+  source_mctl
+
+  local inner brief linux_cmd bsd_cmd
+  inner="printf ok"
+  brief="$SANDBOX/brief log"
+
+  linux_cmd="$(build_script_command "$inner" "$brief")"
+  assert_contains "$linux_cmd" "script --flush" "linux script wrapper flushes output"
+  assert_contains "$linux_cmd" "-c 'printf ok'" "linux script wrapper passes inner command"
+  assert_contains "$linux_cmd" "'$brief'" "linux script wrapper quotes brief log"
+
+  uname() { printf 'Darwin\n'; }
+  bsd_cmd="$(build_script_command "$inner" "$brief")"
+  unset -f uname
+
+  assert_contains "$bsd_cmd" "script -F -q" "bsd script wrapper flushes output quietly"
+  assert_contains "$bsd_cmd" "/bin/sh -c 'printf ok'" "bsd script wrapper passes inner command through shell"
+  assert_contains "$bsd_cmd" "'$brief'" "bsd script wrapper quotes brief log"
+}
+
 test_add_review_pr_launches_review_runner_from_repo_root() {
   make_sandbox
   run_mctl_in_dir "$REPO" add review-pr 7

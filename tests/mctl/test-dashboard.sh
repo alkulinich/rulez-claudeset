@@ -48,6 +48,8 @@ test_dashboard_fzf_command_reloads_every_two_seconds() {
   assert_contains "$cmd" "ctrl-r:reload" "fzf has reload binding"
   assert_contains "$cmd" "sleep 2" "fzf refresh driver sleeps two seconds"
   assert_contains "$cmd" "send-keys" "refresh driver asks tmux to trigger reload"
+  assert_contains "$cmd" "$RULEZ_CLAUDESET_HOME/mctl/dashboard-panes" "refresh driver reads persisted pane registry"
+  assert_not_contains "$cmd" "mctl-dash:0.0" "refresh driver does not hardcode tmux pane index"
   assert_contains "$cmd" "--track" "fzf tracks the selected run across reloads"
   assert_contains "$cmd" "--id-nth 1" "fzf tracks by stable run name, not the changing state row"
 }
@@ -89,10 +91,13 @@ test_dashboard_creates_three_pane_layout() {
   local log
   log="$(cat "$SANDBOX/tmux.log")"
   assert_eq "0" "$RC" "dashboard exits 0"
-  assert_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash]" "dashboard creates session"
-  assert_contains "$log" "tmux [split-window] [-h] [-t] [mctl-dash:0.0]" "dashboard creates right column"
-  assert_contains "$log" "tmux [split-window] [-v] [-t] [mctl-dash:0.1]" "dashboard splits right column"
+  assert_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash] [-P] [-F] [#{pane_id}]" "dashboard captures list pane id"
+  assert_contains "$log" "tmux [split-window] [-h] [-t] [%1] [-P] [-F] [#{pane_id}]" "dashboard creates right column from captured list pane"
+  assert_contains "$log" "tmux [split-window] [-v] [-t] [%2] [-P] [-F] [#{pane_id}]" "dashboard splits captured brief pane"
+  assert_file_exists "$RULEZ_CLAUDESET_HOME/mctl/dashboard-panes" "dashboard persists pane registry"
   assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches after layout"
+  assert_not_contains "$log" "mctl-dash:0.0" "dashboard does not hardcode list pane index"
+  assert_not_contains "$log" "mctl-dash:0.1" "dashboard does not hardcode brief pane index"
 }
 
 test_dashboard_empty_registry_shows_message_in_task_list() {
@@ -106,19 +111,39 @@ test_dashboard_empty_registry_shows_message_in_task_list() {
   assert_contains "$log" "no runs - mctl add spec2pr <spec>" "empty dashboard shows message in task list"
 }
 
+test_dashboard_ignores_stale_run_dir_without_meta() {
+  make_sandbox
+  mkdir -p "$RULEZ_CLAUDESET_HOME/mctl/stale-empty"
+
+  run_mctl
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "dashboard exits 0 with stale empty run dir"
+  assert_contains "$log" "no runs - mctl add spec2pr <spec>" "stale run dir falls back to empty state"
+  assert_not_contains "$OUT" "No such file" "dashboard does not try to read missing meta"
+}
+
 test_dashboard_retarget_respawns_brief_and_details() {
   make_sandbox
   dashboard_fixture_run
+  cat > "$RULEZ_CLAUDESET_HOME/mctl/dashboard-panes" <<EOF
+list=%1
+brief=%2
+details=%3
+EOF
 
   run_mctl __retarget repo-foo
 
   local log
   log="$(cat "$SANDBOX/tmux.log")"
   assert_eq "0" "$RC" "retarget exits 0"
-  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [mctl-dash:0.1]" "retarget respawns brief pane"
+  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [%2]" "retarget respawns brief pane by persisted pane id"
   assert_contains "$log" "tail -F" "retarget brief tails log"
-  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [mctl-dash:0.2]" "retarget respawns details pane"
+  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [%3]" "retarget respawns details pane by persisted pane id"
   assert_contains "$log" "spec2pr-watch.sh" "retarget details invokes watcher"
+  assert_not_contains "$log" "mctl-dash:0.1" "retarget does not hardcode brief pane index"
+  assert_not_contains "$log" "mctl-dash:0.2" "retarget does not hardcode details pane index"
 }
 
 test_dashboard_missing_fzf_fails_before_creating_session() {

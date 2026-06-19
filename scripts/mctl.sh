@@ -250,9 +250,46 @@ build_empty_command() {
   printf '%s' "printf '%s\n' 'no runs - mctl add spec2pr <spec>'"
 }
 
+dashboard_panes_file() {
+  printf '%s/dashboard-panes\n' "$MCTL_HOME"
+}
+
+write_dashboard_panes() {
+  local list_pane="$1" brief_pane="$2" details_pane="$3" panes_file tmp
+  mkdir -p "$MCTL_HOME"
+  panes_file="$(dashboard_panes_file)"
+  tmp="$panes_file.$$"
+  cat > "$tmp" <<EOF
+list=$list_pane
+brief=$brief_pane
+details=$details_pane
+EOF
+  mv "$tmp" "$panes_file"
+}
+
+dashboard_pane_id() {
+  local role="$1" panes_file
+  panes_file="$(dashboard_panes_file)"
+  [ -f "$panes_file" ] || return 1
+  meta_get "$panes_file" "$role"
+}
+
+require_dashboard_pane_id() {
+  local role="$1" pane_id
+  pane_id="$(dashboard_pane_id "$role")" || die "dashboard pane registry missing; restart dashboard"
+  [ -n "$pane_id" ] || die "dashboard pane registry missing $role pane; restart dashboard"
+  printf '%s\n' "$pane_id"
+}
+
 first_run_dir() {
+  local run_dir
   [ -d "$MCTL_HOME" ] || return 1
-  find "$MCTL_HOME" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1
+  while IFS= read -r run_dir; do
+    [ -f "$run_dir/meta" ] || continue
+    printf '%s\n' "$run_dir"
+    return 0
+  done < <(find "$MCTL_HOME" -mindepth 1 -maxdepth 1 -type d | sort)
+  return 1
 }
 
 run_dir_for_name() {
@@ -287,12 +324,13 @@ build_list_command() {
 }
 
 build_fzf_command() {
-  local mctl_cmd list_cmd reload focus refresh_driver start_bind
+  local mctl_cmd list_cmd reload focus refresh_driver start_bind panes_file
   mctl_cmd="RULEZ_CLAUDESET_HOME=$(shell_quote "$RULEZ_CLAUDESET_HOME") bash $(shell_quote "$SCRIPT_DIR/mctl.sh")"
   list_cmd="$mctl_cmd ls"
   reload="ctrl-r:reload($list_cmd)"
   focus="focus:execute-silent($mctl_cmd __retarget {1})"
-  refresh_driver="while tmux has-session -t $(shell_quote "$DASH_SESSION") 2>/dev/null; do sleep 2; tmux send-keys -t $(shell_quote "$DASH_SESSION:0.0") C-r; done >/dev/null 2>&1 &"
+  panes_file="$(dashboard_panes_file)"
+  refresh_driver="while tmux has-session -t $(shell_quote "$DASH_SESSION") 2>/dev/null; do sleep 2; list_pane=\$(awk -F= '\$1 == \"list\" {print substr(\$0, length(\$1) + 2)}' $(shell_quote "$panes_file") 2>/dev/null || true); [ -n \"\$list_pane\" ] && tmux send-keys -t \"\$list_pane\" C-r; done >/dev/null 2>&1 &"
   start_bind="start:execute-silent($refresh_driver)+reload($list_cmd)"
   printf '%s | fzf --ansi --no-sort --disabled --track --id-nth 1 --bind %s --bind %s --bind %s --header %s' \
     "$list_cmd" \
@@ -305,10 +343,12 @@ build_fzf_command() {
 cmd_retarget() {
   [ "$#" -eq 1 ] || die "usage: mctl __retarget <name>"
   require_cmd tmux
-  local run_dir="$MCTL_HOME/$1"
+  local run_dir="$MCTL_HOME/$1" brief_pane details_pane
   [ -d "$run_dir" ] || die "unknown run: $1"
-  tmux respawn-pane -k -t "$DASH_SESSION:0.1" "$(build_brief_command "$run_dir")"
-  tmux respawn-pane -k -t "$DASH_SESSION:0.2" "$(build_details_command "$run_dir")"
+  brief_pane="$(require_dashboard_pane_id brief)"
+  details_pane="$(require_dashboard_pane_id details)"
+  tmux respawn-pane -k -t "$brief_pane" "$(build_brief_command "$run_dir")"
+  tmux respawn-pane -k -t "$details_pane" "$(build_details_command "$run_dir")"
 }
 
 cmd_dashboard() {
@@ -320,7 +360,7 @@ cmd_dashboard() {
     return 0
   fi
 
-  local first left_cmd brief_cmd details_cmd
+  local first left_cmd brief_cmd details_cmd list_pane brief_pane details_pane
   first="$(first_run_dir || true)"
   if [ -n "$first" ]; then
     left_cmd="$(build_fzf_command)"
@@ -332,9 +372,10 @@ cmd_dashboard() {
     details_cmd="$(build_empty_command)"
   fi
 
-  tmux new-session -d -s "$DASH_SESSION" "$left_cmd"
-  tmux split-window -h -t "$DASH_SESSION:0.0" "$brief_cmd"
-  tmux split-window -v -t "$DASH_SESSION:0.1" "$details_cmd"
+  list_pane="$(tmux new-session -d -s "$DASH_SESSION" -P -F '#{pane_id}' "$left_cmd")"
+  brief_pane="$(tmux split-window -h -t "$list_pane" -P -F '#{pane_id}' "$brief_cmd")"
+  details_pane="$(tmux split-window -v -t "$brief_pane" -P -F '#{pane_id}' "$details_cmd")"
+  write_dashboard_panes "$list_pane" "$brief_pane" "$details_pane"
   tmux select-layout -t "$DASH_SESSION" main-vertical
   tmux attach-session -t "$DASH_SESSION"
 }
