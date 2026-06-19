@@ -152,6 +152,7 @@ make_sandbox() {
   cp "$TESTS_DIR/stub-script.sh" "$SANDBOX/bin/script"
   cp "$TESTS_DIR/stub-fzf.sh" "$SANDBOX/bin/fzf"
   chmod +x "$SANDBOX/bin/tmux" "$SANDBOX/bin/script" "$SANDBOX/bin/fzf"
+  ln -s "$(command -v dirname)" "$SANDBOX/bin/dirname"
 
   REPO="$SANDBOX/repo"
   git init -q -b main "$REPO"
@@ -171,8 +172,17 @@ make_sandbox() {
 
 run_mctl() {
   set +e
-  OUT="$(bash "$MCTL" "$@" 2>&1)"
+  OUT="$("${BASH:-bash}" "$MCTL" "$@" 2>&1)"
   RC=$?
+}
+
+run_mctl_with_stubs_only() {
+  local saved_path="$PATH"
+  PATH="$SANDBOX/bin"
+  set +e
+  OUT="$("${BASH:-bash}" "$MCTL" "$@" 2>&1)"
+  RC=$?
+  PATH="$saved_path"
 }
 
 source_mctl() {
@@ -1115,6 +1125,17 @@ test_dashboard_creates_three_pane_layout() {
   assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches after layout"
 }
 
+test_dashboard_empty_registry_shows_message_in_task_list() {
+  make_sandbox
+
+  run_mctl
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "empty dashboard exits 0"
+  assert_contains "$log" "no runs - mctl add spec2pr <spec>" "empty dashboard shows message in task list"
+}
+
 test_dashboard_retarget_respawns_brief_and_details() {
   make_sandbox
   dashboard_fixture_run
@@ -1177,11 +1198,12 @@ cmd_dashboard() {
 
   local first left_cmd brief_cmd details_cmd
   first="$(first_run_dir || true)"
-  left_cmd="$(build_fzf_command)"
   if [ -n "$first" ]; then
+    left_cmd="$(build_fzf_command)"
     brief_cmd="$(build_brief_command "$first")"
     details_cmd="$(build_details_command "$first")"
   else
+    left_cmd="$(build_empty_command)"
     brief_cmd="$(build_empty_command)"
     details_cmd="$(build_empty_command)"
   fi
@@ -1226,13 +1248,13 @@ Append to `tests/mctl/test-add.sh`:
 test_add_missing_tmux_or_script_fails_cleanly() {
   make_sandbox
   rm -f "$SANDBOX/bin/tmux"
-  run_mctl add spec2pr "$SPEC"
+  run_mctl_with_stubs_only add spec2pr "$SPEC"
   assert_eq "1" "$RC" "missing tmux exits 1"
   assert_contains "$OUT" "missing dependency: tmux" "missing tmux message"
 
   make_sandbox
   rm -f "$SANDBOX/bin/script"
-  run_mctl add spec2pr "$SPEC"
+  run_mctl_with_stubs_only add spec2pr "$SPEC"
   assert_eq "1" "$RC" "missing script exits 1"
   assert_contains "$OUT" "missing dependency: script" "missing script message"
 }
@@ -1245,7 +1267,7 @@ test_dashboard_missing_fzf_fails_before_creating_session() {
   make_sandbox
   rm -f "$SANDBOX/bin/fzf"
 
-  run_mctl
+  run_mctl_with_stubs_only
 
   local log
   log="$(cat "$SANDBOX/tmux.log")"
@@ -1322,15 +1344,19 @@ test_symlinked_mctl_resolves_companion_scripts_from_real_path() {
   mkdir -p "$SANDBOX/local-bin"
   ln -s "$MCTL" "$SANDBOX/local-bin/mctl"
 
+  MCTL_TESTING=1 source "$SANDBOX/local-bin/mctl"
+  assert_eq "$REPO_ROOT/scripts/spec2pr.sh" "$SPEC2PR_SCRIPT" "symlinked mctl resolves spec2pr path"
+  assert_eq "$REPO_ROOT/scripts/review-pr.sh" "$REVIEW_PR_SCRIPT" "symlinked mctl resolves review-pr path"
+  assert_eq "$REPO_ROOT/scripts/spec2pr-watch.sh" "$WATCH_SCRIPT" "symlinked mctl resolves watch path"
+
   set +e
-  OUT="$(cd "$SANDBOX" && PATH="$SANDBOX/local-bin:$PATH" bash "$SANDBOX/local-bin/mctl" add spec2pr "$SPEC" 2>&1)"
+  OUT="$(cd "$SANDBOX" && PATH="$SANDBOX/local-bin:$PATH" "${BASH:-bash}" "$SANDBOX/local-bin/mctl" add spec2pr "$SPEC" 2>&1)"
   RC=$?
 
   local log
   log="$(cat "$SANDBOX/tmux.log")"
   assert_eq "0" "$RC" "symlinked mctl add exits 0"
   assert_contains "$log" "$REPO_ROOT/scripts/spec2pr.sh" "symlinked mctl uses real spec2pr path"
-  assert_contains "$log" "$REPO_ROOT/scripts/spec2pr-watch.sh" "script dir has watch path available in globals"
 }
 ```
 
