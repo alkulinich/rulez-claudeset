@@ -50,8 +50,17 @@ $RULEZ_CLAUDESET_HOME/mctl/<name>/
   brief.log   # script-captured pipeline console (the "brief" pane tails this)
 ```
 
-- `<name>` = the spec filename stem (`foo` from `foo.md`) or `pr-<n>` (`pr-7`).
-- tmux session per run = `mctl-<name>` (e.g. `mctl-foo`, `mctl-pr-7`).
+- `<name>` is repo-qualified and uses the same sanitization as the existing
+  spec2pr family (`sanitize`: lowercase, replace runs outside `[a-z0-9_-]`
+  with `-`, trim leading/trailing dashes):
+  - spec2pr: `<repo-slug>-<spec-slug>` (`my-repo-foo` from repo `my-repo`,
+    spec `Foo.md`)
+  - review-pr: `<repo-slug>-pr-<n>` (`my-repo-pr-7`)
+- The stored `token` is exactly this `<name>`, not the raw filename stem. It is
+  the metadata id that `spec2pr-watch.sh` can resolve directly under
+  `~/.spec2pr/<id>/`.
+- tmux session per run = `mctl-<name>` (e.g. `mctl-my-repo-foo`,
+  `mctl-my-repo-pr-7`).
 - `RULEZ_CLAUDESET_HOME` (data) is distinct from the existing
   `RULEZ_CLAUDESET_DIR` (the repo clone). Different things, different names.
 
@@ -85,7 +94,11 @@ session `mctl-<name>` exist."
 **add:**
 
 1. Parse `add <kind> <arg>`; derive `<name>` and watch `<token>`
-   (spec stem, or `pr-<n>`).
+   using the repo-qualified rules above. For `spec2pr`, validate that the spec
+   is inside a git repository, derive `repo-slug` from the repo root basename
+   and `spec-slug` from the spec filename stem, and use
+   `<repo-slug>-<spec-slug>` for both `<name>` and `<token>`. For `review-pr`,
+   derive `repo-slug` from `pwd`'s repo root and use `<repo-slug>-pr-<n>`.
 2. Validate: spec file exists, or pr# is numeric. Refuse if session
    `mctl-<name>` is already live.
 3. Capture the current repo dir (`pwd`).
