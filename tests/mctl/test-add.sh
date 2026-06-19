@@ -146,3 +146,17 @@ FAKE
   assert_file_exists "$run_dir/exit" "exit marker written by inner command"
   assert_eq "37" "$(meta_value "$run_dir/exit" rc)" "exit marker records child rc"
 }
+
+test_add_missing_tmux_or_script_fails_cleanly() {
+  make_sandbox
+  rm -f "$SANDBOX/bin/tmux"
+  run_mctl_with_stubs_only add spec2pr "$SPEC"
+  assert_eq "1" "$RC" "missing tmux exits 1"
+  assert_contains "$OUT" "missing dependency: tmux" "missing tmux message"
+
+  make_sandbox
+  rm -f "$SANDBOX/bin/script"
+  run_mctl_with_stubs_only add spec2pr "$SPEC"
+  assert_eq "1" "$RC" "missing script exits 1"
+  assert_contains "$OUT" "missing dependency: script" "missing script message"
+}

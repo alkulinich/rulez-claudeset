@@ -105,3 +105,16 @@ test_dashboard_retarget_respawns_brief_and_details() {
   assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [mctl-dash:0.2]" "retarget respawns details pane"
   assert_contains "$log" "spec2pr-watch.sh" "retarget details invokes watcher"
 }
+
+test_dashboard_missing_fzf_fails_before_creating_session() {
+  make_sandbox
+  rm -f "$SANDBOX/bin/fzf"
+
+  run_mctl_with_stubs_only
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "1" "$RC" "missing fzf exits 1"
+  assert_contains "$OUT" "missing dependency: fzf" "missing fzf message"
+  assert_not_contains "$log" "tmux [new-session]" "dashboard does not create partial session"
+}
