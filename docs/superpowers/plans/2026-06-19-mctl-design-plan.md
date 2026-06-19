@@ -411,10 +411,6 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"
 }
 
-if [ "${MCTL_TESTING:-0}" = "1" ]; then
-  return 0
-fi
-
 main() {
   case "${1:-}" in
     add)
@@ -433,6 +429,10 @@ main() {
       ;;
   esac
 }
+
+if [ "${MCTL_TESTING:-0}" = "1" ]; then
+  return 0
+fi
 
 main "$@"
 ```
