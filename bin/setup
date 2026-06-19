@@ -28,6 +28,23 @@ mkdir -p "$CLAUDE_DIR/commands"
 ln -sfn "$SKILL_DIR/commands/rulez" "$CLAUDE_DIR/commands/rulez"
 log "Linked commands → ~/.claude/commands/rulez"
 
+# Symlink mctl into a user PATH location for shell use.
+LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
+ln -sfn "$SKILL_DIR/scripts/mctl.sh" "$LOCAL_BIN/mctl"
+log "Linked mctl -> ~/.local/bin/mctl"
+
+case ":$PATH:" in
+  *":$LOCAL_BIN:"*) ;;
+  *) log "Warning: ~/.local/bin is not on PATH; add it or run scripts/mctl.sh directly" ;;
+esac
+
+for dep in tmux script fzf; do
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    log "Warning: $dep is required for mctl"
+  fi
+done
+
 # 2. Merge settings into ~/.claude/settings.json
 SETTINGS_SRC="$SKILL_DIR/settings.json"
 SETTINGS_DST="$CLAUDE_DIR/settings.json"
