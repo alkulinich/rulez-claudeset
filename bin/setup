@@ -111,7 +111,7 @@ migrate_spec2pr_home() {
         warn "warning: migrated ~/.spec2pr to $target but could not create legacy symlink"
       fi
     else
-      warn "warning: cannot migrate ~/.spec2pr to $target; leaving it unchanged" 2>&1
+      warn "warning: cannot migrate ~/.spec2pr to $target; leaving it unchanged"
     fi
     return 0
   fi
