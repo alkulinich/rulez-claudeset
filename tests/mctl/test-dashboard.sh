@@ -51,3 +51,57 @@ test_dashboard_fzf_command_reloads_every_two_seconds() {
   assert_contains "$cmd" "--track" "fzf tracks the selected run across reloads"
   assert_contains "$cmd" "--id-nth 1" "fzf tracks by stable run name, not the changing state row"
 }
+
+test_dashboard_attaches_existing_session() {
+  make_sandbox
+  printf 'mctl-dash\n' > "$SANDBOX/tmux-sessions"
+
+  run_mctl
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "dashboard attach exits 0"
+  assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches existing session"
+  assert_not_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash]" "dashboard does not create duplicate session"
+}
+
+test_dashboard_creates_three_pane_layout() {
+  make_sandbox
+  dashboard_fixture_run
+
+  run_mctl
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "dashboard exits 0"
+  assert_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash]" "dashboard creates session"
+  assert_contains "$log" "tmux [split-window] [-h] [-t] [mctl-dash:0.0]" "dashboard creates right column"
+  assert_contains "$log" "tmux [split-window] [-v] [-t] [mctl-dash:0.1]" "dashboard splits right column"
+  assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches after layout"
+}
+
+test_dashboard_empty_registry_shows_message_in_task_list() {
+  make_sandbox
+
+  run_mctl
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "empty dashboard exits 0"
+  assert_contains "$log" "no runs - mctl add spec2pr <spec>" "empty dashboard shows message in task list"
+}
+
+test_dashboard_retarget_respawns_brief_and_details() {
+  make_sandbox
+  dashboard_fixture_run
+
+  run_mctl __retarget repo-foo
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "retarget exits 0"
+  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [mctl-dash:0.1]" "retarget respawns brief pane"
+  assert_contains "$log" "tail -F" "retarget brief tails log"
+  assert_contains "$log" "tmux [respawn-pane] [-k] [-t] [mctl-dash:0.2]" "retarget respawns details pane"
+  assert_contains "$log" "spec2pr-watch.sh" "retarget details invokes watcher"
+}

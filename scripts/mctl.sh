@@ -295,6 +295,43 @@ build_fzf_command() {
     "$(shell_quote "mctl runs")"
 }
 
+cmd_retarget() {
+  [ "$#" -eq 1 ] || die "usage: mctl __retarget <name>"
+  require_cmd tmux
+  local run_dir="$MCTL_HOME/$1"
+  [ -d "$run_dir" ] || die "unknown run: $1"
+  tmux respawn-pane -k -t "$DASH_SESSION:0.1" "$(build_brief_command "$run_dir")"
+  tmux respawn-pane -k -t "$DASH_SESSION:0.2" "$(build_details_command "$run_dir")"
+}
+
+cmd_dashboard() {
+  require_cmd tmux
+  require_cmd fzf
+
+  if tmux has-session -t "$DASH_SESSION" 2>/dev/null; then
+    tmux attach-session -t "$DASH_SESSION"
+    return 0
+  fi
+
+  local first left_cmd brief_cmd details_cmd
+  first="$(first_run_dir || true)"
+  if [ -n "$first" ]; then
+    left_cmd="$(build_fzf_command)"
+    brief_cmd="$(build_brief_command "$first")"
+    details_cmd="$(build_details_command "$first")"
+  else
+    left_cmd="$(build_empty_command)"
+    brief_cmd="$(build_empty_command)"
+    details_cmd="$(build_empty_command)"
+  fi
+
+  tmux new-session -d -s "$DASH_SESSION" "$left_cmd"
+  tmux split-window -h -t "$DASH_SESSION:0.0" "$brief_cmd"
+  tmux split-window -v -t "$DASH_SESSION:0.1" "$details_cmd"
+  tmux select-layout -t "$DASH_SESSION" main-vertical
+  tmux attach-session -t "$DASH_SESSION"
+}
+
 main() {
   case "${1:-}" in
     add)
@@ -307,6 +344,10 @@ main() {
       ;;
     "")
       cmd_dashboard
+      ;;
+    __retarget)
+      shift
+      cmd_retarget "$@"
       ;;
     *)
       die "usage: mctl [add spec2pr <spec.md>|add review-pr <pr#>|ls]"
