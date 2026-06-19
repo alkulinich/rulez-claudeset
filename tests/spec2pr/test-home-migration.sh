@@ -208,6 +208,26 @@ test_spec2pr_setup_replaces_empty_target_with_active_run_symlink() {
   assert_contains "$output" "linked $HOME/.rulez-claudeset/spec2pr to existing ~/.spec2pr (active run; not moved)" "empty active target link message emitted"
 }
 
+test_spec2pr_setup_completes_migration_after_active_lock_clears() {
+  make_sandbox
+  unset RULEZ_CLAUDESET_HOME
+  write_legacy_meta
+  mkdir -p "$HOME/.spec2pr/project-toy-spec.lock"
+  source_setup_for_migration
+
+  migrate_spec2pr_home >/dev/null 2>&1
+  assert_symlink_target "$HOME/.rulez-claudeset/spec2pr" "$HOME/.spec2pr" "active run fallback links target to legacy"
+
+  rmdir "$HOME/.spec2pr/project-toy-spec.lock"
+
+  local output
+  output="$(migrate_spec2pr_home 2>&1)"
+
+  assert_file_exists "$HOME/.rulez-claudeset/spec2pr/project-toy-spec/meta" "legacy metadata migrates after active lock clears"
+  assert_symlink_target "$HOME/.spec2pr" "$HOME/.rulez-claudeset/spec2pr" "legacy path points at target after active lock clears"
+  assert_contains "$output" "migrated ~/.spec2pr to $HOME/.rulez-claudeset/spec2pr (left a symlink)" "post-active migration reports success"
+}
+
 test_spec2pr_setup_cross_filesystem_links_new_default_to_legacy() {
   make_sandbox
   unset RULEZ_CLAUDESET_HOME

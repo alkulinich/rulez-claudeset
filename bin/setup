@@ -70,6 +70,7 @@ migrate_spec2pr_home() {
   local legacy="$HOME/.spec2pr"
   local rulez_home="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
   local target="$rulez_home/spec2pr"
+  local active_lock=false
 
   [ -d "$legacy" ] || return 0
   [ ! -L "$legacy" ] || return 0
@@ -79,11 +80,26 @@ migrate_spec2pr_home() {
     return 0
   fi
 
-  if spec2pr_target_symlink_points_to_legacy "$target" "$legacy"; then
-    return 0
+  if find "$legacy" -mindepth 1 -maxdepth 1 -type d -name '*.lock' -print -quit | grep -q .; then
+    active_lock=true
   fi
 
-  if find "$legacy" -mindepth 1 -maxdepth 1 -type d -name '*.lock' -print -quit | grep -q .; then
+  if spec2pr_target_symlink_points_to_legacy "$target" "$legacy"; then
+    if [ "$active_lock" = true ]; then
+      return 0
+    fi
+
+    if ! spec2pr_home_same_filesystem "$legacy" "$rulez_home"; then
+      return 0
+    fi
+
+    if ! rm "$target"; then
+      warn "warning: cannot remove $target symlink to complete ~/.spec2pr migration; leaving ~/.spec2pr unchanged"
+      return 0
+    fi
+  fi
+
+  if [ "$active_lock" = true ]; then
     spec2pr_link_target_to_legacy \
       "$target" \
       "$legacy" \
