@@ -35,7 +35,11 @@ test_dashboard_empty_state_command_mentions_add() {
   make_sandbox
   source_mctl
 
-  assert_eq "printf '%s\n' 'no runs - mctl add spec2pr <spec>'" "$(build_empty_command)" "empty command"
+  local cmd
+  cmd="$(build_empty_command)"
+
+  assert_contains "$cmd" "printf '%s\n' 'no runs - mctl add spec2pr <spec>'" "empty command prints message"
+  assert_contains "$cmd" "read -r _" "empty command keeps pane open"
 }
 
 test_dashboard_fzf_command_reloads_every_two_seconds() {
@@ -80,6 +84,23 @@ test_dashboard_attaches_existing_session() {
   assert_eq "0" "$RC" "dashboard attach exits 0"
   assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches existing session"
   assert_not_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash]" "dashboard does not create duplicate session"
+}
+
+test_dashboard_attaches_existing_session_without_fzf() {
+  make_sandbox
+  rm -f "$SANDBOX/bin/fzf"
+  ln -s "$(command -v bash)" "$SANDBOX/bin/bash"
+  ln -s "$(command -v grep)" "$SANDBOX/bin/grep"
+  printf 'mctl-dash\n' > "$SANDBOX/tmux-sessions"
+
+  run_mctl_with_stubs_only
+
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+  assert_eq "0" "$RC" "dashboard attach exits 0 without fzf"
+  assert_contains "$log" "tmux [attach-session] [-t] [mctl-dash]" "dashboard attaches existing session without fzf"
+  assert_not_contains "$OUT" "missing dependency: fzf" "existing dashboard does not require fzf"
+  assert_not_contains "$log" "tmux [new-session] [-d] [-s] [mctl-dash]" "dashboard does not create duplicate session without fzf"
 }
 
 test_dashboard_creates_three_pane_layout() {

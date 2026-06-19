@@ -247,7 +247,7 @@ cmd_ls() {
 }
 
 build_empty_command() {
-  printf '%s' "printf '%s\n' 'no runs - mctl add spec2pr <spec>'"
+  printf '%s' "printf '%s\n' 'no runs - mctl add spec2pr <spec>'; read -r _"
 }
 
 dashboard_panes_file() {
@@ -353,12 +353,13 @@ cmd_retarget() {
 
 cmd_dashboard() {
   require_cmd tmux
-  require_cmd fzf
 
   if tmux has-session -t "$DASH_SESSION" 2>/dev/null; then
     tmux attach-session -t "$DASH_SESSION"
     return 0
   fi
+
+  require_cmd fzf
 
   local first left_cmd brief_cmd details_cmd list_pane brief_pane details_pane
   first="$(first_run_dir || true)"
