@@ -2,7 +2,8 @@
 # Read-only progress watcher for spec2pr.sh and review-pr.sh runs.
 set -uo pipefail
 
-SPEC2PR_HOME="${SPEC2PR_HOME:-$HOME/.spec2pr}"
+RULEZ_CLAUDESET_HOME="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
+SPEC2PR_HOME="${SPEC2PR_HOME:-$RULEZ_CLAUDESET_HOME/spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
 SPEC2PR_WATCH_LINES="${SPEC2PR_WATCH_LINES:-40}"
 
