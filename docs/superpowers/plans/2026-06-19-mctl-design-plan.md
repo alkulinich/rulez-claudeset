@@ -1034,7 +1034,8 @@ test_dashboard_fzf_command_reloads_every_two_seconds() {
   assert_contains "$cmd" "ctrl-r:reload" "fzf has reload binding"
   assert_contains "$cmd" "sleep 2" "fzf refresh driver sleeps two seconds"
   assert_contains "$cmd" "send-keys" "refresh driver asks tmux to trigger reload"
-  assert_contains "$cmd" "--track" "fzf tracks the selected row across reloads"
+  assert_contains "$cmd" "--track" "fzf tracks the selected run across reloads"
+  assert_contains "$cmd" "--id-nth 1" "fzf tracks by stable run name, not the changing state row"
 }
 ```
 
@@ -1097,7 +1098,7 @@ build_fzf_command() {
   focus="focus:execute-silent(bash $(shell_quote "$SCRIPT_DIR/mctl.sh") __retarget {1})"
   refresh_driver="while tmux has-session -t $(shell_quote "$DASH_SESSION") 2>/dev/null; do sleep 2; tmux send-keys -t $(shell_quote "$DASH_SESSION:0.0") C-r; done >/dev/null 2>&1 &"
   start_bind="start:execute-silent($refresh_driver)+reload($list_cmd)"
-  printf '%s | fzf --ansi --no-sort --disabled --track --bind %s --bind %s --bind %s --header %s' \
+  printf '%s | fzf --ansi --no-sort --disabled --track --id-nth 1 --bind %s --bind %s --bind %s --header %s' \
     "$list_cmd" \
     "$(shell_quote "$start_bind")" \
     "$(shell_quote "$reload")" \
