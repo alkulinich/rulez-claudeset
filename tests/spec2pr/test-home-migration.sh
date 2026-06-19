@@ -6,7 +6,7 @@ RUNTIME="$REPO_ROOT/scripts/lib/spec2pr-runtime.sh"
 WATCH="$REPO_ROOT/scripts/spec2pr-watch.sh"
 
 source_setup_for_migration() {
-  RULEZ_SETUP_TESTING=1 source "$SETUP"
+  RULEZ_SETUP_TESTING=1 source "$SETUP" -- || true
   set +e
 }
 
@@ -106,6 +106,7 @@ test_spec2pr_setup_migrates_legacy_home_and_leaves_symlink() {
 
 test_spec2pr_setup_migration_is_idempotent_after_move() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   source_setup_for_migration
   migrate_spec2pr_home >/dev/null 2>&1
@@ -120,6 +121,7 @@ test_spec2pr_setup_migration_is_idempotent_after_move() {
 
 test_spec2pr_setup_replaces_empty_target_directory() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   mkdir -p "$HOME/.rulez-claudeset/spec2pr"
   source_setup_for_migration
@@ -148,6 +150,7 @@ test_spec2pr_setup_uses_custom_rulez_home_for_target() {
 
 test_spec2pr_setup_refuses_non_empty_target() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   mkdir -p "$HOME/.rulez-claudeset/spec2pr/existing"
   printf 'existing\n' > "$HOME/.rulez-claudeset/spec2pr/existing/meta"
@@ -163,6 +166,7 @@ test_spec2pr_setup_refuses_non_empty_target() {
 
 test_spec2pr_setup_links_new_default_when_legacy_lock_exists() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   mkdir -p "$HOME/.spec2pr/project-toy-spec.lock"
   source_setup_for_migration
@@ -177,6 +181,7 @@ test_spec2pr_setup_links_new_default_when_legacy_lock_exists() {
 
 test_spec2pr_setup_replaces_empty_target_with_active_run_symlink() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   mkdir -p "$HOME/.spec2pr/project-toy-spec.lock" "$HOME/.rulez-claudeset/spec2pr"
   source_setup_for_migration
@@ -191,6 +196,7 @@ test_spec2pr_setup_replaces_empty_target_with_active_run_symlink() {
 
 test_spec2pr_setup_cross_filesystem_links_new_default_to_legacy() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   source_setup_for_migration
   spec2pr_home_same_filesystem() { return 1; }
@@ -205,6 +211,7 @@ test_spec2pr_setup_cross_filesystem_links_new_default_to_legacy() {
 
 test_spec2pr_setup_cross_filesystem_link_is_idempotent() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   source_setup_for_migration
   spec2pr_home_same_filesystem() { return 1; }
@@ -219,6 +226,7 @@ test_spec2pr_setup_cross_filesystem_link_is_idempotent() {
 
 test_spec2pr_setup_mv_failure_returns_success_with_warning() {
   make_sandbox
+  unset RULEZ_CLAUDESET_HOME
   write_legacy_meta
   source_setup_for_migration
 
@@ -237,7 +245,8 @@ test_spec2pr_setup_mv_failure_returns_success_with_warning() {
 
 test_spec2pr_setup_testing_mode_does_not_run_installer_body() {
   make_sandbox
-  RULEZ_SETUP_TESTING=1 source "$SETUP"
+  RULEZ_SETUP_TESTING=1 source "$SETUP" -- || true
+  set +e
 
   assert_file_absent "$HOME/.claude/commands/rulez" "testing mode does not symlink Claude commands"
 }
