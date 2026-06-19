@@ -140,7 +140,7 @@ The same markdown is also written to `~/.claude/what-have-i-done/<today>.md`. Re
 
 Two unattended pipelines that drive `codex` and `claude -p` from spec to merged PR.
 
-**`scripts/spec2pr.sh <spec.md>`** — run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.spec2pr/<id>/`) and runs: spec-review loop → plan → plan-review loop → implement → push + open a GitHub PR → diff gate → PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
+**`scripts/spec2pr.sh <spec.md>`** - run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.rulez-claudeset/spec2pr/<id>/`) and runs: spec-review loop -> plan -> plan-review loop -> implement -> push + open a GitHub PR -> diff gate -> PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
 
 **`scripts/review-pr.sh <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, `claude` reviews the diff, `codex` fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
 

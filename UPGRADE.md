@@ -6,6 +6,19 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.6.2 - from v1.6.1
+
+**Action:** None. `bin/setup` migrates the default `spec2pr` state dir
+automatically when it is safe.
+
+**Caveat:** `/rulez:spec2pr` state now defaults to
+`~/.rulez-claudeset/spec2pr/`; worktrees stay at `~/.worktrees/`.
+On normal same-filesystem installs, existing `~/.spec2pr/` is moved there
+and the old path becomes a deletable symlink after no local scripts still
+reference it. With a cross-filesystem custom `RULEZ_CLAUDESET_HOME`, or
+while a legacy run is locked, the new default may be a symlink back to the
+old path until you manually migrate the state.
+
 ## To v1.6.1 — from v1.6.0
 
 **Action:** None.
