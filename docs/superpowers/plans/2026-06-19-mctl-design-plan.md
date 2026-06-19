@@ -194,7 +194,10 @@ run_mctl_with_stubs_only() {
 }
 
 source_mctl() {
+  local saved_options
+  saved_options="$(set +o)"
   MCTL_TESTING=1 source "$MCTL"
+  eval "$saved_options"
 }
 
 meta_value() {
@@ -709,7 +712,7 @@ test_add_review_pr_launches_review_runner_from_repo_root() {
   local log
   log="$(cat "$SANDBOX/tmux.log")"
   assert_contains "$log" "$REPO_ROOT/scripts/review-pr.sh" "runner uses absolute review-pr path"
-  assert_contains "$log" " 7" "runner passes PR number"
+  assert_contains "$log" "'7'" "runner passes quoted PR number"
   assert_contains "$log" "$(shell_escape_for_test "$REPO")" "runner cd command mentions repo root"
 }
 
