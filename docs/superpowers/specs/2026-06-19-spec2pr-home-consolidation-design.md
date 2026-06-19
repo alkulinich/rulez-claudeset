@@ -79,9 +79,13 @@ suite exercises the override path and is unaffected by the default change.
 
 A guarded, idempotent block, run in both interactive and `-q`/auto-update mode.
 This migrates only the legacy default path; the `SPEC2PR_HOME` override remains
-an explicit user escape hatch and is not rewritten by setup. The destination
-base follows `RULEZ_CLAUDESET_HOME`, so custom data homes get the same default
-layout:
+an explicit user escape hatch and is not rewritten by setup. `bin/setup` runs
+under `set -e`, so the migration must live in a function whose fallible
+filesystem operations are explicitly guarded (`if ! mv ...; then warn; return
+0; fi`, same for `mkdir`, `rmdir`, and `ln -s`). The function itself must always
+return 0 after warning; a failed migration must not abort the rest of setup. The
+destination base follows `RULEZ_CLAUDESET_HOME`, so custom data homes get the
+same default layout:
 
 ```
 legacy="$HOME/.spec2pr"
@@ -89,7 +93,9 @@ rulez_home="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
 target="$rulez_home/spec2pr"
 
 if  $legacy exists  AND is a real directory (not a symlink):
-    mkdir -p "$rulez_home"
+    if mkdir -p "$rulez_home" fails:
+        echo "warning: cannot create $rulez_home; leaving ~/.spec2pr unchanged"
+        return success
 
     if $target is a symlink pointing at $legacy:
         # Cross-filesystem migration already installed the new default as a
@@ -98,27 +104,37 @@ if  $legacy exists  AND is a real directory (not a symlink):
 
     else if $legacy and $rulez_home are not on the same filesystem:
         if $target does not exist:
-            ln -s "$legacy" "$target"
-            echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+            if ln -s "$legacy" "$target" succeeds:
+                echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+            else:
+                echo "warning: cannot link $target to ~/.spec2pr; leaving ~/.spec2pr unchanged"
 
         else if $target exists AND is an empty directory:
-            rmdir "$target"
-            ln -s "$legacy" "$target"
-            echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+            if rmdir "$target" succeeds AND ln -s "$legacy" "$target" succeeds:
+                echo "linked $target to existing ~/.spec2pr (cross-filesystem; not moved)"
+            else:
+                echo "warning: cannot replace empty $target with symlink; leaving ~/.spec2pr unchanged"
 
         else:
             echo "warning: cannot atomically migrate ~/.spec2pr to $target and target is not empty; leaving both unchanged"
 
     else if $target does not exist:
-        mv "$legacy" "$target"
-        ln -s "$target" "$legacy"
-        echo "migrated ~/.spec2pr to $target (left a symlink)"
+        if mv "$legacy" "$target" succeeds:
+            if ln -s "$target" "$legacy" succeeds:
+                echo "migrated ~/.spec2pr to $target (left a symlink)"
+            else:
+                echo "warning: migrated ~/.spec2pr to $target but could not create legacy symlink"
+        else:
+            echo "warning: cannot migrate ~/.spec2pr to $target; leaving it unchanged"
 
     else if $target exists AND is an empty directory:
-        rmdir "$target"
-        mv "$legacy" "$target"
-        ln -s "$target" "$legacy"
-        echo "migrated ~/.spec2pr to $target (left a symlink)"
+        if rmdir "$target" succeeds AND mv "$legacy" "$target" succeeds:
+            if ln -s "$target" "$legacy" succeeds:
+                echo "migrated ~/.spec2pr to $target (left a symlink)"
+            else:
+                echo "warning: migrated ~/.spec2pr to $target but could not create legacy symlink"
+        else:
+            echo "warning: cannot replace empty $target with migrated ~/.spec2pr; leaving it unchanged"
 
     else:
         echo "warning: both ~/.spec2pr and $target exist; leaving them unchanged"
@@ -165,6 +181,9 @@ Personal-tool grade. The migration is best-effort and guarded:
   must not abort over the migration. The user still has their data at
   `~/.spec2pr` and can move or link it by hand. (We do not attempt
   cross-device copy logic — out of scope.)
+- If `mkdir`, `rmdir`, or `ln -s` fails, `bin/setup` also continues after
+  warning. The migration helper must contain these failures instead of letting
+  `set -e` terminate setup.
 - If both the legacy dir and a non-empty destination exist, setup warns and
   leaves both trees unchanged rather than guessing at a merge.
 - If the legacy dir and destination parent are on different filesystems, setup
@@ -191,7 +210,10 @@ Light, matching the repo's stub/sandbox style:
   the destination is absent or empty. Assert a second cross-filesystem run is a
   no-op when that target symlink already points at the legacy tree. To keep this
   testable, the migration block should be a small function (or a sourceable
-  snippet) rather than inline-only in `bin/setup`'s main flow.
+  snippet) rather than inline-only in `bin/setup`'s main flow. Include at least
+  one injected failure case under `set -e` (for example a stubbed `mv` or
+  unwritable destination parent) and assert setup/migration still returns
+  success after printing a warning.
 - **Default resolution** — add direct assertions in the same test file (or a
   second small `test-*.sh`) that, with `SPEC2PR_HOME` unset in a sandboxed
   `HOME`, both `scripts/lib/spec2pr-runtime.sh` and `scripts/spec2pr-watch.sh`
