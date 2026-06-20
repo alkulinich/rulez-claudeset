@@ -42,6 +42,31 @@ run_review_pr() {
   RC=$?
 }
 
+queue_clean_codex_pr_review() {
+  enqueue "$1-codex-review" <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"No blocker or major findings from codex."}'
+EOF
+}
+
+queue_dirty_codex_pr_review() {
+  enqueue "$1-codex-review" <<'EOF'
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"review-fix.txt","summary":"missing review fix","evidence":"review-fix.txt is absent from the PR diff"}],"notes":"Only blocker and major findings are listed."}'
+EOF
+}
+
+queue_mismatched_codex_pr_review() {
+  enqueue "$1-codex-review-mismatch" <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[{"severity":"blocker","artifact":"review-fix.txt","summary":"count mismatch","evidence":"finding severity does not match blockers_found"}],"notes":"mismatch fixture"}'
+EOF
+}
+
+queue_claude_pr_fix() {
+  enqueue_claude "$1-claude-fix" <<'EOF'
+printf 'review fix\n' > review-fix.txt
+printf '{"result":"fixed review finding with claude"}'
+EOF
+}
+
 test_review_pr_clean_done() {
   make_pr_sandbox
   queue_clean_pr_review 01-pr
@@ -170,4 +195,64 @@ test_review_pr_stale_lock_reclaimed() {
 
   assert_contains "$OUT" "PRREVIEW OK preflight: reclaimed stale lock" "stale lock reclaimed"
   assert_contains "$OUT" "PRREVIEW DONE" "run proceeds past reclaimed lock"
+}
+
+test_review_pr_codex_reviewer_clean_done_skips_claude_classifier() {
+  make_pr_sandbox
+  queue_clean_codex_pr_review 01-pr
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "codex reviewer clean review exits 0"
+  assert_contains "$OUT" "PRREVIEW OK pr-review: pr-review r1 reviewer=codex blockers=0 majors=0 clean" "codex reviewer status names reviewer"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL worktree=$PR_WT" "codex reviewer clean reaches done"
+  assert_eq "1" "$(codex_calls)" "clean codex reviewer makes one codex review call"
+  assert_eq "0" "$(claude_calls)" "clean codex reviewer skips claude review and classifier"
+  assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=review.json" "codex reviewer uses review schema"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "clean codex reviewer makes no codex fix call"
+  assert_contains "$(cat "$SPEC2PR_HOME/project-pr-$PR_NUMBER/pr-review-r1.review")" "No blocker or major findings from codex." "codex JSON rendered to review file"
+}
+
+test_review_pr_codex_reviewer_dirty_round_uses_claude_fixer() {
+  make_pr_sandbox
+  queue_dirty_codex_pr_review 01-pr
+  queue_claude_pr_fix 02-pr
+  queue_clean_codex_pr_review 03-pr
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "codex reviewer dirty then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW OK pr-review: pr-review r1 reviewer=codex blockers=1 majors=0" "dirty codex reviewer status names reviewer"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "codex reviewer reaches done after claude fix"
+  assert_file_exists "$PR_WT/review-fix.txt" "claude fix landed in worktree"
+  assert_eq "review-pr: pr-review review fixes r1" \
+    "$(git -C "$PR_WT" log -1 --format=%s)" "engine commits claude fix"
+  assert_eq "2" "$(codex_calls)" "codex reviewer called for dirty and clean rounds"
+  assert_eq "1" "$(claude_calls)" "claude fixer called once"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "codex fixer not used when codex reviews"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" "02-pr-claude-fix.sh" "claude consumed fix fixture"
+}
+
+test_review_pr_codex_reviewer_count_mismatch_halts() {
+  make_pr_sandbox
+  queue_mismatched_codex_pr_review 01-pr
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "codex reviewer count mismatch exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: review counts do not match findings" "count mismatch halt"
+  assert_eq "1" "$(codex_calls)" "mismatch consumes one codex review call"
+  assert_eq "0" "$(claude_calls)" "mismatch does not call claude fixer or classifier"
+}
+
+test_review_pr_reviewer_flag_validation() {
+  make_pr_sandbox
+  run_review_pr --reviewer gpt "$PR_NUMBER"
+  assert_eq "1" "$RC" "invalid reviewer exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "invalid reviewer shows usage"
+
+  run_review_pr --reviewer
+  assert_eq "1" "$RC" "missing reviewer value exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "missing reviewer value shows usage"
+
+  run_review_pr "$PR_NUMBER" extra
+  assert_eq "1" "$RC" "extra positional exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
 }
