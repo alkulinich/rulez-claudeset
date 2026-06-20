@@ -72,6 +72,48 @@ test_add_review_pr_writes_repo_qualified_pr_metadata() {
   assert_eq "$REPO" "$(meta_value "$run_dir/meta" repo)" "review-pr repo root comes from cwd"
 }
 
+test_add_review_pr_with_reviewer_persists_and_forwards_flag() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr 7 --reviewer codex
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add review-pr with reviewer exits 0"
+  assert_file_exists "$run_dir/meta" "review-pr reviewer meta file created"
+  assert_eq "codex" "$(meta_value "$run_dir/meta" reviewer)" "reviewer persisted in meta"
+  assert_contains "$log" "$REPO_ROOT/scripts/review-pr.sh" "runner uses review-pr script"
+  assert_contains "$log" "--reviewer" "runner forwards reviewer flag"
+  assert_contains "$log" "'codex'" "runner forwards reviewer value"
+  assert_contains "$log" "'7'" "runner forwards PR number"
+}
+
+test_add_review_pr_default_reviewer_does_not_write_meta_line() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr 7
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add review-pr default reviewer exits 0"
+  assert_eq "" "$(meta_value "$run_dir/meta" reviewer)" "default reviewer omitted from meta"
+  assert_not_contains "$log" "--reviewer" "default review-pr runner does not forward reviewer flag"
+}
+
+test_add_rejects_reviewer_for_spec2pr_and_invalid_review_pr_value() {
+  make_sandbox
+
+  run_mctl add spec2pr "$SPEC" --reviewer codex
+  assert_eq "1" "$RC" "spec2pr reviewer flag exits 1"
+  assert_contains "$OUT" "--reviewer is only supported for review-pr" "spec2pr reviewer rejection message"
+
+  run_mctl_in_dir "$REPO" add review-pr 7 --reviewer gpt
+  assert_eq "1" "$RC" "invalid review-pr reviewer exits 1"
+  assert_contains "$OUT" "usage: mctl add spec2pr <spec.md> | mctl add review-pr <pr#> [--reviewer <claude|codex>]" "invalid reviewer prints add usage"
+}
+
 test_add_refuses_missing_spec_non_numeric_pr_and_outside_repo() {
   make_sandbox
 
