@@ -17,7 +17,9 @@ to restore cross-model contrast.
 
 The engine is **shared**: `pr-review-engine.sh` is sourced by both
 `review-pr.sh` and `spec2pr.sh`. spec2pr's final PR review must stay
-claude-reviews → codex-fixes, byte-for-byte.
+claude-reviews → codex-fixes, byte-for-byte. In particular, an ambient
+environment variable from a user's shell must not be able to flip spec2pr's
+topology.
 
 ## Goal
 
@@ -45,14 +47,20 @@ The fixer is **derived**: `fixer = claude` when `reviewer == codex`, else `codex
 ## Change 1 — engine (`scripts/lib/pr-review-engine.sh`)
 
 At the top of `pr_review_engine_run`, alongside the existing knobs, read one new
-optional global:
+optional global behind an explicit caller opt-in:
 
 ```bash
-local pr_reviewer="${PR_REVIEWER:-claude}"   # review-pr may set =codex; spec2pr never sets it
+local pr_reviewer="claude"
+if [ "${PR_REVIEWER_SELECTABLE:-}" = "1" ]; then
+  pr_reviewer="${PR_REVIEWER:-claude}"       # review-pr sets; spec2pr never opts in
+fi
 ```
 
 Validate it once (`claude` or `codex`); `halt` on anything else. Derive the
 fixer locally (`codex` by default, `claude` when `pr_reviewer = codex`).
+Because spec2pr never sets `PR_REVIEWER_SELECTABLE=1`, exported shell values
+like `PR_REVIEWER=codex scripts/spec2pr.sh …` are ignored and spec2pr keeps the
+existing claude-reviewer/codex-fixer topology.
 
 ### Reviewer branch (replaces the review + classify block, lines ~47–124)
 
@@ -72,7 +80,12 @@ fixer locally (`codex` by default, `claude` when `pr_reviewer = codex`).
   3. Assert the worktree is clean (reviewer must not edit).
   4. `b` / `m` come **straight from the schema** (`.blockers_found` /
      `.majors_found`) — the separate classify call is **skipped**.
-  5. Render `$review_file` from the codex JSON (a `jq` render of `notes` plus
+  5. Mirror the existing codex review-loop integrity guard: count
+     `findings[] | select(.severity=="blocker")` and
+     `findings[] | select(.severity=="major")`; if either count differs from
+     `.blockers_found` / `.majors_found`, `halt "review counts do not match
+     findings ($review_json)"`.
+  6. Render `$review_file` from the codex JSON (a `jq` render of `notes` plus
      each finding as `- [severity] artifact: summary` / `evidence: …`) so
      `show_review` and the downstream fix prompt consume it unchanged.
 
@@ -110,6 +123,8 @@ a small parse loop:
 - Keep exactly one positional (the PR ref); error on zero or more than one.
 - Validate the reviewer value; `halt` with usage on anything else.
 - Export `PR_REVIEWER` so the sourced engine sees it.
+- Export `PR_REVIEWER_SELECTABLE=1` so the shared engine knows this caller is
+  allowed to honor `PR_REVIEWER`; spec2pr does not set this opt-in.
 
 Usage string becomes: `review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>`.
 
@@ -153,7 +168,14 @@ Reuse the existing stub harness (`tests/spec2pr/stub-claude.sh`,
   to `meta` and the built inner command contains `--reviewer codex`; `--reviewer`
   on `spec2pr` is rejected.
 - **spec2pr guard:** a spec2pr clean-done pipeline test asserts the engine call
-  path never emits `--reviewer` / never flips to a claude fixer.
+  path never emits `--reviewer` / never flips to a claude fixer. Also run this
+  guard with `PR_REVIEWER=codex` exported to prove ambient environment cannot
+  change spec2pr's final PR-review topology.
+- **Codex reviewer count integrity:** queue a schema-valid codex `review`
+  fixture whose `blockers_found` / `majors_found` values do not match the
+  severities in `findings[]`; assert the engine halts with
+  `review counts do not match findings` instead of treating the round as clean
+  or dirty from the inconsistent counters.
 
 Run via `bash tests/spec2pr/run-tests.sh` → all green (count rises by the new
 asserts).
