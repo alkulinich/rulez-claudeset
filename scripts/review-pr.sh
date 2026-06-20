@@ -21,8 +21,39 @@ PR_DONE_APPROVE=1
 
 STAGE="preflight"
 
-[ "$#" -eq 1 ] || halt "usage: review-pr.sh <pr-number|pr-url>"
-PR_REF="$1"
+usage() {
+  halt "usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>"
+}
+
+PR_REVIEWER="claude"
+PR_REF=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --reviewer)
+      [ "$#" -ge 2 ] || usage
+      PR_REVIEWER="$2"
+      shift 2
+      ;;
+    --reviewer=*)
+      PR_REVIEWER="${1#--reviewer=}"
+      shift
+      ;;
+    --*)
+      usage
+      ;;
+    *)
+      [ -z "$PR_REF" ] || usage
+      PR_REF="$1"
+      shift
+      ;;
+  esac
+done
+
+[ -n "$PR_REF" ] || usage
+case "$PR_REVIEWER" in
+  claude|codex) ;;
+  *) usage ;;
+esac
 
 require_codex
 require_claude
@@ -99,4 +130,4 @@ status "OK" "preflight ok pr=$PR_URL"
 TMP_DIR="$(mktemp -d -t review-pr.XXXXXX)"
 write_schemas
 
-pr_review_engine_run
+pr_review_engine_run "$PR_REVIEWER"
