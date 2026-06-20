@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# review-pr.sh <pr-number|pr-url>
+# review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>
 #
 # Standalone PR reviewer. Run from inside a checkout of the PR's repo. Fetches
 # the PR head into a throwaway worktree and runs the shared review engine:
-# claude reviews the diff, codex fixes findings, commit + push to the PR head
-# branch, repeat up to MAX_FIX_ROUNDS, until clean (PRREVIEW DONE) or stuck
-# (PRREVIEW DIRTY). Findings/logs land under $SPEC2PR_HOME/<id>/.
+# selected reviewer reviews the diff, the opposite model fixes findings, commit
+# + push to the PR head branch, repeat up to MAX_FIX_ROUNDS, until clean
+# (PRREVIEW DONE) or stuck (PRREVIEW DIRTY). Findings/logs land under
+# $SPEC2PR_HOME/<id>/.
 set -euo pipefail
 
 source "$(dirname "$0")/lib/spec2pr-runtime.sh"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# PR-review engine: fresh-eyes claude review -> classify -> codex fix -> commit
-# /push -> repeat, up to MAX_FIX_ROUNDS, then DONE (clean) or DIRTY (stuck).
+# PR-review engine: fresh-eyes review -> opposite-model fix -> commit/push ->
+# repeat, up to MAX_FIX_ROUNDS, then DONE (clean) or DIRTY (stuck). Default is
+# claude reviews/classifies and codex fixes; callers may select codex reviewer.
 #
 # Sourced after spec2pr-runtime.sh. Reads these globals (set by the caller):
 #   WORKTREE BASE_SHA BRANCH META_DIR PR_URL TMP_DIR STATUS_PATH

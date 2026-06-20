@@ -60,6 +60,19 @@ printf '{"blockers_found":0,"majors_found":0,"findings":[{"severity":"blocker","
 EOF
 }
 
+queue_schema_invalid_codex_pr_review() {
+  enqueue "$1-codex-review-invalid-schema" <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[]}'
+EOF
+}
+
+queue_editing_codex_pr_review() {
+  enqueue "$1-codex-review-edits-worktree" <<'EOF'
+printf 'reviewer edit\n' > reviewer-edit.txt
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"No findings, but edited the worktree."}'
+EOF
+}
+
 queue_claude_pr_fix() {
   enqueue_claude "$1-claude-fix" <<'EOF'
 printf 'review fix\n' > review-fix.txt
@@ -240,6 +253,51 @@ test_review_pr_codex_reviewer_count_mismatch_halts() {
   assert_contains "$OUT" "PRREVIEW HALT pr-review: review counts do not match findings" "count mismatch halt"
   assert_eq "1" "$(codex_calls)" "mismatch consumes one codex review call"
   assert_eq "0" "$(claude_calls)" "mismatch does not call claude fixer or classifier"
+}
+
+test_review_pr_codex_reviewer_schema_violation_halts() {
+  make_pr_sandbox
+  queue_schema_invalid_codex_pr_review 01-pr
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "codex reviewer schema violation exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: codex pr-review-r1 violated review schema" "schema violation halt"
+  assert_eq "1" "$(codex_calls)" "schema violation consumes one codex review call"
+  assert_eq "0" "$(claude_calls)" "schema violation does not call claude fixer or classifier"
+}
+
+test_review_pr_codex_reviewer_edit_halts() {
+  make_pr_sandbox
+  queue_editing_codex_pr_review 01-pr
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "codex reviewer edit exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: reviewer modified worktree" "reviewer edit halt"
+  assert_file_exists "$PR_WT/reviewer-edit.txt" "codex reviewer edit remains for inspection"
+  assert_eq "1" "$(codex_calls)" "reviewer edit consumes one codex review call"
+  assert_eq "0" "$(claude_calls)" "reviewer edit does not call claude fixer or classifier"
+}
+
+test_review_pr_reviewer_flag_equals_form() {
+  make_pr_sandbox
+  queue_clean_codex_pr_review 01-pr
+  run_review_pr --reviewer=codex "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "equals-form reviewer flag exits 0"
+  assert_contains "$OUT" "PRREVIEW OK pr-review: pr-review r1 reviewer=codex blockers=0 majors=0 clean" "equals-form reviewer flag selects codex"
+  assert_eq "1" "$(codex_calls)" "equals-form reviewer flag makes one codex review call"
+  assert_eq "0" "$(claude_calls)" "equals-form reviewer flag skips claude review and classifier"
+}
+
+test_review_pr_reviewer_flag_after_pr_ref() {
+  make_pr_sandbox
+  queue_clean_codex_pr_review 01-pr
+  run_review_pr "$PR_NUMBER" --reviewer codex
+
+  assert_eq "0" "$RC" "post-positional reviewer flag exits 0"
+  assert_contains "$OUT" "PRREVIEW OK pr-review: pr-review r1 reviewer=codex blockers=0 majors=0 clean" "post-positional reviewer flag selects codex"
+  assert_eq "1" "$(codex_calls)" "post-positional reviewer flag makes one codex review call"
+  assert_eq "0" "$(claude_calls)" "post-positional reviewer flag skips claude review and classifier"
 }
 
 test_review_pr_reviewer_flag_validation() {
