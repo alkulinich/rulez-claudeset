@@ -83,6 +83,25 @@ test_pr_review_dirty_round_pushes() {
     "spec2pr: pr-review review fixes r1" "dirty pr-review fix commit is last"
 }
 
+test_spec2pr_pr_review_ignores_ambient_reviewer_variables() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_dirty_pr_review 05-pr-review
+  queue_clean_pr_review 06-pr-review-clean
+  PR_REVIEWER=codex PR_REVIEWER_SELECTABLE=1 run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "ambient reviewer variables do not change spec2pr topology"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "spec2pr reaches done"
+  assert_contains "$OUT" "pr-review r1 blockers=1 majors=0" "default status has no reviewer label"
+  assert_not_contains "$OUT" "reviewer=codex" "spec2pr does not switch to codex reviewer"
+  assert_eq "5" "$(codex_calls)" "spec2pr uses codex for spec review, plan, plan review, implementation, and pr fix"
+  assert_eq "4" "$(claude_calls)" "spec2pr uses claude for pr review/classify twice"
+  assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "spec2pr still uses codex pr-fix schema"
+}
+
 test_pr_review_fix_schema_violation_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review

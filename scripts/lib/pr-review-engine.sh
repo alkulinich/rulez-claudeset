@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# PR-review engine: fresh-eyes claude review -> classify -> codex fix -> commit
-# /push -> repeat, up to MAX_FIX_ROUNDS, then DONE (clean) or DIRTY (stuck).
+# PR-review engine: fresh-eyes review -> opposite-model fix -> commit/push ->
+# repeat, up to MAX_FIX_ROUNDS, then DONE (clean) or DIRTY (stuck). Default is
+# claude reviews/classifies and codex fixes; callers may select codex reviewer.
 #
 # Sourced after spec2pr-runtime.sh. Reads these globals (set by the caller):
 #   WORKTREE BASE_SHA BRANCH META_DIR PR_URL TMP_DIR STATUS_PATH
@@ -14,6 +15,21 @@
 # halt / split. Does not return on a completed review.
 
 pr_review_engine_run() {
+  if [ "$#" -gt 1 ]; then
+    halt "usage: pr_review_engine_run [claude|codex]"
+  fi
+  local pr_reviewer="claude"
+  if [ "$#" -gt 0 ]; then
+    pr_reviewer="$1"
+  fi
+  case "$pr_reviewer" in
+    claude|codex) ;;
+    *) halt "invalid pr reviewer: $pr_reviewer" ;;
+  esac
+  local pr_fixer="codex"
+  if [ "$pr_reviewer" = "codex" ]; then
+    pr_fixer="claude"
+  fi
   local review_run_desc="${REVIEW_RUN_DESC:-an unattended spec2pr run}"
   local commit_prefix="${COMMIT_PREFIX:-spec2pr}"
   local done_comment_header="${DONE_COMMENT_HEADER:-spec2pr PR review complete.}"
@@ -35,7 +51,7 @@ pr_review_engine_run() {
     split diff "$diff_size" "$SPEC2PR_MAX_DIFF"
   fi
 
-  local round review_prompt review_json review_file
+  local round review_prompt review_json review_file review_blockers review_majors status_reviewer
   local classify_prompt classify_json classify_result classify_tmp
   local malformed attempt classify_rc b m fix_prompt before_fix_head after_fix_head
 
@@ -45,9 +61,10 @@ pr_review_engine_run() {
     fi
 
     review_prompt="$META_DIR/pr-review-r$round.prompt"
-    review_json="$META_DIR/pr-review-r$round.claude.json"
     review_file="$META_DIR/pr-review-r$round.review"
-    cat > "$review_prompt" <<EOF
+    if [ "$pr_reviewer" = "claude" ]; then
+      review_json="$META_DIR/pr-review-r$round.claude.json"
+      cat > "$review_prompt" <<EOF
 You are a fresh-eyes PR reviewer for $review_run_desc.
 
 Review only the implementation diff below, produced from immutable base
@@ -62,20 +79,20 @@ Return your review as prose in the JSON envelope's result field.
 Diff:
 $(cat "$diff_file")
 EOF
-    run_claude_json "pr-review-r$round" "$review_prompt" "$review_json"
-    jq -er '.result' "$review_json" > "$review_file" \
-      || halt "reviewer response missing result ($review_json)"
-    if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
-      halt "reviewer modified worktree"
-    fi
+      run_claude_json "pr-review-r$round" "$review_prompt" "$review_json"
+      jq -er '.result' "$review_json" > "$review_file" \
+        || halt "reviewer response missing result ($review_json)"
+      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        halt "reviewer modified worktree"
+      fi
 
-    classify_prompt="$META_DIR/pr-review-r$round.classify.prompt"
-    classify_json="$META_DIR/pr-review-r$round.classify.json"
-    classify_result="$META_DIR/pr-review-r$round.classify.result.json"
-    classify_tmp="$META_DIR/pr-review-r$round.classify.tmp"
-    malformed=0
-    for attempt in 1 2; do
-      cat > "$classify_prompt" <<EOF
+      classify_prompt="$META_DIR/pr-review-r$round.classify.prompt"
+      classify_json="$META_DIR/pr-review-r$round.classify.json"
+      classify_result="$META_DIR/pr-review-r$round.classify.result.json"
+      classify_tmp="$META_DIR/pr-review-r$round.classify.tmp"
+      malformed=0
+      for attempt in 1 2; do
+        cat > "$classify_prompt" <<EOF
 Classify the review below. Return only JSON with integer keys
 blockers_found and majors_found. Blockers are release-blocking correctness,
 safety, data-loss, security, or contract failures. Majors are high or medium
@@ -84,54 +101,103 @@ severity regressions that should be fixed before human review.
 Review:
 $(cat "$review_file")
 EOF
-      set +e
-      claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
-      classify_rc=$?
-      set -e
-      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
-        halt "classifier modified worktree"
-      fi
-      if [ "$classify_rc" -eq 2 ]; then
-        halt "claude pr-review-r$round.classify-a$attempt failed (stderr: $META_DIR/pr-review-r$round.classify-a$attempt.stderr)"
-      fi
-      if [ "$classify_rc" -ne 0 ]; then
-        malformed=1
-        continue
-      fi
-      if jq -e 'if (.result | type) == "object" then .result else (.result | tostring | fromjson?) end
-        | select(type=="object")
-        | {blockers_found, majors_found}
-        | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
-        | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
-          "$classify_json" > "$classify_result" 2>/dev/null; then
-        malformed=0
-        break
-      fi
-      jq -r '.result // empty' "$classify_json" | extract_json_object > "$classify_tmp" 2>/dev/null || true
-      if [ -s "$classify_tmp" ] && jq -e '{blockers_found, majors_found}
+        set +e
+        claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
+        classify_rc=$?
+        set -e
+        if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+          halt "classifier modified worktree"
+        fi
+        if [ "$classify_rc" -eq 2 ]; then
+          halt "claude pr-review-r$round.classify-a$attempt failed (stderr: $META_DIR/pr-review-r$round.classify-a$attempt.stderr)"
+        fi
+        if [ "$classify_rc" -ne 0 ]; then
+          malformed=1
+          continue
+        fi
+        if jq -e 'if (.result | type) == "object" then .result else (.result | tostring | fromjson?) end
+          | select(type=="object")
+          | {blockers_found, majors_found}
           | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
           | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
-          "$classify_tmp" > "$classify_result" 2>/dev/null; then
-        malformed=0
-        break
+            "$classify_json" > "$classify_result" 2>/dev/null; then
+          malformed=0
+          break
+        fi
+        jq -r '.result // empty' "$classify_json" | extract_json_object > "$classify_tmp" 2>/dev/null || true
+        if [ -s "$classify_tmp" ] && jq -e '{blockers_found, majors_found}
+            | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
+            | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
+            "$classify_tmp" > "$classify_result" 2>/dev/null; then
+          malformed=0
+          break
+        fi
+        malformed=1
+      done
+      if [ "$malformed" -ne 0 ]; then
+        halt "classifier returned malformed JSON"
       fi
-      malformed=1
-    done
-    if [ "$malformed" -ne 0 ]; then
-      halt "classifier returned malformed JSON"
+      b="$(jq -r '.blockers_found' "$classify_result")"
+      m="$(jq -r '.majors_found' "$classify_result")"
+    else
+      review_json="$META_DIR/pr-review-r$round.json"
+      cat > "$review_prompt" <<EOF
+You are a fresh-eyes PR reviewer for $review_run_desc.
+
+Review only the implementation diff below, produced from immutable base
+$BASE_SHA to HEAD.${spec_plan_line}
+You may inspect files and run tests in this worktree, but do not edit files,
+commit, push, or comment on GitHub. If the diff relies on a third-party library
+or API whose current behavior you are unsure of, consult the context7 MCP for
+up-to-date docs before forming a finding.
+
+Return JSON matching the output schema.
+
+Severity contract:
+- Blockers are release-blocking correctness, safety, data-loss, security, or contract failures.
+- Majors are high or medium severity regressions that should be fixed before human review.
+- Minor, low, or nit issues belong in notes only and must not appear in findings or counts.
+
+Diff:
+$(cat "$diff_file")
+EOF
+      codex_call review "pr-review-r$round" "$review_prompt"
+      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        halt "reviewer modified worktree"
+      fi
+      b="$(jq -r '.blockers_found' "$review_json")"
+      m="$(jq -r '.majors_found' "$review_json")"
+      review_blockers="$(jq '[.findings[]? | select(.severity == "blocker")] | length' "$review_json")"
+      review_majors="$(jq '[.findings[]? | select(.severity == "major")] | length' "$review_json")"
+      if [ "$b" -ne "$review_blockers" ] || [ "$m" -ne "$review_majors" ]; then
+        halt "review counts do not match findings ($review_json)"
+      fi
+      jq -r '
+        [
+          (.findings[]? | "\(.severity | ascii_upcase): \(.summary)\nArtifact: \(.artifact)\nEvidence: \(.evidence)"),
+          (.notes | select(. != ""))
+        ] | join("\n\n")
+      ' "$review_json" > "$review_file"
     fi
-    b="$(jq -r '.blockers_found' "$classify_result")"
-    m="$(jq -r '.majors_found' "$classify_result")"
     if [ "$((b + m))" -eq 0 ]; then
-      status "OK" "pr-review r$round blockers=0 majors=0 clean"
+      status_reviewer=""
+      if [ "$pr_reviewer" != "claude" ]; then
+        status_reviewer=" reviewer=$pr_reviewer"
+      fi
+      status "OK" "pr-review r$round${status_reviewer} blockers=0 majors=0 clean"
       show_review "$review_file"
       break
     fi
 
-    status "OK" "pr-review r$round blockers=$b majors=$m"
+    status_reviewer=""
+    if [ "$pr_reviewer" != "claude" ]; then
+      status_reviewer=" reviewer=$pr_reviewer"
+    fi
+    status "OK" "pr-review r$round${status_reviewer} blockers=$b majors=$m"
     show_review "$review_file"
     fix_prompt="$META_DIR/pr-review-r$round.fix.prompt"
-    cat > "$fix_prompt" <<EOF
+    if [ "$pr_fixer" = "codex" ]; then
+      cat > "$fix_prompt" <<EOF
 Fix the blocker and major findings from this fresh-eyes PR review.
 
 Review findings:
@@ -141,13 +207,32 @@ Make the necessary code, test, and documentation changes in this worktree.
 Do not push, do not create a PR. Your final message must be exactly the JSON
 required by the output schema.
 EOF
-    before_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-    codex_call pr-fix "pr-review-r$round.fix" "$fix_prompt"
-    after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-    if [ "$after_fix_head" != "$before_fix_head" ]; then
-      halt "pr-review fixer committed changes (contract violation)"
+      before_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      codex_call pr-fix "pr-review-r$round.fix" "$fix_prompt"
+      after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_fix_head" != "$before_fix_head" ]; then
+        halt "pr-review fixer committed changes (contract violation)"
+      fi
+      jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
+    else
+      cat > "$fix_prompt" <<EOF
+Fix the blocker and major findings from this fresh-eyes PR review.
+
+Review findings:
+$(cat "$review_file")
+
+Make the necessary code, test, and documentation changes in this worktree.
+Do not push, do not create a PR.
+EOF
+      before_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      run_claude_json "pr-review-r$round.fix" "$fix_prompt" "$META_DIR/pr-review-r$round.fix.json"
+      after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_fix_head" != "$before_fix_head" ]; then
+        halt "pr-review fixer committed changes (contract violation)"
+      fi
+      jq -er '.result' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix" \
+        || halt "fixer response missing result ($META_DIR/pr-review-r$round.fix.json)"
     fi
-    jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
       git -C "$WORKTREE" add -A
       git -C "$WORKTREE" commit -q -m "$commit_prefix: pr-review review fixes r$round"
