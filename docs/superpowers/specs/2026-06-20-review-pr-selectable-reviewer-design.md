@@ -46,21 +46,23 @@ The fixer is **derived**: `fixer = claude` when `reviewer == codex`, else `codex
 
 ## Change 1 — engine (`scripts/lib/pr-review-engine.sh`)
 
-At the top of `pr_review_engine_run`, alongside the existing knobs, read one new
-optional global behind an explicit caller opt-in:
+Change `pr_review_engine_run` to accept one optional positional argument from
+callers:
 
 ```bash
 local pr_reviewer="claude"
-if [ "${PR_REVIEWER_SELECTABLE:-}" = "1" ]; then
-  pr_reviewer="${PR_REVIEWER:-claude}"       # review-pr sets; spec2pr never opts in
+if [ "$#" -gt 0 ]; then
+  pr_reviewer="$1"                           # review-pr passes; spec2pr passes nothing
 fi
 ```
 
-Validate it once (`claude` or `codex`); `halt` on anything else. Derive the
-fixer locally (`codex` by default, `claude` when `pr_reviewer = codex`).
-Because spec2pr never sets `PR_REVIEWER_SELECTABLE=1`, exported shell values
-like `PR_REVIEWER=codex scripts/spec2pr.sh …` are ignored and spec2pr keeps the
-existing claude-reviewer/codex-fixer topology.
+Validate arity first (`0` or `1` only), then validate the reviewer value once
+(`claude` or `codex`); `halt` on anything else. Derive the fixer locally
+(`codex` by default, `claude` when `pr_reviewer = codex`). Because spec2pr still
+calls `pr_review_engine_run` with no arguments, exported shell values like
+`PR_REVIEWER=codex scripts/spec2pr.sh …` or even
+`PR_REVIEWER_SELECTABLE=1 PR_REVIEWER=codex scripts/spec2pr.sh …` are ignored
+and spec2pr keeps the existing claude-reviewer/codex-fixer topology.
 
 ### Reviewer branch (replaces the review + classify block, lines ~47–124)
 
@@ -116,8 +118,10 @@ the engine's own `add` / `commit` / `push` are unchanged.
 
 ### Status / log lines
 
-Include the active reviewer in the per-round status (e.g.
-`pr-review r$round reviewer=codex blockers=…`) so logs show which model ran.
+When `review-pr.sh` passes a non-default reviewer, include the active reviewer
+in the per-round status (e.g. `pr-review r$round reviewer=codex blockers=…`) so
+logs show which model ran. Leave the default `claude` status text unchanged, so
+spec2pr's shared-engine status output remains byte-for-byte compatible.
 
 ## Change 2 — `scripts/review-pr.sh`
 
@@ -127,9 +131,9 @@ a small parse loop:
 - Accept `--reviewer <claude|codex>` in any position; default `claude`.
 - Keep exactly one positional (the PR ref); error on zero or more than one.
 - Validate the reviewer value; `halt` with usage on anything else.
-- Export `PR_REVIEWER` so the sourced engine sees it.
-- Export `PR_REVIEWER_SELECTABLE=1` so the shared engine knows this caller is
-  allowed to honor `PR_REVIEWER`; spec2pr does not set this opt-in.
+- Call `pr_review_engine_run "$PR_REVIEWER"` after parsing, rather than relying
+  on exported environment state. spec2pr continues calling `pr_review_engine_run`
+  with no arguments.
 
 Usage string becomes: `review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>`.
 
@@ -174,8 +178,9 @@ Reuse the existing stub harness (`tests/spec2pr/stub-claude.sh`,
   `--reviewer codex`; `--reviewer` on `spec2pr` is rejected.
 - **spec2pr guard:** a spec2pr clean-done pipeline test asserts the engine call
   path never emits `--reviewer` / never flips to a claude fixer. Also run this
-  guard with `PR_REVIEWER=codex` exported to prove ambient environment cannot
-  change spec2pr's final PR-review topology.
+  guard with both `PR_REVIEWER=codex` and
+  `PR_REVIEWER_SELECTABLE=1 PR_REVIEWER=codex` exported to prove ambient
+  environment cannot change spec2pr's final PR-review topology.
 - **Codex reviewer count integrity:** queue a schema-valid codex `review`
   fixture whose `blockers_found` / `majors_found` values do not match the
   severities in `findings[]`; assert the engine halts with
@@ -189,8 +194,8 @@ Run both suites; the spec2pr count and mctl count rise by the new asserts:
 
 - **edit** `scripts/lib/pr-review-engine.sh` — `PR_REVIEWER` knob; reviewer and
   fixer branches; review_file render for the codex reviewer.
-- **edit** `scripts/review-pr.sh` — parse/validate `--reviewer`, export
-  `PR_REVIEWER`.
+- **edit** `scripts/review-pr.sh` — parse/validate `--reviewer`, then pass the
+  reviewer as the explicit `pr_review_engine_run` argument.
 - **edit** `scripts/mctl.sh` — accept/validate/persist/forward `--reviewer`
   (`cmd_add`, `write_meta`, `build_inner_runner_command`).
 - **edit** `tests/spec2pr/test-review-pr.sh` (+ stubs) — new codex-reviewer
