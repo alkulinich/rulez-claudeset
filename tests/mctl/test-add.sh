@@ -102,6 +102,19 @@ test_add_review_pr_default_reviewer_does_not_write_meta_line() {
   assert_not_contains "$log" "--reviewer" "default review-pr runner does not forward reviewer flag"
 }
 
+test_add_review_pr_explicit_claude_reviewer_uses_default_behavior() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr 7 --reviewer claude
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add review-pr explicit claude reviewer exits 0"
+  assert_eq "" "$(meta_value "$run_dir/meta" reviewer)" "explicit claude reviewer omitted from meta"
+  assert_not_contains "$log" "--reviewer" "explicit claude reviewer is not forwarded"
+}
+
 test_add_rejects_reviewer_for_spec2pr_and_invalid_review_pr_value() {
   make_sandbox
 
