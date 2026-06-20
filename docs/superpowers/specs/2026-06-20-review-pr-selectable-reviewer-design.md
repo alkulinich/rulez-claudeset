@@ -73,6 +73,11 @@ existing claude-reviewer/codex-fixer topology.
 - **`pr_reviewer = codex`** — new, reuses the existing `review` codex schema:
   1. Write a codex-flavored review prompt (review the diff; do **not** edit,
      commit, push, or comment; the `--output-schema` already forces the shape).
+     The prompt must carry the same severity contract as the existing classifier:
+     blockers are release-blocking correctness, safety, data-loss, security, or
+     contract failures; majors are high or medium severity regressions that should
+     be fixed before human review; minor/low/nit observations go in `notes` only
+     and never in `findings` or the blocker/major counts.
   2. `codex_call review "pr-review-r$round" "$review_prompt"` →
      `$META_DIR/pr-review-r$round.json`, validated against the `review` schema
      (`blockers_found`, `majors_found`, `notes`, `findings[]` with
@@ -164,9 +169,9 @@ Reuse the existing stub harness (`tests/spec2pr/stub-claude.sh`,
   `PRREVIEW DONE`.
 - **Default path regression:** existing `test-review-pr.sh` (claude-reviews →
   codex-fixes) stays green untouched.
-- **mctl:** `mctl add review-pr <pr#> --reviewer codex` writes `reviewer=codex`
-  to `meta` and the built inner command contains `--reviewer codex`; `--reviewer`
-  on `spec2pr` is rejected.
+- **mctl:** in `tests/mctl/`, `mctl add review-pr <pr#> --reviewer codex`
+  writes `reviewer=codex` to `meta` and the built inner command contains
+  `--reviewer codex`; `--reviewer` on `spec2pr` is rejected.
 - **spec2pr guard:** a spec2pr clean-done pipeline test asserts the engine call
   path never emits `--reviewer` / never flips to a claude fixer. Also run this
   guard with `PR_REVIEWER=codex` exported to prove ambient environment cannot
@@ -177,8 +182,8 @@ Reuse the existing stub harness (`tests/spec2pr/stub-claude.sh`,
   `review counts do not match findings` instead of treating the round as clean
   or dirty from the inconsistent counters.
 
-Run via `bash tests/spec2pr/run-tests.sh` → all green (count rises by the new
-asserts).
+Run both suites; the spec2pr count and mctl count rise by the new asserts:
+`bash tests/spec2pr/run-tests.sh` and `bash tests/mctl/run-tests.sh`.
 
 ## Files
 
@@ -188,12 +193,15 @@ asserts).
   `PR_REVIEWER`.
 - **edit** `scripts/mctl.sh` — accept/validate/persist/forward `--reviewer`
   (`cmd_add`, `write_meta`, `build_inner_runner_command`).
-- **edit** `tests/spec2pr/test-review-pr.sh` (+ stubs / a small mctl test) — new
-  codex-reviewer coverage and the spec2pr guard.
+- **edit** `tests/spec2pr/test-review-pr.sh` (+ stubs) — new codex-reviewer
+  coverage and the spec2pr guard.
+- **edit** `tests/mctl/test-add.sh` — `mctl add review-pr --reviewer` persistence
+  and forwarding coverage, plus `spec2pr --reviewer` rejection.
 
 ## Verification
 
 - `bash tests/spec2pr/run-tests.sh` → all green.
+- `bash tests/mctl/run-tests.sh` → all green.
 - Manual (optional, real PR): `review-pr.sh --reviewer codex <pr#>` on a small
   PR → ends `PRREVIEW DONE`, logs show `reviewer=codex` and a claude fix call on
   any non-clean round. Default `review-pr.sh <pr#>` unchanged.
