@@ -38,6 +38,10 @@ die() {
   exit 1
 }
 
+add_usage() {
+  die "usage: mctl add spec2pr <spec.md> | mctl add review-pr <pr#> [--reviewer <claude|codex>]"
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"
 }
@@ -77,7 +81,7 @@ meta_get() {
 }
 
 write_meta() {
-  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9"
+  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}"
   cat > "$run_dir/meta" <<EOF
 kind=$kind
 token=$token
@@ -88,6 +92,9 @@ spec2pr_home=$spec_home
 spec2pr_worktrees=$wt_home
 target=$target
 EOF
+  if [ -n "$reviewer" ]; then
+    printf 'reviewer=%s\n' "$reviewer" >> "$run_dir/meta"
+  fi
 }
 
 ensure_new_run_slot() {
@@ -115,21 +122,26 @@ build_inner_runner_command() {
   local run_dir meta
   run_dir="$1"
   meta="$run_dir/meta"
-  local kind repo target spec_home wt_home runner exit_path
+  local kind repo target spec_home wt_home reviewer runner exit_path runner_args
   kind="$(meta_get "$meta" kind)"
   repo="$(meta_get "$meta" repo)"
   target="$(meta_get "$meta" target)"
   spec_home="$(meta_get "$meta" spec2pr_home)"
   wt_home="$(meta_get "$meta" spec2pr_worktrees)"
+  reviewer="$(meta_get "$meta" reviewer)"
   runner="$(runner_for_kind "$kind")"
   exit_path="$run_dir/exit"
+  runner_args="$(shell_quote "$target")"
+  if [ "$kind" = "review-pr" ] && [ -n "$reviewer" ]; then
+    runner_args="--reviewer $(shell_quote "$reviewer") $runner_args"
+  fi
 
   printf 'cd %s && SPEC2PR_HOME=%s SPEC2PR_WORKTREES=%s SPEC2PR_VERBOSE=1 bash %s %s; rc=$?; printf %s "$rc" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" > %s; exit "$rc"' \
     "$(shell_quote "$repo")" \
     "$(shell_quote "$spec_home")" \
     "$(shell_quote "$wt_home")" \
     "$(shell_quote "$runner")" \
-    "$(shell_quote "$target")" \
+    "$runner_args" \
     "$(shell_quote $'rc=%s\nfinished=%s\n')" \
     "$(shell_quote "$exit_path")"
 }
@@ -167,13 +179,32 @@ launch_run() {
 }
 
 cmd_add() {
-  [ "$#" -eq 2 ] || die "usage: mctl add spec2pr <spec.md> | mctl add review-pr <pr#>"
+  [ "$#" -ge 2 ] || add_usage
   require_cmd tmux
   require_cmd script
 
-  local kind="$1" arg="$2" repo target repo_slug name token session run_dir started
+  local kind="$1" arg="$2" reviewer="" repo target repo_slug name token session run_dir started
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --reviewer)
+        [ "$#" -ge 2 ] || add_usage
+        reviewer="$2"
+        shift 2
+        ;;
+      --reviewer=*)
+        reviewer="${1#--reviewer=}"
+        shift
+        ;;
+      *)
+        add_usage
+        ;;
+    esac
+  done
+
   case "$kind" in
     spec2pr)
+      [ -z "$reviewer" ] || die "--reviewer is only supported for review-pr"
       [ -f "$arg" ] || die "spec not found: $arg"
       repo="$(git_root_for_path "$arg")" || die "spec is not inside a git repository"
       target="$(canonical_file_path "$arg")" || die "could not resolve spec path: $arg"
@@ -188,6 +219,15 @@ cmd_add() {
       token="$name"
       ;;
     review-pr)
+      if [ -n "$reviewer" ]; then
+        case "$reviewer" in
+          claude|codex) ;;
+          *) add_usage ;;
+        esac
+        if [ "$reviewer" = "claude" ]; then
+          reviewer=""
+        fi
+      fi
       [[ "$arg" =~ ^[0-9]+$ ]] || die "pr number must be numeric: $arg"
       repo="$(git_root_for_cwd)" || die "not inside a git repository"
       target="$arg"
@@ -209,7 +249,7 @@ cmd_add() {
   : > "$run_dir/brief.log"
   started="$(utc_now)"
   write_meta "$run_dir" "$kind" "$token" "$session" "$repo" "$started" \
-    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target"
+    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target" "$reviewer"
 
   launch_run "$run_dir"
   printf '%s\n' "$name"
