@@ -143,10 +143,14 @@ plan"}` instead of `{"plan_path":...,"summary":...}`.
 Each full run moves one model call from the codex queue to the claude queue. So:
 
 - `codex_calls` assertions drop by 1 each (plan is authored once per scenario
-  and persists across reruns): the five `=6` checks in `test-stages.sh` → `=5`,
-  the two `=7` forged-marker checks → `=6`.
-- The existing `claude_calls` assertions in `test-pipeline.sh` (`=2`, `=4`, `=3`)
-  rise by the number of plan-authoring claude calls in that test.
+  and persists across reruns): the seven `=6` checks in `test-stages.sh` → `=5`,
+  and the two `=7` forged-marker checks → `=6`.
+- `test-pipeline.sh` `codex_calls` assertions also drop by 1 for scenarios that
+  author a plan: `=4` → `=3`, `=5` → `=4`, and each `=7` resume/stale-implementation
+  assertion → `=6`.
+- The existing `claude_calls` assertions in `test-pipeline.sh` rise by the same
+  one plan-authoring claude call in those tests: `=2` → `=3`, `=4` → `=5`, and
+  each `=3` classifier-retry assertion → `=4`.
 
 Recount per run after the change — codex authors: spec-review, plan-review,
 implement; claude authors: plan, pr-review (review + classify).
