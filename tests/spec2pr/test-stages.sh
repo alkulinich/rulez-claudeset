@@ -226,6 +226,27 @@ test_implement_pr_body_links_spec_and_plan_to_github_head() {
   assert_contains "$gh_log" "- Plan: [$PLAN_REL](https://github.com/acme/widgets/blob/$head/$PLAN_REL)" "PR body links plan to head SHA"
 }
 
+test_fast_mode_only_marks_implementation_codex_call() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+
+  run_spec2pr --fast "$SPEC"
+
+  local invocations
+  invocations="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log" 2>/dev/null || true)"
+
+  assert_eq "0" "$RC" "fast spec2pr exits 0"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "fast spec2pr reaches done"
+  assert_contains "$invocations" "schema=implement.json" "implementation call was made"
+  assert_contains "$invocations" "schema=implement.json fixture=04-implement.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "implementation call uses fast mode"
+  assert_not_contains "$invocations" "schema=review.json fixture=01-spec-review.sh args=exec --enable fast_mode" "spec review call is not fast"
+  assert_not_contains "$invocations" "schema=review.json fixture=03-plan-review.sh args=exec --enable fast_mode" "plan review call is not fast"
+}
+
 test_implement_blocked_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review

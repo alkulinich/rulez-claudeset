@@ -16,6 +16,7 @@ RULEZ_CLAUDESET_HOME="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
 SPEC2PR_HOME="${SPEC2PR_HOME:-$RULEZ_CLAUDESET_HOME/spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
+SPEC2PR_CODEX_FAST="${SPEC2PR_CODEX_FAST:-}"
 # Set to any non-empty value to echo review findings and stage summaries to stdout.
 SPEC2PR_VERBOSE="${SPEC2PR_VERBOSE:-}"
 CONTRACT_PREFIX="${CONTRACT_PREFIX:-SPEC2PR}"
@@ -263,17 +264,42 @@ EOF
 }
 
 # -- Model call layer ------------------------------------------------------
+codex_fast_enabled_for_role() {
+  local role="$1"
+  [ -n "$SPEC2PR_CODEX_FAST" ] || return 1
+  case "$role" in
+    implement|pr-fix) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 codex_call() {
   local role="$1" tag="$2" prompt_file="$3"
   local last="$META_DIR/$tag.json"
   local err="$META_DIR/$tag.stderr"
+  local progress_suffix=""
+  local use_fast=0
 
-  progress "running codex $tag"
-  if ! "$SPEC2PR_CODEX_BIN" exec --cd "$WORKTREE" \
-      --output-schema "$TMP_DIR/$role.json" \
-      --output-last-message "$last" \
-      < "$prompt_file" > "$META_DIR/$tag.stdout" 2> "$err"; then
-    halt "codex $tag failed (stderr: $err)"
+  if codex_fast_enabled_for_role "$role"; then
+    progress_suffix=" fast"
+    use_fast=1
+  fi
+
+  progress "running codex $tag$progress_suffix"
+  if [ "$use_fast" -eq 1 ]; then
+    if ! "$SPEC2PR_CODEX_BIN" exec --enable fast_mode -c 'service_tier="fast"' --cd "$WORKTREE" \
+        --output-schema "$TMP_DIR/$role.json" \
+        --output-last-message "$last" \
+        < "$prompt_file" > "$META_DIR/$tag.stdout" 2> "$err"; then
+      halt "codex $tag failed (stderr: $err)"
+    fi
+  else
+    if ! "$SPEC2PR_CODEX_BIN" exec --cd "$WORKTREE" \
+        --output-schema "$TMP_DIR/$role.json" \
+        --output-last-message "$last" \
+        < "$prompt_file" > "$META_DIR/$tag.stdout" 2> "$err"; then
+      halt "codex $tag failed (stderr: $err)"
+    fi
   fi
   jq -e . "$last" > /dev/null 2>&1 || halt "codex $tag returned invalid JSON ($last)"
   validate_codex_output "$role" "$tag" "$last"
