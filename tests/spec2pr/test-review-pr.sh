@@ -135,6 +135,94 @@ test_review_pr_dirty_round_pushes_to_head() {
   assert_eq "1" "$(codex_calls)" "one codex fix call"
 }
 
+test_review_pr_codex_fixer_prompt_includes_prior_round_history() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: R1_REVIEWER_FINDING_ALPHA. Evidence: review-fix-r1.txt absent."}'
+EOF
+  enqueue_claude 01-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 01-pr-fix <<'EOF'
+printf 'round 1 fix\n' > review-fix-r1.txt
+printf '{"summary":"R1_FIX_SUMMARY_ALPHA created review-fix-r1.txt"}'
+EOF
+  enqueue_claude 02-pr-a-review <<'EOF'
+printf '{"result":"MAJOR: R2_REVIEWER_FINDING_BRAVO. Evidence: review-fix-r2.txt absent."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":1}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'round 2 fix\n' > review-fix-r2.txt
+printf '{"summary":"R2_FIX_SUMMARY_BRAVO created review-fix-r2.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round1_prompt round2_prompt
+  round1_prompt="$(cat "$meta/pr-review-r1.fix.prompt")"
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "codex fixer two dirty rounds then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "codex fixer history run reaches done"
+  assert_not_contains "$round1_prompt" "=== Round" "round 1 codex fix prompt has no history preamble"
+  assert_contains "$round2_prompt" "The earlier rounds below already attempted fixes on this PR." "round 2 codex fix prompt has history introduction"
+  assert_contains "$round2_prompt" "=== Round 1 ===" "round 2 codex fix prompt labels prior round"
+  assert_contains "$round2_prompt" "R1_REVIEWER_FINDING_ALPHA" "round 2 codex fix prompt includes round 1 finding"
+  assert_contains "$round2_prompt" "R1_FIX_SUMMARY_ALPHA created review-fix-r1.txt" "round 2 codex fix prompt includes round 1 fix summary"
+  assert_contains "$round2_prompt" "R2_REVIEWER_FINDING_BRAVO" "round 2 codex fix prompt keeps current findings"
+  assert_contains "$round2_prompt" "Your final message must be exactly the JSON" "round 2 codex fix prompt keeps codex trailer"
+}
+
+test_review_pr_fixer_history_skips_missing_prior_metadata() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: MISSING_META_R1_FINDING. Evidence: missing-meta-r1.txt absent."}'
+EOF
+  enqueue_claude 01-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 01-pr-fix <<'EOF'
+printf 'round 1 missing metadata fix\n' > missing-meta-r1.txt
+printf '{"summary":"MISSING_META_R1_FIX_SUMMARY wrote missing-meta-r1.txt"}'
+EOF
+  enqueue_claude 02-pr-a-review <<'EOF'
+rm -f "$SPEC2PR_HOME"/project-pr-*/pr-review-r1.fix
+printf '{"result":"MAJOR: MISSING_META_R2_FINDING. Evidence: missing-meta-r2.txt absent."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":1}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'round 2 missing metadata fix\n' > missing-meta-r2.txt
+printf '{"summary":"MISSING_META_R2_FIX_SUMMARY wrote missing-meta-r2.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round2_prompt
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "missing prior fix metadata does not halt"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "missing metadata run reaches done"
+  assert_not_contains "$round2_prompt" "=== Round 1 ===" "round with missing fix summary is skipped"
+  assert_not_contains "$round2_prompt" "MISSING_META_R1_FINDING" "skipped missing-metadata round omits prior finding"
+  assert_contains "$round2_prompt" "MISSING_META_R2_FINDING" "current findings still reach fixer"
+}
+
 test_review_pr_reclaims_unregistered_stale_worktree_dir() {
   make_pr_sandbox
   mkdir -p "$PR_WT"
@@ -149,24 +237,53 @@ test_review_pr_reclaims_unregistered_stale_worktree_dir() {
 
 test_review_pr_cap_exits_dirty() {
   make_pr_sandbox
-  local n
-  for n in 01 02 03; do
-    enqueue_claude "$n-pr-a-review" <<'EOF'
-printf '{"result":"BLOCKER: still broken. Evidence: missing."}'
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R1_FINDING. Evidence: fix-01.txt missing."}'
 EOF
-    enqueue_claude "$n-pr-b-classify" <<'EOF'
+  enqueue_claude 01-pr-b-classify <<'EOF'
 printf '{"result":{"blockers_found":1,"majors_found":0}}'
 EOF
-    enqueue "$n-pr-fix" <<EOF
-printf 'attempt $n\n' > fix-$n.txt
-printf '{"summary":"attempted fix $n"}'
+  enqueue 01-pr-fix <<'EOF'
+printf 'attempt 01\n' > fix-01.txt
+printf '{"summary":"CAP_R1_FIX_SUMMARY wrote fix-01.txt"}'
 EOF
-  done
-  run_review_pr "$PR_NUMBER"
+  enqueue_claude 02-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R2_FINDING. Evidence: fix-02.txt missing."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'attempt 02\n' > fix-02.txt
+printf '{"summary":"CAP_R2_FIX_SUMMARY wrote fix-02.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R3_FINDING. Evidence: still missing."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 03-pr-fix <<'EOF'
+printf 'attempt 03\n' > fix-03.txt
+printf '{"summary":"CAP_R3_FIX_SUMMARY wrote fix-03.txt"}'
+EOF
+  MAX_FIX_ROUNDS=3 run_review_pr "$PR_NUMBER"
 
   assert_eq "3" "$RC" "cap hit exits 3"
   assert_contains "$OUT" "PRREVIEW DIRTY pr-review blockers=1 majors=0" "dirty contract line"
   assert_eq "3" "$(codex_calls)" "exactly three fix rounds"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round3_prompt
+  round3_prompt="$(cat "$meta/pr-review-r3.fix.prompt")"
+
+  assert_contains "$round3_prompt" "=== Round 1 ===" "round 3 fix prompt includes round 1 history block"
+  assert_contains "$round3_prompt" "CAP_R1_FINDING" "round 3 fix prompt includes round 1 finding"
+  assert_contains "$round3_prompt" "CAP_R1_FIX_SUMMARY wrote fix-01.txt" "round 3 fix prompt includes round 1 fix summary"
+  assert_contains "$round3_prompt" "=== Round 2 ===" "round 3 fix prompt includes round 2 history block"
+  assert_contains "$round3_prompt" "CAP_R2_FINDING" "round 3 fix prompt includes round 2 finding"
+  assert_contains "$round3_prompt" "CAP_R2_FIX_SUMMARY wrote fix-02.txt" "round 3 fix prompt includes round 2 fix summary"
+  assert_contains "$round3_prompt" "CAP_R3_FINDING" "round 3 fix prompt keeps current findings"
 }
 
 test_review_pr_fork_halts() {
@@ -242,6 +359,43 @@ test_review_pr_codex_reviewer_dirty_round_uses_claude_fixer() {
   assert_eq "1" "$(claude_calls)" "claude fixer called once"
   assert_not_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "codex fixer not used when codex reviews"
   assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" "02-pr-claude-fix.sh" "claude consumed fix fixture"
+}
+
+test_review_pr_claude_fixer_prompt_includes_prior_round_history() {
+  make_pr_sandbox
+  enqueue 01-pr-codex-review <<'EOF'
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"claude-r1.txt","summary":"CLAUDE_PATH_R1_FINDING","evidence":"claude-r1.txt is missing"}],"notes":"Only blocker and major findings are listed."}'
+EOF
+  enqueue_claude 02-pr-claude-fix <<'EOF'
+printf 'round 1 claude fix\n' > claude-r1.txt
+printf '{"result":"CLAUDE_R1_FIX_SUMMARY created claude-r1.txt"}'
+EOF
+  enqueue 03-pr-codex-review <<'EOF'
+printf '{"blockers_found":0,"majors_found":1,"findings":[{"severity":"major","artifact":"claude-r2.txt","summary":"CLAUDE_PATH_R2_FINDING","evidence":"claude-r2.txt is missing"}],"notes":"Only blocker and major findings are listed."}'
+EOF
+  enqueue_claude 04-pr-claude-fix <<'EOF'
+printf 'round 2 claude fix\n' > claude-r2.txt
+printf '{"result":"CLAUDE_R2_FIX_SUMMARY created claude-r2.txt"}'
+EOF
+  enqueue 05-pr-codex-review-clean <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"No blocker or major findings from codex."}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round1_prompt round2_prompt
+  round1_prompt="$(cat "$meta/pr-review-r1.fix.prompt")"
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "claude fixer two dirty rounds then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "claude fixer history run reaches done"
+  assert_not_contains "$round1_prompt" "=== Round" "round 1 claude fix prompt has no history preamble"
+  assert_contains "$round2_prompt" "=== Round 1 ===" "round 2 claude fix prompt labels prior round"
+  assert_contains "$round2_prompt" "CLAUDE_PATH_R1_FINDING" "round 2 claude fix prompt includes round 1 finding"
+  assert_contains "$round2_prompt" "CLAUDE_R1_FIX_SUMMARY created claude-r1.txt" "round 2 claude fix prompt includes round 1 fix summary"
+  assert_contains "$round2_prompt" "CLAUDE_PATH_R2_FINDING" "round 2 claude fix prompt keeps current findings"
+  assert_contains "$round2_prompt" "Do not push, do not create a PR." "round 2 claude fix prompt keeps claude trailer"
+  assert_not_contains "$round2_prompt" "Your final message must be exactly the JSON" "claude fix prompt does not receive codex trailer"
 }
 
 test_review_pr_codex_reviewer_count_mismatch_halts() {

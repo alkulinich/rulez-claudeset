@@ -13,6 +13,41 @@
 #   DONE_COMMENT_HEADER        — first line of the PR summary comment
 # Sets STAGE internally and ends by calling finish 0 (DONE) / dirty (cap) /
 # halt / split. Does not return on a completed review.
+pr_review_engine_fix_history_preamble() {
+  if [ "$#" -ne 2 ]; then
+    halt "usage: pr_review_engine_fix_history_preamble <round> <meta-dir>"
+  fi
+  local current_round="$1" meta_dir="$2"
+  local prior_round review_file fix_file wrote_any=0
+
+  if [ "$current_round" -le 1 ]; then
+    return 0
+  fi
+
+  for prior_round in $(seq 1 "$((current_round - 1))"); do
+    review_file="$meta_dir/pr-review-r$prior_round.review"
+    fix_file="$meta_dir/pr-review-r$prior_round.fix"
+    if [ ! -s "$review_file" ] || [ ! -s "$fix_file" ]; then
+      continue
+    fi
+    if [ "$wrote_any" -eq 0 ]; then
+      cat <<'EOF'
+The earlier rounds below already attempted fixes on this PR. Shown oldest
+first: what the reviewer flagged, and what was changed in response. Do not
+undo a prior fix unless the current findings require it. If a finding keeps
+recurring, try a different approach than the ones already attempted.
+
+EOF
+      wrote_any=1
+    fi
+    printf '=== Round %s ===\n' "$prior_round"
+    printf 'Reviewer findings:\n'
+    cat "$review_file"
+    printf '\nFix attempt:\n'
+    cat "$fix_file"
+    printf '\n\n'
+  done
+}
 
 pr_review_engine_run() {
   if [ "$#" -gt 1 ]; then
@@ -53,7 +88,7 @@ pr_review_engine_run() {
 
   local round review_prompt review_json review_file review_blockers review_majors status_reviewer
   local classify_prompt classify_json classify_result classify_tmp
-  local malformed attempt classify_rc b m fix_prompt before_fix_head after_fix_head
+  local malformed attempt classify_rc b m fix_prompt fix_history_preamble before_fix_head after_fix_head
 
   for round in $(seq 1 "$MAX_FIX_ROUNDS"); do
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
@@ -196,9 +231,13 @@ EOF
     status "OK" "pr-review r$round${status_reviewer} blockers=$b majors=$m"
     show_review "$review_file"
     fix_prompt="$META_DIR/pr-review-r$round.fix.prompt"
+    fix_history_preamble="$(pr_review_engine_fix_history_preamble "$round" "$META_DIR")"
+    if [ -n "$fix_history_preamble" ]; then
+      fix_history_preamble="${fix_history_preamble}"$'\n\n'
+    fi
     if [ "$pr_fixer" = "codex" ]; then
       cat > "$fix_prompt" <<EOF
-Fix the blocker and major findings from this fresh-eyes PR review.
+${fix_history_preamble}Fix the blocker and major findings from this fresh-eyes PR review.
 
 Review findings:
 $(cat "$review_file")
@@ -216,7 +255,7 @@ EOF
       jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
     else
       cat > "$fix_prompt" <<EOF
-Fix the blocker and major findings from this fresh-eyes PR review.
+${fix_history_preamble}Fix the blocker and major findings from this fresh-eyes PR review.
 
 Review findings:
 $(cat "$review_file")
