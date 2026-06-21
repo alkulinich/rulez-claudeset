@@ -104,6 +104,19 @@ test_add_spec2pr_with_fast_persists_and_forwards_flag() {
   assert_contains "$log" "$SPEC" "runner forwards spec path"
 }
 
+test_add_spec2pr_accepts_fast_after_target() {
+  make_sandbox
+  run_mctl add spec2pr "$SPEC" --fast
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add spec2pr accepts --fast after target"
+  assert_eq "1" "$(meta_value "$run_dir/meta" fast)" "suffix fast persisted in meta"
+  assert_contains "$log" "--fast" "suffix fast forwards fast flag"
+}
+
 test_add_review_pr_with_fast_and_reviewer_persists_and_forwards_flags() {
   make_sandbox
   run_mctl_in_dir "$REPO" add --fast review-pr 7 --reviewer codex
