@@ -86,38 +86,36 @@ test_plan_written_and_committed() {
 test_plan_wrong_path_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Wrong\n' > docs/superpowers/plans/wrong.md
-printf '{"plan_path":"docs/superpowers/plans/wrong.md","summary":"wrong"}'
+printf '{"result":"wrong"}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "wrong plan path exits 1"
-  assert_contains "$OUT" "planner wrote unexpected path" "wrong path halt"
+  assert_contains "$OUT" "planner did not write plan" "wrong path halt"
 }
 
-test_plan_schema_violation_halts() {
+test_plan_missing_file_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
-mkdir -p docs/superpowers/plans
-printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md"}'
+  enqueue_claude 02-plan <<'EOF'
+printf '{"result":"claimed success without writing the plan"}'
 EOF
   run_spec2pr "$SPEC"
 
-  assert_eq "1" "$RC" "schema-invalid plan exits 1"
-  assert_contains "$OUT" "SPEC2PR HALT plan: codex plan violated plan schema" "schema violation halt"
+  assert_eq "1" "$RC" "missing plan file exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT plan: planner did not write plan" "missing plan halt"
 }
 
 test_oversized_plan_splits() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"large"}'
+printf '{"result":"large"}'
 EOF
   run_spec2pr "$SPEC"
 
@@ -128,16 +126,34 @@ EOF
 test_plan_unrelated_file_change_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
 printf 'oops\n' > unrelated.txt
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"extra"}'
+printf '{"result":"extra"}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "unrelated planner edit exits 1"
   assert_contains "$OUT" "planner changed unexpected files" "planner scope guard"
+}
+
+test_plan_self_commit_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
+git add docs/superpowers/plans/toy-spec-plan.md
+git commit -q -m "planner self-committed plan"
+printf '{"result":"committed plan"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "self-committing planner exits 1"
+  assert_contains "$OUT" \
+    "SPEC2PR HALT plan: planner committed changes (contract violation)" \
+    "planner self-commit halt"
 }
 
 test_resume_skips_plan_when_file_exists() {
