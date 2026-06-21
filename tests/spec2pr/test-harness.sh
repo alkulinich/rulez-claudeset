@@ -13,6 +13,7 @@ EOF
   assert_eq '{"hello":"world"}' "$(cat "$out_msg")" "fixture stdout becomes last message"
   assert_file_exists "$SPEC2PR_TEST_FIXTURES/01-hello.sh.consumed" "fixture consumed"
   assert_eq "1" "$(codex_calls)" "invocation logged"
+  assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/01-hello.prompt")" "the prompt" "prompt captured"
   local invocation_log
   invocation_log="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")"
   assert_contains "$invocation_log" "schema=review.json" "invocation logged"
