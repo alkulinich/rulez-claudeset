@@ -162,7 +162,7 @@ printf 'attempt $n\n' > fix-$n.txt
 printf '{"summary":"attempted fix $n"}'
 EOF
   done
-  run_review_pr "$PR_NUMBER"
+  MAX_FIX_ROUNDS=3 run_review_pr "$PR_NUMBER"
 
   assert_eq "3" "$RC" "cap hit exits 3"
   assert_contains "$OUT" "PRREVIEW DIRTY pr-review blockers=1 majors=0" "dirty contract line"

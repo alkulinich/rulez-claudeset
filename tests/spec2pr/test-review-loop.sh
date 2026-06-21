@@ -12,7 +12,7 @@ test_spec_review_clean_first_round() {
   assert_eq "1" "$RC" "clean spec review reaches later plan stage"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" \
     "spec-review r1 blockers=0 majors=0 clean" "clean status line"
-  assert_contains "$OUT" "codex plan failed" "later plan stage halt"
+  assert_contains "$OUT" "claude plan failed" "later plan stage halt"
 }
 
 test_spec_review_dirty_then_clean_commits_fixes() {
@@ -26,7 +26,7 @@ test_spec_review_dirty_then_clean_commits_fixes() {
     "$(git -C "$wt" log -1 --format=%s)" "fix commit message"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" \
     "spec-review r1 blockers=1 majors=0" "dirty round logged"
-  assert_contains "$OUT" "codex plan failed" "later plan stage halt"
+  assert_contains "$OUT" "claude plan failed" "later plan stage halt"
 }
 
 test_spec_review_cap_exits_dirty() {
@@ -34,7 +34,7 @@ test_spec_review_cap_exits_dirty() {
   printf '%s\n' "$DIRTY_REVIEW" | enqueue 01-spec-r1
   printf '%s\n' "$DIRTY_REVIEW" | enqueue 02-spec-r2
   printf '%s\n' "$DIRTY_REVIEW" | enqueue 03-spec-r3
-  run_spec2pr "$SPEC"
+  MAX_FIX_ROUNDS=3 run_spec2pr "$SPEC"
   assert_eq "3" "$RC" "cap hit exits 3"
   assert_contains "$OUT" "SPEC2PR DIRTY spec-review blockers=1 majors=0" "DIRTY line"
   assert_eq "3" "$(codex_calls)" "exactly 3 review calls"
@@ -126,7 +126,7 @@ echo fix >> docs/superpowers/specs/toy-spec.md
 printf '{"blockers_found":0,"majors_found":1,"findings":[{"severity":"major","artifact":"docs/superpowers/specs/toy-spec.md","summary":"VERBOSE_MARKER_SUMMARY","evidence":"VERBOSE_MARKER_EVIDENCE"}],"notes":"VERBOSE_MARKER_NOTES"}'
 EOF
   printf '%s\n' "$CLEAN_REVIEW" | enqueue 02-spec-r2
-  run_spec2pr "$SPEC"
+  SPEC2PR_VERBOSE= run_spec2pr "$SPEC"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" \
     "spec-review r1 blockers=0 majors=1" "terse count line present without verbose"
   assert_not_contains "$OUT" "VERBOSE_MARKER_SUMMARY" "findings hidden without verbose"
