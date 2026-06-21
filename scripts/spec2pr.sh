@@ -235,14 +235,19 @@ if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
 Use \$superpowers:writing-plans to write an implementation plan for the
 feature spec at $WT_SPEC_REL.
 
-Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files.
-Your final message must be exactly the JSON required by the output schema.
+Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files. Do
+not commit, push, or create branches or PRs. Your final message should briefly
+summarize the plan.
 EOF
-  codex_call plan plan "$pf"
-  plan_path="$(jq -r '.plan_path' "$META_DIR/plan.json")"
-  [ "$plan_path" = "$WT_PLAN_REL" ] || halt "planner wrote unexpected path"
+  before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  run_claude_json plan "$pf" "$META_DIR/plan.claude.json"
+  after_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  [ "$after_plan_head" = "$before_plan_head" ] || halt "planner committed changes (contract violation)"
   [ -f "$WORKTREE/$WT_PLAN_REL" ] || halt "planner did not write plan"
   assert_only_planner_path_changed
+  plan_summary="$(jq -r '.result // ""' "$META_DIR/plan.claude.json")"
+  jq -n --arg p "$WT_PLAN_REL" --arg s "$plan_summary" \
+    '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
   plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
   if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
     split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
