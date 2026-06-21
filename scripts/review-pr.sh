@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>
+# review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>
 #
 # Standalone PR reviewer. Run from inside a checkout of the PR's repo. Fetches
 # the PR head into a throwaway worktree and runs the shared review engine:
@@ -23,13 +23,17 @@ PR_DONE_APPROVE=1
 STAGE="preflight"
 
 usage() {
-  halt "usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>"
+  halt "usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>"
 }
 
 PR_REVIEWER="claude"
 PR_REF=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --fast)
+      SPEC2PR_CODEX_FAST=1
+      shift
+      ;;
     --reviewer)
       [ "$#" -ge 2 ] || usage
       PR_REVIEWER="$2"

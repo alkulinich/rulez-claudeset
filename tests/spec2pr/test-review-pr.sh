@@ -135,6 +135,37 @@ test_review_pr_dirty_round_pushes_to_head() {
   assert_eq "1" "$(codex_calls)" "one codex fix call"
 }
 
+test_review_pr_fast_marks_codex_fixer_only() {
+  make_pr_sandbox
+  queue_dirty_pr_review 01-pr
+  queue_clean_pr_review 02-pr
+
+  run_review_pr --fast "$PR_NUMBER"
+
+  local invocations
+  invocations="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log" 2>/dev/null || true)"
+
+  assert_eq "0" "$RC" "fast review-pr dirty then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "fast review-pr reaches done"
+  assert_contains "$invocations" "schema=pr-fix.json" "codex fixer call was made"
+  assert_contains "$invocations" "schema=pr-fix.json fixture=01-pr-fix.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "codex fixer uses fast mode"
+}
+
+test_review_pr_fast_flag_is_accepted_after_pr_ref() {
+  make_pr_sandbox
+  queue_dirty_pr_review 01-pr
+  queue_clean_pr_review 02-pr
+
+  run_review_pr "$PR_NUMBER" --fast
+
+  local invocations
+  invocations="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")"
+
+  assert_eq "0" "$RC" "review-pr accepts --fast after PR ref"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "review-pr suffix fast reaches done"
+  assert_contains "$invocations" "schema=pr-fix.json fixture=01-pr-fix.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "suffix fast review-pr fixer uses fast mode"
+}
+
 test_review_pr_codex_fixer_prompt_includes_prior_round_history() {
   make_pr_sandbox
   enqueue_claude 01-pr-a-review <<'EOF'
@@ -361,6 +392,25 @@ test_review_pr_codex_reviewer_dirty_round_uses_claude_fixer() {
   assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" "02-pr-claude-fix.sh" "claude consumed fix fixture"
 }
 
+test_review_pr_fast_does_not_mark_codex_reviewer_when_fixer_is_claude() {
+  make_pr_sandbox
+  queue_dirty_codex_pr_review 01-pr
+  queue_claude_pr_fix 01-pr
+  queue_clean_codex_pr_review 02-pr
+
+  run_review_pr --fast --reviewer codex "$PR_NUMBER"
+
+  local invocations
+  local review_invocations
+  invocations="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log" 2>/dev/null || true)"
+  review_invocations="$(printf '%s\n' "$invocations" | grep 'schema=review.json' || true)"
+
+  assert_eq "0" "$RC" "fast codex-reviewer run exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "fast codex-reviewer run reaches done"
+  assert_contains "$review_invocations" "schema=review.json" "codex reviewer call was made"
+  assert_not_contains "$review_invocations" "--enable fast_mode" "codex reviewer is not fast when fixer is claude"
+}
+
 test_review_pr_claude_fixer_prompt_includes_prior_round_history() {
   make_pr_sandbox
   enqueue 01-pr-codex-review <<'EOF'
@@ -458,13 +508,13 @@ test_review_pr_reviewer_flag_validation() {
   make_pr_sandbox
   run_review_pr --reviewer gpt "$PR_NUMBER"
   assert_eq "1" "$RC" "invalid reviewer exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "invalid reviewer shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "invalid reviewer shows usage"
 
   run_review_pr --reviewer
   assert_eq "1" "$RC" "missing reviewer value exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "missing reviewer value shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "missing reviewer value shows usage"
 
   run_review_pr "$PR_NUMBER" extra
   assert_eq "1" "$RC" "extra positional exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
 }

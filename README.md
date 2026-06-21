@@ -141,9 +141,25 @@ The same markdown is also written to `~/.claude/what-have-i-done/<today>.md`. Re
 
 Two unattended pipelines that drive `codex` and `claude -p` from spec to merged PR.
 
-**`scripts/spec2pr.sh <spec.md>`** - run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.rulez-claudeset/spec2pr/<id>/`) and runs: spec-review loop -> plan -> plan-review loop -> implement -> push + open a GitHub PR -> diff gate -> PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
+**`scripts/spec2pr.sh [--fast] <spec.md>`** - run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.rulez-claudeset/spec2pr/<id>/`) and runs: spec-review loop -> plan -> plan-review loop -> implement -> push + open a GitHub PR -> diff gate -> PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
 
-**`scripts/review-pr.sh <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, `claude` reviews the diff, `codex` fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
+**`scripts/review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, the selected reviewer reviews the diff, the opposite model fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
+
+### Codex fast mode
+
+Use `--fast` to spend Codex Fast mode credits on code-changing Codex calls:
+
+```bash
+scripts/spec2pr.sh --fast docs/superpowers/specs/feature-a.md
+scripts/review-pr.sh --fast 7
+mctl add --fast spec2pr docs/superpowers/specs/feature-a.md
+mctl add --fast review-pr 7
+```
+
+Fast mode applies only to Codex implementation and PR-fix calls. Review,
+planning, classification, and all Claude calls stay on their normal settings.
+Codex Fast mode depends on Codex account support and may not apply when Codex is
+authenticated with an API key instead of ChatGPT.
 
 ### mctl mission control
 
