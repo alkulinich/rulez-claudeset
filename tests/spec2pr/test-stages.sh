@@ -17,10 +17,10 @@ EOF
 }
 
 queue_valid_planner() {
-  enqueue "$1" <<'EOF'
+  enqueue_claude "$1" <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Toy plan\n\nImplement the version flag.\n' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"wrote plan"}'
+printf '{"result":"wrote plan"}'
 EOF
 }
 
@@ -77,6 +77,10 @@ test_plan_written_and_committed() {
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "plan ok $PLAN_REL" "plan ok status"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" \
     "plan-review r1 blockers=0 majors=0 clean" "plan review clean status"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" \
+    "02-plan.sh" "plan authoring call went to claude"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "synthesized plan summary preserves claude result"
 }
 
 test_plan_wrong_path_halts() {
