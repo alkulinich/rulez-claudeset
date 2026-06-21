@@ -35,8 +35,8 @@ test_full_happy_path_done() {
   local wt="$SPEC2PR_WORKTREES/$ID"
   assert_eq "0" "$RC" "full happy path exits 0"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "final done contract"
-  assert_eq "4" "$(codex_calls)" "happy path makes four codex calls"
-  assert_eq "2" "$(claude_calls)" "happy path makes review and classify calls"
+  assert_eq "3" "$(codex_calls)" "happy path makes three codex calls"
+  assert_eq "3" "$(claude_calls)" "happy path makes plan, review, and classify calls"
   assert_contains "$(last_status_line)" "SPEC2PR DONE" "status ends with done"
   assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
   assert_not_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "--approve" "spec2pr never self-approves its own PR"
@@ -97,8 +97,8 @@ test_spec2pr_pr_review_ignores_ambient_reviewer_variables() {
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "spec2pr reaches done"
   assert_contains "$OUT" "pr-review r1 blockers=1 majors=0" "default status has no reviewer label"
   assert_not_contains "$OUT" "reviewer=codex" "spec2pr does not switch to codex reviewer"
-  assert_eq "5" "$(codex_calls)" "spec2pr uses codex for spec review, plan, plan review, implementation, and pr fix"
-  assert_eq "4" "$(claude_calls)" "spec2pr uses claude for pr review/classify twice"
+  assert_eq "4" "$(codex_calls)" "spec2pr uses codex for spec review, plan review, implementation, and pr fix"
+  assert_eq "5" "$(claude_calls)" "spec2pr uses claude for plan plus pr review/classify twice"
   assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "spec2pr still uses codex pr-fix schema"
 }
 
@@ -205,7 +205,7 @@ EOF
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "malformed classifier retry exits 0"
-  assert_eq "3" "$(claude_calls)" "classifier malformed reply retried once"
+  assert_eq "4" "$(claude_calls)" "classifier malformed reply retried once after claude plan"
   assert_contains "$OUT" "SPEC2PR DONE" "retry still finishes done"
 }
 
@@ -227,7 +227,7 @@ EOF
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "fractional classifier count is retried"
-  assert_eq "3" "$(claude_calls)" "fractional classifier reply retried once"
+  assert_eq "4" "$(claude_calls)" "fractional classifier reply retried once after claude plan"
   assert_contains "$OUT" "SPEC2PR DONE" "fractional retry still finishes done"
 }
 
@@ -295,7 +295,7 @@ EOF
   assert_contains "$OUT" \
     "SPEC2PR HALT implement: review changes after implementation; rerun implementation required" \
     "stale remote implementation halt"
-  assert_eq "7" "$(codex_calls)" "does not rerun implementation or pr-review after stale remote implementation"
+  assert_eq "6" "$(codex_calls)" "does not rerun implementation or pr-review after stale remote implementation"
 }
 
 test_open_pr_with_review_fix_after_implementation_halts() {
@@ -327,7 +327,7 @@ EOF
   assert_contains "$OUT" \
     "SPEC2PR HALT implement: review changes after implementation; rerun implementation required" \
     "stale open PR implementation halt"
-  assert_eq "7" "$(codex_calls)" "does not consume implementation or pr-review fixtures after stale open PR implementation"
+  assert_eq "6" "$(codex_calls)" "does not consume implementation or pr-review fixtures after stale open PR implementation"
 }
 
 test_open_pr_resume_allows_prior_pr_review_fix_commits() {
@@ -356,7 +356,7 @@ EOF
   assert_eq "0" "$RC" "open PR resume after pr-review fix exits 0"
   assert_contains "$OUT" "SPEC2PR OK implement: pr exists https://example.com/pr/1" "open PR resume keeps implementation"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "open PR resume finishes"
-  assert_eq "7" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
+  assert_eq "6" "$(codex_calls)" "open PR resume does not rerun implementation after pr-review fix"
 }
 
 test_verbose_begin_markers_go_to_output_not_status_contract() {
