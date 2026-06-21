@@ -309,7 +309,15 @@ add:
 
 ```bash
     fix_history_preamble="$(pr_review_engine_fix_history_preamble "$round" "$META_DIR")"
+    if [ -n "$fix_history_preamble" ]; then
+      fix_history_preamble="${fix_history_preamble}"$'\n\n'
+    fi
 ```
+
+The conditional separator is required because Bash command substitution strips
+trailing newlines from the helper output. Appending the blank line after capture
+keeps prior-round history separated from the current review prompt without
+adding a leading blank line to the byte-identical round-1 prompt.
 
 - [ ] **Step 4: Prefix the codex fixer prompt**
 
