@@ -4,9 +4,29 @@ set -euo pipefail
 source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
-[ "$#" -eq 1 ] || halt "usage: spec2pr.sh <spec-path>"
+usage() {
+  halt "usage: spec2pr.sh [--fast] <spec-path>"
+}
 
-SPEC_INPUT="$1"
+SPEC_INPUT=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fast)
+      SPEC2PR_CODEX_FAST=1
+      shift
+      ;;
+    --*)
+      usage
+      ;;
+    *)
+      [ -z "$SPEC_INPUT" ] || usage
+      SPEC_INPUT="$1"
+      shift
+      ;;
+  esac
+done
+
+[ -n "$SPEC_INPUT" ] || usage
 if [ ! -f "$SPEC_INPUT" ]; then
   halt "spec not found: $SPEC_INPUT"
 fi
