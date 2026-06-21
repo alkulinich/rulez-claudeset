@@ -154,6 +154,13 @@ Add one analogous assertion on the **claude-fixer path** (`--reviewer codex`,
 two dirty rounds then clean) confirming round-2's fix prompt carries round-1's
 findings — since both fixer branches are edited.
 
+Extend the existing cap test (`test_review_pr_cap_exits_dirty`) to assert the
+maximum-history case as well: round-3's fix prompt contains both round-1 and
+round-2 reviewer findings, and both round-1 and round-2 fix summaries. This is
+the only path that can observe two prior fix attempts in a prompt when
+`MAX_FIX_ROUNDS=3`, because a "two dirty rounds then clean" run has no round-3
+fix prompt.
+
 All existing tests must stay green (round-1 prompt unchanged ⇒ no regression in
 the single-round fixtures).
 
