@@ -81,6 +81,10 @@ test_plan_written_and_committed() {
     "02-plan.sh" "plan authoring call went to claude"
   assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
     "synthesized plan summary preserves claude result"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/02-plan.prompt")" \
+    "Do not commit, push, or create branches or PRs." "planner prompt forbids git side effects"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/02-plan.prompt")" \
+    "output schema" "planner prompt no longer asks claude for codex schema output"
 }
 
 test_plan_wrong_path_halts() {

@@ -235,8 +235,8 @@ if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
 Use \$superpowers:writing-plans to write an implementation plan for the
 feature spec at $WT_SPEC_REL.
 
-Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files. Do
-not commit, push, or create branches or PRs. Your final message should briefly
+Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files.
+Do not commit, push, or create branches or PRs. Your final message should briefly
 summarize the plan.
 EOF
   before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
