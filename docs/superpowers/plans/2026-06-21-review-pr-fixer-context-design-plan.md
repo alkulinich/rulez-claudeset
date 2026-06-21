@@ -406,7 +406,7 @@ printf 'round 1 missing metadata fix\n' > missing-meta-r1.txt
 printf '{"summary":"MISSING_META_R1_FIX_SUMMARY wrote missing-meta-r1.txt"}'
 EOF
   enqueue_claude 02-pr-a-review <<'EOF'
-rm -f "$SPEC2PR_HOME/project-pr-7/pr-review-r1.fix"
+rm -f "$SPEC2PR_HOME"/project-pr-*/pr-review-r1.fix
 printf '{"result":"MAJOR: MISSING_META_R2_FINDING. Evidence: missing-meta-r2.txt absent."}'
 EOF
   enqueue_claude 02-pr-b-classify <<'EOF'
@@ -436,7 +436,7 @@ EOF
 }
 ```
 
-This test removes round 1's `.fix` file inside the round 2 reviewer fixture, before the engine assembles the round 2 fixer prompt. The reviewer fixture only changes metadata under `$SPEC2PR_HOME`, not the worktree, so the existing `reviewer modified worktree` guard is not tripped.
+This test removes round 1's `.fix` file inside the round 2 reviewer fixture, before the engine assembles the round 2 fixer prompt. It uses a `$SPEC2PR_HOME/project-pr-*` metadata glob because the fixture script runs in a child process that does not need the parent test's shell-local `PR_NUMBER`. The reviewer fixture only changes metadata under `$SPEC2PR_HOME`, not the worktree, so the existing `reviewer modified worktree` guard is not tripped.
 
 - [ ] **Step 2: Run the defensive test with the rest of the suite**
 
