@@ -181,6 +181,48 @@ EOF
   assert_contains "$round2_prompt" "Your final message must be exactly the JSON" "round 2 codex fix prompt keeps codex trailer"
 }
 
+test_review_pr_fixer_history_skips_missing_prior_metadata() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: MISSING_META_R1_FINDING. Evidence: missing-meta-r1.txt absent."}'
+EOF
+  enqueue_claude 01-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 01-pr-fix <<'EOF'
+printf 'round 1 missing metadata fix\n' > missing-meta-r1.txt
+printf '{"summary":"MISSING_META_R1_FIX_SUMMARY wrote missing-meta-r1.txt"}'
+EOF
+  enqueue_claude 02-pr-a-review <<'EOF'
+rm -f "$SPEC2PR_HOME"/project-pr-*/pr-review-r1.fix
+printf '{"result":"MAJOR: MISSING_META_R2_FINDING. Evidence: missing-meta-r2.txt absent."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":1}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'round 2 missing metadata fix\n' > missing-meta-r2.txt
+printf '{"summary":"MISSING_META_R2_FIX_SUMMARY wrote missing-meta-r2.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round2_prompt
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "missing prior fix metadata does not halt"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "missing metadata run reaches done"
+  assert_not_contains "$round2_prompt" "=== Round 1 ===" "round with missing fix summary is skipped"
+  assert_not_contains "$round2_prompt" "MISSING_META_R1_FINDING" "skipped missing-metadata round omits prior finding"
+  assert_contains "$round2_prompt" "MISSING_META_R2_FINDING" "current findings still reach fixer"
+}
+
 test_review_pr_reclaims_unregistered_stale_worktree_dir() {
   make_pr_sandbox
   mkdir -p "$PR_WT"
