@@ -290,6 +290,43 @@ test_review_pr_codex_reviewer_dirty_round_uses_claude_fixer() {
   assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" "02-pr-claude-fix.sh" "claude consumed fix fixture"
 }
 
+test_review_pr_claude_fixer_prompt_includes_prior_round_history() {
+  make_pr_sandbox
+  enqueue 01-pr-codex-review <<'EOF'
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"claude-r1.txt","summary":"CLAUDE_PATH_R1_FINDING","evidence":"claude-r1.txt is missing"}],"notes":"Only blocker and major findings are listed."}'
+EOF
+  enqueue_claude 02-pr-claude-fix <<'EOF'
+printf 'round 1 claude fix\n' > claude-r1.txt
+printf '{"result":"CLAUDE_R1_FIX_SUMMARY created claude-r1.txt"}'
+EOF
+  enqueue 03-pr-codex-review <<'EOF'
+printf '{"blockers_found":0,"majors_found":1,"findings":[{"severity":"major","artifact":"claude-r2.txt","summary":"CLAUDE_PATH_R2_FINDING","evidence":"claude-r2.txt is missing"}],"notes":"Only blocker and major findings are listed."}'
+EOF
+  enqueue_claude 04-pr-claude-fix <<'EOF'
+printf 'round 2 claude fix\n' > claude-r2.txt
+printf '{"result":"CLAUDE_R2_FIX_SUMMARY created claude-r2.txt"}'
+EOF
+  enqueue 05-pr-codex-review-clean <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"No blocker or major findings from codex."}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round1_prompt round2_prompt
+  round1_prompt="$(cat "$meta/pr-review-r1.fix.prompt")"
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "claude fixer two dirty rounds then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "claude fixer history run reaches done"
+  assert_not_contains "$round1_prompt" "=== Round" "round 1 claude fix prompt has no history preamble"
+  assert_contains "$round2_prompt" "=== Round 1 ===" "round 2 claude fix prompt labels prior round"
+  assert_contains "$round2_prompt" "CLAUDE_PATH_R1_FINDING" "round 2 claude fix prompt includes round 1 finding"
+  assert_contains "$round2_prompt" "CLAUDE_R1_FIX_SUMMARY created claude-r1.txt" "round 2 claude fix prompt includes round 1 fix summary"
+  assert_contains "$round2_prompt" "CLAUDE_PATH_R2_FINDING" "round 2 claude fix prompt keeps current findings"
+  assert_contains "$round2_prompt" "Do not push, do not create a PR." "round 2 claude fix prompt keeps claude trailer"
+  assert_not_contains "$round2_prompt" "Your final message must be exactly the JSON" "claude fix prompt does not receive codex trailer"
+}
+
 test_review_pr_codex_reviewer_count_mismatch_halts() {
   make_pr_sandbox
   queue_mismatched_codex_pr_review 01-pr
