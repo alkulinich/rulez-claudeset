@@ -8,6 +8,7 @@
 set -uo pipefail
 
 cd_dir="" out_msg="" schema=""
+raw_args="$*"
 while [ $# -gt 0 ]; do
   case "$1" in
     --cd) cd_dir="$2"; shift 2 ;;
@@ -26,8 +27,8 @@ if [ -z "$fixture" ]; then
   exit 86
 fi
 
-printf 'CALL cd=%s schema=%s fixture=%s\n' \
-  "$cd_dir" "$(basename "$schema")" "$(basename "$fixture")" >> "$queue/invocations.log"
+printf 'CALL cd=%s schema=%s fixture=%s args=%s\n' \
+  "$cd_dir" "$(basename "$schema")" "$(basename "$fixture")" "$raw_args" >> "$queue/invocations.log"
 printf '%s\n' "$prompt" > "$queue/$(basename "$fixture" .sh).prompt"
 
 out="$(cd "$cd_dir" && bash "$fixture")"

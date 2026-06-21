@@ -7,12 +7,16 @@ test_stub_codex_consumes_fixture_queue() {
 printf '{"hello":"world"}'
 EOF
   local out_msg="$SANDBOX/last.json"
+  local schema="$SANDBOX/review.json"
   printf 'the prompt' | "$SPEC2PR_CODEX_BIN" exec --cd "$PROJECT" \
-    --output-schema /dev/null --output-last-message "$out_msg"
+    --output-schema "$schema" --output-last-message "$out_msg"
   assert_eq '{"hello":"world"}' "$(cat "$out_msg")" "fixture stdout becomes last message"
   assert_file_exists "$SPEC2PR_TEST_FIXTURES/01-hello.sh.consumed" "fixture consumed"
   assert_eq "1" "$(codex_calls)" "invocation logged"
-  assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/01-hello.prompt")" "the prompt" "prompt captured"
+  local invocation_log
+  invocation_log="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")"
+  assert_contains "$invocation_log" "schema=review.json" "invocation logged"
+  assert_contains "$invocation_log" "args=exec --cd $PROJECT --output-schema" "raw codex args are logged"
 }
 
 test_stub_codex_empty_queue_fails() {
