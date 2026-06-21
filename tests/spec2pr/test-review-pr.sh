@@ -135,6 +135,52 @@ test_review_pr_dirty_round_pushes_to_head() {
   assert_eq "1" "$(codex_calls)" "one codex fix call"
 }
 
+test_review_pr_codex_fixer_prompt_includes_prior_round_history() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: R1_REVIEWER_FINDING_ALPHA. Evidence: review-fix-r1.txt absent."}'
+EOF
+  enqueue_claude 01-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 01-pr-fix <<'EOF'
+printf 'round 1 fix\n' > review-fix-r1.txt
+printf '{"summary":"R1_FIX_SUMMARY_ALPHA created review-fix-r1.txt"}'
+EOF
+  enqueue_claude 02-pr-a-review <<'EOF'
+printf '{"result":"MAJOR: R2_REVIEWER_FINDING_BRAVO. Evidence: review-fix-r2.txt absent."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":1}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'round 2 fix\n' > review-fix-r2.txt
+printf '{"summary":"R2_FIX_SUMMARY_BRAVO created review-fix-r2.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round1_prompt round2_prompt
+  round1_prompt="$(cat "$meta/pr-review-r1.fix.prompt")"
+  round2_prompt="$(cat "$meta/pr-review-r2.fix.prompt")"
+
+  assert_eq "0" "$RC" "codex fixer two dirty rounds then clean exits 0"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "codex fixer history run reaches done"
+  assert_not_contains "$round1_prompt" "=== Round" "round 1 codex fix prompt has no history preamble"
+  assert_contains "$round2_prompt" "The earlier rounds below already attempted fixes on this PR." "round 2 codex fix prompt has history introduction"
+  assert_contains "$round2_prompt" "=== Round 1 ===" "round 2 codex fix prompt labels prior round"
+  assert_contains "$round2_prompt" "R1_REVIEWER_FINDING_ALPHA" "round 2 codex fix prompt includes round 1 finding"
+  assert_contains "$round2_prompt" "R1_FIX_SUMMARY_ALPHA created review-fix-r1.txt" "round 2 codex fix prompt includes round 1 fix summary"
+  assert_contains "$round2_prompt" "R2_REVIEWER_FINDING_BRAVO" "round 2 codex fix prompt keeps current findings"
+  assert_contains "$round2_prompt" "Your final message must be exactly the JSON" "round 2 codex fix prompt keeps codex trailer"
+}
+
 test_review_pr_reclaims_unregistered_stale_worktree_dir() {
   make_pr_sandbox
   mkdir -p "$PR_WT"
