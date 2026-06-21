@@ -195,24 +195,53 @@ test_review_pr_reclaims_unregistered_stale_worktree_dir() {
 
 test_review_pr_cap_exits_dirty() {
   make_pr_sandbox
-  local n
-  for n in 01 02 03; do
-    enqueue_claude "$n-pr-a-review" <<'EOF'
-printf '{"result":"BLOCKER: still broken. Evidence: missing."}'
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R1_FINDING. Evidence: fix-01.txt missing."}'
 EOF
-    enqueue_claude "$n-pr-b-classify" <<'EOF'
+  enqueue_claude 01-pr-b-classify <<'EOF'
 printf '{"result":{"blockers_found":1,"majors_found":0}}'
 EOF
-    enqueue "$n-pr-fix" <<EOF
-printf 'attempt $n\n' > fix-$n.txt
-printf '{"summary":"attempted fix $n"}'
+  enqueue 01-pr-fix <<'EOF'
+printf 'attempt 01\n' > fix-01.txt
+printf '{"summary":"CAP_R1_FIX_SUMMARY wrote fix-01.txt"}'
 EOF
-  done
-  run_review_pr "$PR_NUMBER"
+  enqueue_claude 02-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R2_FINDING. Evidence: fix-02.txt missing."}'
+EOF
+  enqueue_claude 02-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 02-pr-fix <<'EOF'
+printf 'attempt 02\n' > fix-02.txt
+printf '{"summary":"CAP_R2_FIX_SUMMARY wrote fix-02.txt"}'
+EOF
+  enqueue_claude 03-pr-a-review <<'EOF'
+printf '{"result":"BLOCKER: CAP_R3_FINDING. Evidence: still missing."}'
+EOF
+  enqueue_claude 03-pr-b-classify <<'EOF'
+printf '{"result":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue 03-pr-fix <<'EOF'
+printf 'attempt 03\n' > fix-03.txt
+printf '{"summary":"CAP_R3_FIX_SUMMARY wrote fix-03.txt"}'
+EOF
+  MAX_FIX_ROUNDS=3 run_review_pr "$PR_NUMBER"
 
   assert_eq "3" "$RC" "cap hit exits 3"
   assert_contains "$OUT" "PRREVIEW DIRTY pr-review blockers=1 majors=0" "dirty contract line"
   assert_eq "3" "$(codex_calls)" "exactly three fix rounds"
+
+  local meta="$SPEC2PR_HOME/project-pr-$PR_NUMBER"
+  local round3_prompt
+  round3_prompt="$(cat "$meta/pr-review-r3.fix.prompt")"
+
+  assert_contains "$round3_prompt" "=== Round 1 ===" "round 3 fix prompt includes round 1 history block"
+  assert_contains "$round3_prompt" "CAP_R1_FINDING" "round 3 fix prompt includes round 1 finding"
+  assert_contains "$round3_prompt" "CAP_R1_FIX_SUMMARY wrote fix-01.txt" "round 3 fix prompt includes round 1 fix summary"
+  assert_contains "$round3_prompt" "=== Round 2 ===" "round 3 fix prompt includes round 2 history block"
+  assert_contains "$round3_prompt" "CAP_R2_FINDING" "round 3 fix prompt includes round 2 finding"
+  assert_contains "$round3_prompt" "CAP_R2_FIX_SUMMARY wrote fix-02.txt" "round 3 fix prompt includes round 2 fix summary"
+  assert_contains "$round3_prompt" "CAP_R3_FINDING" "round 3 fix prompt keeps current findings"
 }
 
 test_review_pr_fork_halts() {
