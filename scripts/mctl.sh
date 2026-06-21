@@ -39,7 +39,7 @@ die() {
 }
 
 add_usage() {
-  die "usage: mctl add spec2pr <spec.md> | mctl add review-pr <pr#> [--reviewer <claude|codex>]"
+  die "usage: mctl add [--fast] spec2pr <spec.md> | mctl add [--fast] review-pr <pr#> [--reviewer <claude|codex>]"
 }
 
 require_cmd() {
@@ -81,7 +81,7 @@ meta_get() {
 }
 
 write_meta() {
-  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}"
+  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}" fast="${11:-}"
   cat > "$run_dir/meta" <<EOF
 kind=$kind
 token=$token
@@ -94,6 +94,9 @@ target=$target
 EOF
   if [ -n "$reviewer" ]; then
     printf 'reviewer=%s\n' "$reviewer" >> "$run_dir/meta"
+  fi
+  if [ -n "$fast" ]; then
+    printf 'fast=%s\n' "$fast" >> "$run_dir/meta"
   fi
 }
 
@@ -122,16 +125,20 @@ build_inner_runner_command() {
   local run_dir meta
   run_dir="$1"
   meta="$run_dir/meta"
-  local kind repo target spec_home wt_home reviewer runner exit_path runner_args
+  local kind repo target spec_home wt_home reviewer fast runner exit_path runner_args
   kind="$(meta_get "$meta" kind)"
   repo="$(meta_get "$meta" repo)"
   target="$(meta_get "$meta" target)"
   spec_home="$(meta_get "$meta" spec2pr_home)"
   wt_home="$(meta_get "$meta" spec2pr_worktrees)"
   reviewer="$(meta_get "$meta" reviewer)"
+  fast="$(meta_get "$meta" fast)"
   runner="$(runner_for_kind "$kind")"
   exit_path="$run_dir/exit"
   runner_args="$(shell_quote "$target")"
+  if [ -n "$fast" ]; then
+    runner_args="--fast $runner_args"
+  fi
   if [ "$kind" = "review-pr" ] && [ -n "$reviewer" ]; then
     runner_args="--reviewer $(shell_quote "$reviewer") $runner_args"
   fi
@@ -183,10 +190,28 @@ cmd_add() {
   require_cmd tmux
   require_cmd script
 
-  local kind="$1" arg="$2" reviewer="" repo target repo_slug name token session run_dir started
+  local fast="" reviewer="" kind arg repo target repo_slug name token session run_dir started
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --fast)
+        fast="1"
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  [ "$#" -ge 2 ] || add_usage
+  kind="$1"
+  arg="$2"
   shift 2
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --fast)
+        fast="1"
+        shift
+        ;;
       --reviewer)
         [ "$#" -ge 2 ] || add_usage
         reviewer="$2"
@@ -249,7 +274,7 @@ cmd_add() {
   : > "$run_dir/brief.log"
   started="$(utc_now)"
   write_meta "$run_dir" "$kind" "$token" "$session" "$repo" "$started" \
-    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target" "$reviewer"
+    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target" "$reviewer" "$fast"
 
   launch_run "$run_dir"
   printf '%s\n' "$name"
