@@ -386,12 +386,14 @@ test_review_pr_fast_does_not_mark_codex_reviewer_when_fixer_is_claude() {
   run_review_pr --fast --reviewer codex "$PR_NUMBER"
 
   local invocations
+  local review_invocations
   invocations="$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log" 2>/dev/null || true)"
+  review_invocations="$(printf '%s\n' "$invocations" | grep 'schema=review.json' || true)"
 
   assert_eq "0" "$RC" "fast codex-reviewer run exits 0"
   assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "fast codex-reviewer run reaches done"
-  assert_contains "$invocations" "schema=review.json" "codex reviewer call was made"
-  assert_not_contains "$invocations" "--enable fast_mode" "codex reviewer is not fast when fixer is claude"
+  assert_contains "$review_invocations" "schema=review.json" "codex reviewer call was made"
+  assert_not_contains "$review_invocations" "--enable fast_mode" "codex reviewer is not fast when fixer is claude"
 }
 
 test_review_pr_claude_fixer_prompt_includes_prior_round_history() {
