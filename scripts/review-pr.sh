@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-pr.sh [--reviewer <claude|codex>] <pr-number|pr-url>
+# review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>
 #
 # Standalone PR reviewer. Run from inside a checkout of the PR's repo. Fetches
 # the PR head into a throwaway worktree and runs the shared review engine:
