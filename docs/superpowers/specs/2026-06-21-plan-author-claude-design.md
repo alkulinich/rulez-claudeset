@@ -76,7 +76,10 @@ summarize the plan.
 Replace `codex_call plan plan "$pf"` and the codex result parsing with:
 
 ```bash
+before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
 run_claude_json plan "$pf" "$META_DIR/plan.claude.json"
+after_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+[ "$after_plan_head" = "$before_plan_head" ] || halt "planner committed changes (contract violation)"
 [ -f "$WORKTREE/$WT_PLAN_REL" ] || halt "planner did not write plan"
 assert_only_planner_path_changed
 plan_summary="$(jq -r '.result // ""' "$META_DIR/plan.claude.json")"
@@ -106,12 +109,16 @@ guards already in the block cover the same failures.
 | wrote to wrong path | `planner wrote unexpected path` (self-report) | `planner did not write plan` (`-f` check; correct file absent) |
 | malformed / no JSON | `codex plan violated plan schema` | n/a — no schema to violate |
 | edited an extra file | `planner changed unexpected files` | same (`assert_only_planner_path_changed`) |
+| committed instead of leaving dirty plan file | not explicitly guarded | `planner committed changes (contract violation)` (`HEAD` must not move during planning) |
 | oversized plan | `SPLIT plan` | same (size check on the file) |
 
 We delete the `plan_path="$(jq -r '.plan_path' ...)"` parse and the
 `[ "$plan_path" = "$WT_PLAN_REL" ] || halt "planner wrote unexpected path"`
 assertion. The `-f` existence check (run before `assert_only_planner_path_changed`)
-and the planner scope guard already catch wrong-path and stray-edit failures.
+and the planner scope guard already catch wrong-path and stray-edit failures. The
+new `before_plan_head` / `after_plan_head` guard enforces the prompt-level
+`Do not commit` contract before the pipeline creates its own
+`spec2pr: write plan` commit.
 
 ## Edge cases & invariants
 
@@ -144,9 +151,13 @@ Each full run moves one model call from the codex queue to the claude queue. So:
 
 - `codex_calls` assertions drop by 1 each (plan is authored once per scenario
   and persists across reruns): the five `=6` checks in `test-stages.sh` → `=5`,
-  the two `=7` forged-marker checks → `=6`.
-- The existing `claude_calls` assertions in `test-pipeline.sh` (`=2`, `=4`, `=3`)
-  rise by the number of plan-authoring claude calls in that test.
+  and the two `=7` forged-marker checks → `=6`.
+- `test-pipeline.sh` `codex_calls` assertions also drop by 1 for scenarios that
+  author a plan: `=4` → `=3`, `=5` → `=4`, and each `=7` resume/stale-implementation
+  assertion → `=6`.
+- The existing `claude_calls` assertions in `test-pipeline.sh` rise by the same
+  one plan-authoring claude call in those tests: `=2` → `=3`, `=4` → `=5`, and
+  each `=3` classifier-retry assertion → `=4`.
 
 Recount per run after the change — codex authors: spec-review, plan-review,
 implement; claude authors: plan, pr-review (review + classify).
@@ -161,6 +172,9 @@ implement; claude authors: plan, pr-review (review + classify).
 - `test_oversized_plan_splits` and `test_plan_unrelated_file_change_halts` →
   move the fixture to the claude queue (`enqueue_claude`, envelope stdout);
   assertions (`SPLIT plan`, `planner changed unexpected files`) stay.
+- Add `test_plan_self_commit_halts`: a claude fixture writes the correct plan
+  path, commits it, and returns a normal envelope; expected message is
+  `planner committed changes (contract violation)`.
 
 ### New positive assertion
 

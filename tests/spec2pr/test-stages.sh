@@ -17,10 +17,10 @@ EOF
 }
 
 queue_valid_planner() {
-  enqueue "$1" <<'EOF'
+  enqueue_claude "$1" <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Toy plan\n\nImplement the version flag.\n' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"wrote plan"}'
+printf '{"result":"wrote plan"}'
 EOF
 }
 
@@ -77,43 +77,49 @@ test_plan_written_and_committed() {
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "plan ok $PLAN_REL" "plan ok status"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" \
     "plan-review r1 blockers=0 majors=0 clean" "plan review clean status"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" \
+    "02-plan.sh" "plan authoring call went to claude"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "synthesized plan summary preserves claude result"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/02-plan.prompt")" \
+    "Do not commit, push, or create branches or PRs." "planner prompt forbids git side effects"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/02-plan.prompt")" \
+    "output schema" "planner prompt no longer asks claude for codex schema output"
 }
 
 test_plan_wrong_path_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Wrong\n' > docs/superpowers/plans/wrong.md
-printf '{"plan_path":"docs/superpowers/plans/wrong.md","summary":"wrong"}'
+printf '{"result":"wrong"}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "wrong plan path exits 1"
-  assert_contains "$OUT" "planner wrote unexpected path" "wrong path halt"
+  assert_contains "$OUT" "planner did not write plan" "wrong path halt"
 }
 
-test_plan_schema_violation_halts() {
+test_plan_missing_file_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
-mkdir -p docs/superpowers/plans
-printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md"}'
+  enqueue_claude 02-plan <<'EOF'
+printf '{"result":"claimed success without writing the plan"}'
 EOF
   run_spec2pr "$SPEC"
 
-  assert_eq "1" "$RC" "schema-invalid plan exits 1"
-  assert_contains "$OUT" "SPEC2PR HALT plan: codex plan violated plan schema" "schema violation halt"
+  assert_eq "1" "$RC" "missing plan file exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT plan: planner did not write plan" "missing plan halt"
 }
 
 test_oversized_plan_splits() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"large"}'
+printf '{"result":"large"}'
 EOF
   run_spec2pr "$SPEC"
 
@@ -124,16 +130,34 @@ EOF
 test_plan_unrelated_file_change_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
-  enqueue 02-plan <<'EOF'
+  enqueue_claude 02-plan <<'EOF'
 mkdir -p docs/superpowers/plans
 printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
 printf 'oops\n' > unrelated.txt
-printf '{"plan_path":"docs/superpowers/plans/toy-spec-plan.md","summary":"extra"}'
+printf '{"result":"extra"}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "unrelated planner edit exits 1"
   assert_contains "$OUT" "planner changed unexpected files" "planner scope guard"
+}
+
+test_plan_self_commit_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+printf '# Toy plan\n' > docs/superpowers/plans/toy-spec-plan.md
+git add docs/superpowers/plans/toy-spec-plan.md
+git commit -q -m "planner self-committed plan"
+printf '{"result":"committed plan"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "self-committing planner exits 1"
+  assert_contains "$OUT" \
+    "SPEC2PR HALT plan: planner committed changes (contract violation)" \
+    "planner self-commit halt"
 }
 
 test_resume_skips_plan_when_file_exists() {
@@ -154,7 +178,7 @@ test_resume_skips_plan_when_file_exists() {
 
   assert_eq "0" "$RC" "resume with existing plan exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "plan exists $PLAN_REL" "plan exists status"
-  assert_eq "6" "$(codex_calls)" "resume skips planner and implement fixtures"
+  assert_eq "5" "$(codex_calls)" "resume skips planner and implement fixtures"
 }
 
 test_implement_pushes_and_creates_pr() {
@@ -259,7 +283,7 @@ test_resume_skips_implement_when_pr_open() {
   assert_eq "0" "$RC" "open PR resume exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr exists https://example.com/pr/1" "pr exists status"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr list" "resume gh pr list ran in worktree"
-  assert_eq "6" "$(codex_calls)" "open PR resume skips implement fixture"
+  assert_eq "5" "$(codex_calls)" "open PR resume skips implement fixture"
 }
 
 test_pr_create_failure_rerun_skips_implement_and_retries_create() {
@@ -285,7 +309,7 @@ test_pr_create_failure_rerun_skips_implement_and_retries_create() {
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement exists $BRANCH" "remote branch skips implement"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "retry pr ok status"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "cwd=$wt_cwd args=pr create" "retry gh pr create ran in worktree"
-  assert_eq "6" "$(codex_calls)" "retry skips implement fixture"
+  assert_eq "5" "$(codex_calls)" "retry skips implement fixture"
 }
 
 test_push_failure_rerun_skips_completed_local_implementation() {
@@ -321,7 +345,7 @@ EOF
   assert_eq "0" "$RC" "push retry exits 0"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement exists local" "local implementation marker skips implement"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "push retry pr ok status"
-  assert_eq "6" "$(codex_calls)" "push retry does not rerun implement"
+  assert_eq "5" "$(codex_calls)" "push retry does not rerun implement"
 }
 
 test_stale_head_marker_does_not_skip_implementation() {
@@ -346,7 +370,7 @@ test_stale_head_marker_does_not_skip_implementation() {
   assert_contains "$(git -C "$wt" log --format=%s)" "implement version file" "implementation ran after forged marker"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement ok $BRANCH" "implementation status logged after forged marker"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "forged marker rerun creates PR"
-  assert_eq "7" "$(codex_calls)" "forged marker consumes implementation fixture"
+  assert_eq "6" "$(codex_calls)" "forged marker consumes implementation fixture"
 }
 
 test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
@@ -372,7 +396,7 @@ test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
   assert_contains "$(git -C "$wt" log --format=%s)" "implement version file" "implementation ran after forged spec2pr-only range"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "implement ok $BRANCH" "implementation status logged after forged spec2pr-only range"
   assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr ok https://example.com/pr/1" "forged spec2pr-only range rerun creates PR"
-  assert_eq "7" "$(codex_calls)" "forged spec2pr-only range consumes implementation fixture"
+  assert_eq "6" "$(codex_calls)" "forged spec2pr-only range consumes implementation fixture"
 }
 
 test_pr_create_failure_rerun_halts_on_ls_remote_error() {
@@ -409,5 +433,5 @@ EOF
 
   assert_eq "1" "$RC" "ls-remote transport error exits 1"
   assert_contains "$OUT" "SPEC2PR HALT implement: git ls-remote failed" "ls-remote failure halt"
-  assert_eq "6" "$(codex_calls)" "ls-remote failure does not rerun implement"
+  assert_eq "5" "$(codex_calls)" "ls-remote failure does not rerun implement"
 }
