@@ -140,11 +140,13 @@ see a clean worktree. The same cleanup must also run in the immediate
 post-model failure paths that reject an otherwise parseable response before a
 stage boundary has been accepted: implementation `blocked`, `uncommitted changes
 after done`, `no implementation commit after done`, planner committed changes,
-planner missing the plan artifact, reviewer/classifier modified worktree, and
-pr-review fixer committed changes. Those are not process failures, but they are
-failed model outputs from the pipeline's perspective and can otherwise leave the
-same dirty or advanced-HEAD wedge. Before launching each model process, capture
-the clean stage boundary:
+planner missing the plan artifact, planner changed unexpected files, review
+counts not matching findings, review changes outside the allowed artifact,
+clean review rounds leaving uncommitted changes, reviewer/classifier modified
+worktree, and pr-review fixer committed changes. Those are not process
+failures, but they are failed model outputs from the pipeline's perspective and
+can otherwise leave the same dirty or advanced-HEAD wedge. Before launching
+each model process, capture the clean stage boundary:
 
 ```bash
 call_start_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
@@ -312,6 +314,12 @@ fix commit, the `spec2pr: write plan` commit.
   implementation boundary, no `implementation-*` markers are written, and a
   second plain run redoes implementation from that boundary instead of layering
   on top of the failed commit.
+- **Auto-clean covers post-call contract failures:** enqueue review/planner/fixer
+  fixtures that return parseable success-shaped output but violate the pipeline
+  contract (`review counts do not match findings`, changes outside the allowed
+  artifact, planner changed unexpected files, or fixer committed changes); assert
+  each halt leaves the worktree clean at the pre-call boundary and a plain re-run
+  does not hit a dirty-worktree guard.
 - **`--start-from <each stage>`** rewinds to the right boundary: after the flag
   run, assert HEAD's subject matches the boundary row, the plan file is present
   or absent as expected, and `implementation-*` markers are gone.
