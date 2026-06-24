@@ -325,13 +325,14 @@ git commit -m "feat(spec2pr): auto-clean worktree on claude model-call failure"
 
 ## Task 3: Auto-clean on immediate post-call contract failures
 
-Some model calls return a parseable, success-shaped response that the pipeline then *rejects* (counts don't match findings, edits outside the allowed file, planner committed, implementation `blocked`, fixer committed, reviewer/classifier touched the tree). These are failed model outputs and can leave the same dirty-or-advanced-HEAD wedge. Clean to `CALL_START_HEAD` before each such halt. This task also rewrites the one existing test that encoded the old "second run wedges on the leftover dirt" behavior.
+Some model calls return a parseable, success-shaped response that the pipeline then *rejects* (counts don't match findings, edits outside the allowed file, planner committed, implementation `blocked`, reviewer/fixer missing required fields, fixer committed, reviewer/classifier touched the tree). These are failed model outputs and can leave the same dirty-or-advanced-HEAD wedge. Clean to `CALL_START_HEAD` before each such halt. This task also rewrites the one existing test that encoded the old "second run wedges on the leftover dirt" behavior.
 
 **Files:**
 - Modify: `scripts/spec2pr.sh` (`assert_only_allowed_path_changed` `:154-161`; `assert_only_planner_path_changed` `:163-169`; `review_loop` count-mismatch `:218-220` and clean-round-uncommitted `:227-229`; planner contract `:265-266`; implement `blocked`/uncommitted/no-commit `:384-393`)
-- Modify: `scripts/lib/pr-review-engine.sh` (reviewer-modified `:120-122`, `:200-202`; count-mismatch `:207-209`; classifier-modified `:143-145`; fixer-committed `:252-254`, `:269-271`)
+- Modify: `scripts/lib/pr-review-engine.sh` (reviewer missing-result / modified-worktree `:119-122`, `:200-202`; classifier-modified `:143-145`; count-mismatch `:207-209`; fixer-committed / missing-result `:252-256`, `:269-273`)
 - Modify: `tests/spec2pr/test-review-loop.sh` (rewrite `test_spec_review_resume_halts_before_committing_stale_dirty_worktree`)
 - Test: `tests/spec2pr/test-resume-recovery.sh` (append)
+- Test: `tests/spec2pr/test-review-pr.sh` (append one codex-reviewer / Claude-fixer regression)
 
 **Interfaces:**
 - Consumes: `clean_worktree_to`, `CALL_START_HEAD` (Tasks 1–2). `CALL_START_HEAD` always holds the boundary of the most recent model call, which for every contract check here is the stage's clean pre-call HEAD (review-round start at `:178`, `before_plan_head`, `before_impl_head`, `before_fix_head`).
@@ -414,12 +415,54 @@ EOF
     "sneaky planner commit dropped"
   assert_file_absent "$wt/docs/superpowers/plans/toy-spec-plan.md" "plan artifact dropped with the commit"
 }
+
+# A Claude pr-review/fixer can return parseable JSON that is missing the
+# required result field after editing the worktree. These halts happen before
+# the normal modified-worktree/fix-commit paths, so they need explicit cleanup.
+test_autoclean_pr_review_missing_result_leaves_clean() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review <<'EOF'
+printf 'review dirt\n' > reviewer-dirt.txt
+printf '{"summary":"missing result"}'
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "missing reviewer result exits 1"
+  assert_contains "$OUT" "reviewer response missing result" "reviewer contract halt"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "reviewer missing-result halt leaves tree clean"
+  assert_file_absent "$wt/reviewer-dirt.txt" "reviewer dirt removed"
+}
+```
+
+Append to `tests/spec2pr/test-review-pr.sh`:
+
+```bash
+test_review_pr_claude_fixer_missing_result_autocleans() {
+  make_pr_sandbox
+  queue_dirty_codex_pr_review 01-pr
+  enqueue_claude 02-pr-claude-fix <<'EOF'
+printf 'fix dirt\n' > fix-dirt.txt
+printf '{"summary":"missing result"}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "missing fixer result exits 1"
+  assert_contains "$OUT" "fixer response missing result" "fixer contract halt"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "fixer missing-result halt leaves tree clean"
+  assert_file_absent "$PR_WT/fix-dirt.txt" "fixer dirt removed"
+}
 ```
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 'test_autoclean_review_scope_violation_leaves_clean\|test_autoclean_planner_self_commit_leaves_clean\|test_spec_review_contract_failure_autocleans_then_resumes'`
-Expected: FAIL — the worktree still holds the stray file / sneaky commit after the halt; the rewritten resume test halts on dirty worktree.
+Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 'test_autoclean_review_scope_violation_leaves_clean\|test_autoclean_planner_self_commit_leaves_clean\|test_autoclean_pr_review_missing_result_leaves_clean\|test_review_pr_claude_fixer_missing_result_autocleans\|test_spec_review_contract_failure_autocleans_then_resumes'`
+Expected: FAIL — the worktree still holds the stray file / sneaky commit / reviewer or fixer dirt after the halt; the rewritten resume test halts on dirty worktree.
 
 - [ ] **Step 4: Clean before the scope-guard halts in `spec2pr.sh`**
 
@@ -526,9 +569,14 @@ Implement status handling (`:383-393`) — `blocked`, `uncommitted changes after
 
 In `scripts/lib/pr-review-engine.sh`, wrap each of these halts with a `clean_worktree_to "$CALL_START_HEAD"` first.
 
-Claude reviewer modified worktree (`:120-122`):
+Claude reviewer missing result / modified worktree (`:119-122`), replacing the
+existing plain `jq ... || halt` with the wrapped form:
 
 ```bash
+      jq -er '.result' "$review_json" > "$review_file" || {
+        clean_worktree_to "$CALL_START_HEAD"
+        halt "reviewer response missing result ($review_json)"
+      }
       if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
         clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer modified worktree"
@@ -571,25 +619,36 @@ Codex fixer committed changes (`:252-254`):
       fi
 ```
 
-Claude fixer committed changes (`:269-271`):
+Claude fixer committed changes / missing result (`:269-273`), replacing the
+existing plain fixer-result `jq ... || halt` with the wrapped form:
 
 ```bash
       if [ "$after_fix_head" != "$before_fix_head" ]; then
         clean_worktree_to "$CALL_START_HEAD"
         halt "pr-review fixer committed changes (contract violation)"
       fi
+      jq -er '.result' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix" || {
+        clean_worktree_to "$CALL_START_HEAD"
+        halt "fixer response missing result ($META_DIR/pr-review-r$round.fix.json)"
+      }
 ```
+
+Keep the existing successful `jq -er` destinations; this change only wraps the
+missing-result halts so a parseable-but-invalid Claude reviewer or fixer output
+cannot leave uncommitted edits behind before the later dirty-tree handling has a
+chance to run.
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `bash tests/spec2pr/run-tests.sh`
-Expected: PASS — the three new/rewritten contract tests green; all other existing tests (which assert only RC and the unchanged halt strings) still green.
+Expected: PASS — the five new/rewritten contract tests green; all other existing tests (which assert only RC and the unchanged halt strings) still green.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add scripts/spec2pr.sh scripts/lib/pr-review-engine.sh \
-  tests/spec2pr/test-review-loop.sh tests/spec2pr/test-resume-recovery.sh
+  tests/spec2pr/test-review-loop.sh tests/spec2pr/test-resume-recovery.sh \
+  tests/spec2pr/test-review-pr.sh
 git commit -m "feat(spec2pr): auto-clean worktree on post-call contract failures"
 ```
 
