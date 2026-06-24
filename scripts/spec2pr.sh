@@ -156,7 +156,10 @@ assert_only_allowed_path_changed() {
   local path
   while IFS= read -r path; do
     [ -z "$path" ] && continue
-    [ "$path" = "$allowed_path" ] || halt "$STAGE changed files outside allowed artifact"
+    if [ "$path" != "$allowed_path" ]; then
+      clean_worktree_to "$CALL_START_HEAD"
+      halt "$STAGE changed files outside allowed artifact"
+    fi
   done < <(changed_paths)
 }
 
@@ -164,7 +167,10 @@ assert_only_planner_path_changed() {
   local path
   while IFS= read -r path; do
     [ -z "$path" ] && continue
-    [ "$path" = "$WT_PLAN_REL" ] || halt "planner changed unexpected files"
+    if [ "$path" != "$WT_PLAN_REL" ]; then
+      clean_worktree_to "$CALL_START_HEAD"
+      halt "planner changed unexpected files"
+    fi
   done < <(changed_paths)
 }
 
@@ -216,6 +222,7 @@ EOF
     fb="$(jq '[.findings[] | select(.severity=="blocker")] | length' "$last")"
     fm="$(jq '[.findings[] | select(.severity=="major")] | length' "$last")"
     if [ "$b" != "$fb" ] || [ "$m" != "$fm" ]; then
+      clean_worktree_to "$CALL_START_HEAD"
       halt "review counts do not match findings ($last)"
     fi
 
@@ -225,6 +232,7 @@ EOF
 
     if [ "$((b + m))" -eq 0 ]; then
       if [ -n "$(git -C "$WORKTREE" status --porcelain)" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "clean review round left uncommitted changes (contract violation)"
       fi
       status "OK" "$stage r$round blockers=0 majors=0 clean"
@@ -262,8 +270,14 @@ EOF
   before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   run_claude_json plan "$pf" "$META_DIR/plan.claude.json"
   after_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  [ "$after_plan_head" = "$before_plan_head" ] || halt "planner committed changes (contract violation)"
-  [ -f "$WORKTREE/$WT_PLAN_REL" ] || halt "planner did not write plan"
+  if [ "$after_plan_head" != "$before_plan_head" ]; then
+    clean_worktree_to "$CALL_START_HEAD"
+    halt "planner committed changes (contract violation)"
+  fi
+  if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
+    clean_worktree_to "$CALL_START_HEAD"
+    halt "planner did not write plan"
+  fi
   assert_only_planner_path_changed
   plan_summary="$(jq -r '.result // ""' "$META_DIR/plan.claude.json")"
   jq -n --arg p "$WT_PLAN_REL" --arg s "$plan_summary" \
@@ -383,14 +397,19 @@ EOF
       case "$impl_status" in
         blocked)
           blocked_reason="$(jq -r '.blocked_reason' "$META_DIR/implement.json")"
+          clean_worktree_to "$CALL_START_HEAD"
           halt "$blocked_reason"
           ;;
         done)
           if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+            clean_worktree_to "$CALL_START_HEAD"
             halt "uncommitted changes after done"
           fi
           after_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-          [ "$after_impl_head" != "$before_impl_head" ] || halt "no implementation commit after done"
+          if [ "$after_impl_head" = "$before_impl_head" ]; then
+            clean_worktree_to "$CALL_START_HEAD"
+            halt "no implementation commit after done"
+          fi
           printf '%s\n' "$before_impl_head" > "$META_DIR/implementation-base"
           printf '%s\n' "$after_impl_head" > "$META_DIR/implementation-head"
           implementation_ok_record "$before_impl_head" "$after_impl_head" > "$META_DIR/implementation-ok"

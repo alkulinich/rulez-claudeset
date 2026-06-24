@@ -100,3 +100,66 @@ EOF
   assert_eq "0" "$RC" "run 2 resumes to DONE after claude auto-clean"
   assert_not_contains "$OUT" "dirty worktree before" "run 2 never hits a dirty-worktree guard"
 }
+
+# A reviewer that edits OUTSIDE the allowed artifact: parseable output, rejected
+# by the scope guard. Auto-clean must leave the tree clean at the round boundary.
+test_autoclean_review_scope_violation_leaves_clean() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  enqueue 01-spec-r1 <<'EOF'
+printf 'oops\n' > unrelated.txt
+printf '{"blockers_found":0,"majors_found":1,"findings":[{"severity":"major","artifact":"docs/superpowers/specs/toy-spec.md","summary":"s","evidence":"e"}],"notes":""}'
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "scope violation exits 1"
+  assert_contains "$OUT" "changed files outside allowed artifact" "scope guard halt"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "auto-clean removed the out-of-scope edit"
+  assert_file_absent "$wt/unrelated.txt" "stray file gone"
+  assert_eq "spec2pr: import spec" "$(git -C "$wt" log -1 --format=%s)" \
+    "HEAD unchanged at the round boundary"
+}
+
+# A planner that returns success but COMMITS its work: contract rejects it and
+# auto-clean must drop the sneaky commit back to before_plan_head.
+test_autoclean_planner_self_commit_leaves_clean() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+printf '# plan\n' > docs/superpowers/plans/toy-spec-plan.md
+git add docs/superpowers/plans/toy-spec-plan.md
+git commit -q -m "planner self-committed"
+printf '{"result":"committed"}'
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "self-committing planner exits 1"
+  assert_contains "$OUT" "planner committed changes (contract violation)" "planner contract halt"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" "tree clean"
+  assert_eq "spec2pr: import spec" "$(git -C "$wt" log -1 --format=%s)" \
+    "sneaky planner commit dropped"
+  assert_file_absent "$wt/docs/superpowers/plans/toy-spec-plan.md" "plan artifact dropped with the commit"
+}
+
+# A Claude pr-review/fixer can return parseable JSON that is missing the
+# required result field after editing the worktree. These halts happen before
+# the normal modified-worktree/fix-commit paths, so they need explicit cleanup.
+test_autoclean_pr_review_missing_result_leaves_clean() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  enqueue_claude 05-pr-review <<'EOF'
+printf 'review dirt\n' > reviewer-dirt.txt
+printf '{"summary":"missing result"}'
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "missing reviewer result exits 1"
+  assert_contains "$OUT" "reviewer response missing result" "reviewer contract halt"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "reviewer missing-result halt leaves tree clean"
+  assert_file_absent "$wt/reviewer-dirt.txt" "reviewer dirt removed"
+}

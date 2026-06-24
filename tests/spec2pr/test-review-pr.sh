@@ -477,7 +477,9 @@ test_review_pr_codex_reviewer_edit_halts() {
 
   assert_eq "1" "$RC" "codex reviewer edit exits 1"
   assert_contains "$OUT" "PRREVIEW HALT pr-review: reviewer modified worktree" "reviewer edit halt"
-  assert_file_exists "$PR_WT/reviewer-edit.txt" "codex reviewer edit remains for inspection"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "reviewer edit halt leaves tree clean"
+  assert_file_absent "$PR_WT/reviewer-edit.txt" "codex reviewer edit removed"
   assert_eq "1" "$(codex_calls)" "reviewer edit consumes one codex review call"
   assert_eq "0" "$(claude_calls)" "reviewer edit does not call claude fixer or classifier"
 }
@@ -517,4 +519,20 @@ test_review_pr_reviewer_flag_validation() {
   run_review_pr "$PR_NUMBER" extra
   assert_eq "1" "$RC" "extra positional exits 1"
   assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
+}
+
+test_review_pr_claude_fixer_missing_result_autocleans() {
+  make_pr_sandbox
+  queue_dirty_codex_pr_review 01-pr
+  enqueue_claude 02-pr-claude-fix <<'EOF'
+printf 'fix dirt\n' > fix-dirt.txt
+printf '{"summary":"missing result"}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "missing fixer result exits 1"
+  assert_contains "$OUT" "fixer response missing result" "fixer contract halt"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "fixer missing-result halt leaves tree clean"
+  assert_file_absent "$PR_WT/fix-dirt.txt" "fixer dirt removed"
 }
