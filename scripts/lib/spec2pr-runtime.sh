@@ -293,6 +293,23 @@ clean_worktree_to() {
   git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
 }
 
+# reset_worktree_to <commit-ish>
+# Strict rewind for --start-from: tag the pre-reset HEAD as
+# spec2pr-backup/${SLUG:-$ID} when the reset drops commits, then hard-reset to
+# <commit-ish> and remove untracked files. Halts on any git failure -- the
+# caller wants a hard stop, not best-effort recovery.
+reset_worktree_to() {
+  local target="$1" head backup_suffix
+  backup_suffix="${SLUG:-$ID}"
+  head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  if [ "$(git -C "$WORKTREE" rev-parse "$target")" != "$head" ]; then
+    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$head" >/dev/null 2>&1 \
+      || halt "backup tag failed"
+  fi
+  git -C "$WORKTREE" reset --hard "$target" >/dev/null 2>&1 || halt "reset to $target failed"
+  git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || halt "clean failed"
+}
+
 codex_call() {
   local role="$1" tag="$2" prompt_file="$3"
   local last="$META_DIR/$tag.json"

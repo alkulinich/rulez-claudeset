@@ -5,14 +5,23 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--start-from <stage>] <spec-path>"
 }
 
 SPEC_INPUT=""
+START_FROM="spec-review"
+START_FROM_GIVEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
       SPEC2PR_CODEX_FAST=1
+      shift
+      ;;
+    --start-from)
+      shift
+      [ "$#" -gt 0 ] || usage
+      START_FROM="$1"
+      START_FROM_GIVEN=1
       shift
       ;;
     --*)
@@ -27,6 +36,19 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$SPEC_INPUT" ] || usage
+
+stage_index() {
+  case "$1" in
+    spec-review) printf 1 ;;
+    plan)        printf 2 ;;
+    plan-review) printf 3 ;;
+    implementation) printf 4 ;;
+    *) printf 0 ;;
+  esac
+}
+START_INDEX="$(stage_index "$START_FROM")"
+[ "$START_INDEX" -ge 1 ] || usage
+
 if [ ! -f "$SPEC_INPUT" ]; then
   halt "spec not found: $SPEC_INPUT"
 fi
@@ -117,6 +139,16 @@ git -C "$GIT_ROOT" fetch -q origin main || halt "git fetch origin main failed"
 SOURCE_SHA="$(sha256_of "$SPEC_ABS")"
 
 if [ -d "$WORKTREE/.git" ] || git -C "$WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  WORKTREE_RESUMED=1
+else
+  WORKTREE_RESUMED=0
+fi
+
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 0 ]; then
+  halt "no worktree to restart; run spec2pr without --start-from first"
+fi
+
+if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   [ -f "$META_DIR/source-path" ] || halt "missing metadata: source-path"
   [ -f "$META_DIR/source-sha256" ] || halt "missing metadata: source-sha256"
   [ -f "$META_DIR/base-sha" ] || halt "missing metadata: base-sha"
@@ -137,6 +169,97 @@ else
   printf '%s\n' "$SPEC_ABS" > "$META_DIR/source-path"
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
+fi
+
+commit_with_subject() {
+  local want="$1" line
+  while IFS= read -r line; do
+    if [ "${line#* }" = "$want" ]; then
+      printf '%s' "${line%% *}"
+      return 0
+    fi
+  done < <(git -C "$WORKTREE" log --format='%H %s' "$BASE_SHA..HEAD")
+}
+
+newest_commit_with_prefix() {
+  local prefix="$1" line subject
+  while IFS= read -r line; do
+    subject="${line#* }"
+    case "$subject" in
+      "$prefix"*)
+        printf '%s' "${line%% *}"
+        return 0
+        ;;
+    esac
+  done < <(git -C "$WORKTREE" log --format='%H %s' "$BASE_SHA..HEAD")
+}
+
+if [ "$START_FROM_GIVEN" -eq 1 ]; then
+  STAGE="restart"
+  open_pr="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')" \
+    || halt "gh pr list failed"
+  if [ -n "$open_pr" ]; then
+    halt "open PR or remote branch exists for $BRANCH; close it and delete the branch, then re-run"
+  fi
+  set +e
+  git -C "$WORKTREE" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1
+  ls_remote_rc=$?
+  set -e
+  if [ "$ls_remote_rc" -eq 0 ]; then
+    halt "open PR or remote branch exists for $BRANCH; close it and delete the branch, then re-run"
+  elif [ "$ls_remote_rc" -ne 2 ]; then
+    halt "git ls-remote failed"
+  fi
+
+  restart_boundary=""
+  case "$START_FROM" in
+    spec-review)
+      restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+      ;;
+    plan)
+      restart_boundary="$(newest_commit_with_prefix "spec2pr: spec-review review fixes ")"
+      if [ -z "$restart_boundary" ]; then
+        restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+      fi
+      ;;
+    plan-review)
+      restart_boundary="$(commit_with_subject "spec2pr: write plan")"
+      if [ -z "$restart_boundary" ]; then
+        halt "no plan committed; restart from plan instead"
+      fi
+      ;;
+    implementation)
+      if [ -s "$META_DIR/implementation-base" ]; then
+        restart_boundary="$(cat "$META_DIR/implementation-base")"
+      fi
+      if [ -z "$restart_boundary" ]; then
+        restart_boundary="$(newest_commit_with_prefix "spec2pr: plan-review review fixes ")"
+      fi
+      if [ -z "$restart_boundary" ]; then
+        restart_boundary="$(commit_with_subject "spec2pr: write plan")"
+      fi
+      if [ -z "$restart_boundary" ]; then
+        halt "no reviewed plan boundary; restart from plan-review instead"
+      fi
+      ;;
+  esac
+  [ -n "$restart_boundary" ] || halt "could not resolve boundary for $START_FROM"
+
+  reset_worktree_to "$restart_boundary"
+  case "$START_FROM" in
+    spec-review|plan)
+      rm -f "$META_DIR/plan.json" \
+        "$META_DIR/implementation-base" \
+        "$META_DIR/implementation-head" \
+        "$META_DIR/implementation-ok"
+      ;;
+    plan-review|implementation)
+      rm -f "$META_DIR/implementation-base" \
+        "$META_DIR/implementation-head" \
+        "$META_DIR/implementation-ok"
+      ;;
+  esac
+  status "OK" "restart from $START_FROM at $restart_boundary"
 fi
 
 if ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: import spec"; then
@@ -254,12 +377,15 @@ EOF
   dirty "$stage" "$b" "$m" "$META_DIR/$stage-r$MAX_FIX_ROUNDS.json"
 }
 
-review_loop spec-review "the file at $WT_SPEC_REL (a feature spec)" "$WT_SPEC_REL"
+if [ 1 -ge "$START_INDEX" ]; then
+  review_loop spec-review "the file at $WT_SPEC_REL (a feature spec)" "$WT_SPEC_REL"
+fi
 
-STAGE="plan"
-if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
-  pf="$META_DIR/plan.prompt"
-  cat > "$pf" <<EOF
+if [ 2 -ge "$START_INDEX" ]; then
+  STAGE="plan"
+  if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
+    pf="$META_DIR/plan.prompt"
+    cat > "$pf" <<EOF
 Use \$superpowers:writing-plans to write an implementation plan for the
 feature spec at $WT_SPEC_REL.
 
@@ -267,36 +393,39 @@ Create exactly one plan file at $WT_PLAN_REL. Do not edit any other files.
 Do not commit, push, or create branches or PRs. Your final message should briefly
 summarize the plan.
 EOF
-  before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  run_claude_json plan "$pf" "$META_DIR/plan.claude.json"
-  after_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  if [ "$after_plan_head" != "$before_plan_head" ]; then
-    clean_worktree_to "$CALL_START_HEAD"
-    halt "planner committed changes (contract violation)"
+    before_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+    run_claude_json plan "$pf" "$META_DIR/plan.claude.json"
+    after_plan_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+    if [ "$after_plan_head" != "$before_plan_head" ]; then
+      clean_worktree_to "$CALL_START_HEAD"
+      halt "planner committed changes (contract violation)"
+    fi
+    if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
+      clean_worktree_to "$CALL_START_HEAD"
+      halt "planner did not write plan"
+    fi
+    assert_only_planner_path_changed
+    plan_summary="$(jq -r '.result // ""' "$META_DIR/plan.claude.json")"
+    jq -n --arg p "$WT_PLAN_REL" --arg s "$plan_summary" \
+      '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
+    plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
+    if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
+      split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+    fi
+    if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      git -C "$WORKTREE" add "$WT_PLAN_REL"
+      git -C "$WORKTREE" commit -q -m "spec2pr: write plan" || halt "git commit plan failed"
+    fi
+    status "OK" "plan ok $WT_PLAN_REL"
+    show_summary "$META_DIR/plan.json"
+  else
+    status "OK" "plan exists $WT_PLAN_REL"
   fi
-  if [ ! -f "$WORKTREE/$WT_PLAN_REL" ]; then
-    clean_worktree_to "$CALL_START_HEAD"
-    halt "planner did not write plan"
-  fi
-  assert_only_planner_path_changed
-  plan_summary="$(jq -r '.result // ""' "$META_DIR/plan.claude.json")"
-  jq -n --arg p "$WT_PLAN_REL" --arg s "$plan_summary" \
-    '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
-  plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
-  if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
-    split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
-  fi
-  if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
-    git -C "$WORKTREE" add "$WT_PLAN_REL"
-    git -C "$WORKTREE" commit -q -m "spec2pr: write plan" || halt "git commit plan failed"
-  fi
-  status "OK" "plan ok $WT_PLAN_REL"
-  show_summary "$META_DIR/plan.json"
-else
-  status "OK" "plan exists $WT_PLAN_REL"
 fi
 
-review_loop plan-review "the file at $WT_PLAN_REL (an implementation plan for the spec at $WT_SPEC_REL)" "$WT_PLAN_REL"
+if [ 3 -ge "$START_INDEX" ]; then
+  review_loop plan-review "the file at $WT_PLAN_REL (an implementation plan for the spec at $WT_SPEC_REL)" "$WT_PLAN_REL"
+fi
 
 implementation_ok_record() {
   printf 'base=%s\nhead=%s\n' "$1" "$2"

@@ -3,6 +3,8 @@
 # Reuses queue_* helpers defined in test-stages.sh / test-pipeline.sh (all
 # test-*.sh files are sourced into one namespace by run-tests.sh).
 
+WT_PLAN_REL_T="docs/superpowers/plans/toy-spec-plan.md"
+
 # Run spec-review(clean) -> plan -> plan-review(clean) so the next enqueued
 # codex fixture is consumed as the implement call. Leaves HEAD at "write plan".
 queue_through_plan_review() {
@@ -162,4 +164,165 @@ EOF
   assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
     "reviewer missing-result halt leaves tree clean"
   assert_file_absent "$wt/reviewer-dirt.txt" "reviewer dirt removed"
+}
+
+# Build a worktree progressed through plan-review, then halted at a failed
+# implement (auto-cleaned). HEAD = "spec2pr: write plan", clean tree, NO remote
+# branch and NO PR -- the precondition for a local --start-from.
+build_pre_impl_worktree() {
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue 04-implement <<'EOF'
+echo "implement boom" >&2
+exit 7
+EOF
+  run_spec2pr "$SPEC"
+}
+
+test_start_from_no_worktree_halts() {
+  make_sandbox
+  run_spec2pr --start-from plan "$SPEC"
+  assert_eq "1" "$RC" "no-worktree --start-from exits 1"
+  assert_contains "$OUT" "no worktree to restart; run spec2pr without --start-from first" \
+    "no-worktree halt"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree was created"
+}
+
+test_start_from_unknown_stage_usage() {
+  make_sandbox
+  run_spec2pr --start-from bogus "$SPEC"
+  assert_eq "1" "$RC" "unknown stage exits 1"
+  assert_contains "$OUT" "usage: spec2pr.sh" "unknown stage rejected by usage"
+}
+
+test_start_from_open_remote_branch_refuses() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr "$SPEC"          # full happy run pushes the branch + creates PR
+  assert_eq "0" "$RC" "setup happy run exits 0"
+  local head_before; head_before="$(git -C "$wt" rev-parse HEAD)"
+
+  run_spec2pr --start-from plan "$SPEC"
+  assert_eq "1" "$RC" "--start-from against a live remote branch exits 1"
+  assert_contains "$OUT" "open PR or remote branch exists for $BRANCH" "refusal halt"
+  assert_eq "$head_before" "$(git -C "$wt" rev-parse HEAD)" "no rewind happened"
+}
+
+test_start_from_spec_review_drops_plan() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  build_pre_impl_worktree
+  run_spec2pr --start-from spec-review "$SPEC"   # no new fixtures: halts at empty codex queue
+  assert_eq "spec2pr: import spec" "$(git -C "$wt" log -1 --format=%s)" \
+    "rewound to the import boundary"
+  assert_file_absent "$wt/$WT_PLAN_REL_T" "plan file dropped by reset"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan.json" "plan marker deleted"
+  assert_file_absent "$SPEC2PR_HOME/$ID/implementation-base" "impl marker deleted"
+}
+
+test_start_from_plan_review_keeps_plan() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  build_pre_impl_worktree
+  run_spec2pr --start-from plan-review "$SPEC"
+  assert_eq "spec2pr: write plan" "$(git -C "$wt" log -1 --format=%s)" \
+    "plan-review boundary is the write-plan commit"
+  assert_file_exists "$wt/$WT_PLAN_REL_T" "plan file kept"
+  assert_file_absent "$SPEC2PR_HOME/$ID/implementation-base" "impl marker deleted"
+}
+
+test_start_from_plan_review_without_plan_commit_halts() {
+  make_sandbox
+  # Only spec-review ran (no plan committed yet): reaching plan stage needs a
+  # planner; here we stop right after a clean spec-review by leaving the planner
+  # queue empty, so HEAD = import spec with no write-plan commit.
+  queue_clean_spec_review 01-spec-review
+  run_spec2pr "$SPEC"   # halts at "claude plan failed", HEAD = import spec
+  run_spec2pr --start-from plan-review "$SPEC"
+  assert_eq "1" "$RC" "plan-review with no plan commit exits 1"
+  assert_contains "$OUT" "no plan committed; restart from plan instead" "guidance halt"
+}
+
+test_start_from_plan_rewinds_past_spec_fixes() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  # spec-review makes a fix commit, then plan is written; --start-from plan must
+  # rewind to the spec-review fix commit (NOT import), keeping the spec fix.
+  enqueue 01-spec-r1 <<'EOF'
+echo fix >> docs/superpowers/specs/toy-spec.md
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"docs/superpowers/specs/toy-spec.md","summary":"s","evidence":"e"}],"notes":""}'
+EOF
+  printf '%s\n' "$CLEAN_REVIEW" | enqueue 02-spec-r2
+  queue_valid_planner 03-plan
+  enqueue 04-plan-review <<'EOF'
+echo "plan-review boom" >&2
+exit 7
+EOF
+  run_spec2pr "$SPEC"   # halts at plan-review (auto-cleaned); HEAD = write plan
+  run_spec2pr --start-from plan "$SPEC"
+  assert_eq "spec2pr: spec-review review fixes r1" "$(git -C "$wt" log -1 --format=%s)" \
+    "plan boundary is the newest spec-review fix commit"
+  assert_file_absent "$wt/$WT_PLAN_REL_T" "plan dropped on plan rewind"
+}
+
+test_start_from_implementation_rewinds_and_tags_backup() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  local slug="${ID#project-}"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr "$SPEC"          # full run: impl committed + markers + pushed + PR
+  assert_eq "0" "$RC" "setup happy run exits 0"
+  local impl_head; impl_head="$(git -C "$wt" rev-parse HEAD)"
+
+  # Simulate "user closed the PR and deleted the remote branch".
+  rm -f "$SPEC2PR_TEST_GH/pr-list-url"
+  git --git-dir="$ORIGIN" update-ref -d "refs/heads/$BRANCH"
+
+  run_spec2pr --start-from implementation "$SPEC"
+  assert_eq "spec2pr: write plan" "$(git -C "$wt" log -1 --format=%s)" \
+    "rewound to the implementation-base (reviewed-plan) boundary"
+  assert_file_absent "$wt/version.txt" "implementation commit dropped"
+  assert_file_absent "$SPEC2PR_HOME/$ID/implementation-base" "impl marker deleted"
+  assert_eq "spec2pr-backup/$slug" "$(git -C "$wt" tag -l "spec2pr-backup/$slug")" \
+    "backup tag created"
+  assert_eq "$impl_head" "$(git -C "$wt" rev-parse "spec2pr-backup/$slug")" \
+    "backup tag points at the dropped implementation head"
+}
+
+test_start_from_implementation_skips_review_loops() {
+  make_sandbox
+  build_pre_impl_worktree
+  local before; before="$(codex_calls)"   # spec-review + plan-review + implement = 3
+  enqueue 05-implement <<'EOF'
+echo "second implement boom" >&2
+exit 7
+EOF
+  run_spec2pr --start-from implementation "$SPEC"
+  local after; after="$(codex_calls)"
+  assert_eq "$((before + 1))" "$after" \
+    "only the implement codex call ran; spec-review and plan-review loops skipped"
+}
+
+test_no_flag_run_unchanged() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "no-flag full run still exits 0"
+  assert_contains "$OUT" "SPEC2PR DONE" "no-flag run reaches done"
+  assert_eq "3" "$(codex_calls)" "no-flag run makes the same three codex calls"
+  assert_eq "3" "$(claude_calls)" "no-flag run makes the same three claude calls"
 }
