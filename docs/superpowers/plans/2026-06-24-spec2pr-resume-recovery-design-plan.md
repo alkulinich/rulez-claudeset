@@ -804,7 +804,8 @@ reset_worktree_to() {
   backup_suffix="${SLUG:-$ID}"
   head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   if [ "$(git -C "$WORKTREE" rev-parse "$target")" != "$head" ]; then
-    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$head" >/dev/null 2>&1 || true
+    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$head" >/dev/null 2>&1 \
+      || halt "backup tag failed"
   fi
   git -C "$WORKTREE" reset --hard "$target" >/dev/null 2>&1 || halt "reset to $target failed"
   git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || halt "clean failed"
@@ -889,7 +890,9 @@ The existing body of the original `if` branch (the metadata-validation block, `:
 
 - [ ] **Step 6: Add the boundary-scan helpers**
 
-In `scripts/spec2pr.sh`, after the import-commit block (after `:147`, before `status "OK" "preflight ok"`), add:
+In `scripts/spec2pr.sh`, after the worktree detection / metadata block (after
+the closing `fi` of the resumed-vs-new worktree conditional) and **before** the
+import-commit block, add:
 
 ```bash
 # Newest-first scan of this branch's commits for boundary resolution.
@@ -919,7 +922,12 @@ newest_commit_with_prefix() {
 
 - [ ] **Step 7: Add the rewind preamble**
 
-In `scripts/spec2pr.sh`, immediately before `review_loop spec-review ...` (`:249`), add the preamble. It runs only when `--start-from` was given (the no-worktree and worktree-resumed checks already ran in Step 5):
+In `scripts/spec2pr.sh`, immediately after the boundary-scan helpers from Step
+6 and **before** the import-commit block, add the preamble. It runs only when
+`--start-from` was given (the no-worktree and worktree-resumed checks already
+ran in Step 5). Keeping it before import/spec-review ensures `--start-from`
+does not create a new import commit or otherwise mutate the worktree before
+checking the local-only preconditions and resolving the requested boundary:
 
 ```bash
 if [ "$START_FROM_GIVEN" -eq 1 ]; then
@@ -931,9 +939,14 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
   if [ -n "$open_pr" ]; then
     halt "open PR or remote branch exists for $BRANCH; close it and delete the branch, then re-run"
   fi
-  if git -C "$WORKTREE" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  set +e
+  git -C "$WORKTREE" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1
+  ls_remote_rc=$?
+  set -e
+  if [ "$ls_remote_rc" -eq 0 ]; then
     halt "open PR or remote branch exists for $BRANCH; close it and delete the branch, then re-run"
   fi
+  [ "$ls_remote_rc" -eq 2 ] || halt "git ls-remote failed"
 
   # Resolve the boundary commit for the chosen stage.
   restart_boundary=""
@@ -982,6 +995,9 @@ fi
 ```
 
 - [ ] **Step 8: Gate the pre-PR stage blocks on `START_INDEX`**
+
+After the rewind preamble, keep the existing import-commit block unchanged. Then
+wrap the pre-PR stages on `START_INDEX`.
 
 In `scripts/spec2pr.sh`, wrap the spec-review loop (`:249`):
 
@@ -1038,14 +1054,14 @@ git commit -m "feat(spec2pr): add --start-from stage rewind with local-only prec
 - *Captured pre-call boundary + reset-to-boundary (not HEAD) so failed commits are discarded* — Task 1 (`CALL_START_HEAD`, `clean_worktree_to`), consumed in Tasks 2–3.
 - *Backup tag `spec2pr-backup/${SLUG:-$ID}` on commit-dropping resets (best-effort in auto-clean, strict in `--start-from`)* — Tasks 1 and 4.
 - *`--start-from` arg + `stage_index` + `START_INDEX` gating of the three pre-PR blocks* — Task 4.
-- *Rewind preamble: require worktree, refuse live PR/remote branch, boundary table, reset, stale-marker deletion* — Task 4.
+- *Rewind preamble before import/spec-review: require worktree, refuse live PR/remote branch (and halt on `ls-remote` errors), boundary table, reset, stale-marker deletion* — Task 4.
 - *Edge cases: `plan-review` with no plan commit; `implementation` with no `implementation-base` marker falling back to plan-review-fix then write-plan; normal-run byte-identity; `--fast` composes (independent flags)* — Task 4 (boundary `case`, gating, independent flag parsing).
 - *Testing bullets* — deadlock recovery (T1), discards failed commits (T1), post-call contract failures (T3), `--start-from` each stage (T4), skip earlier loops (T4), precondition halts (T4), backup tag (T1 + T4), no-flag regression (T4).
 - *Out of scope* — re-review skip-when-clean, `pr-review` as a target, automatic PR teardown/force-push, retry/backoff: none added. `pr-review` stays excluded; rewinds are local-only.
 
 **Placeholder scan:** No `TBD`/`add error handling`/`similar to`/`write tests for the above`. Every code step shows full code; every test step shows the fixture and assertions.
 
-**Type/name consistency:** `CALL_START_HEAD`, `clean_worktree_to`, `reset_worktree_to`, `stage_index`, `commit_with_subject`, `newest_commit_with_prefix`, `START_FROM`, `START_FROM_GIVEN`, `START_INDEX`, `WORKTREE_RESUMED`, `restart_boundary` are spelled identically across the tasks that define and consume them. Backup-tag suffix is `${SLUG:-$ID}` in both helpers. Marker filenames (`plan.json`, `implementation-base|head|ok`) match the script's existing names. Halt strings reuse the exact spec wording.
+**Type/name consistency:** `CALL_START_HEAD`, `clean_worktree_to`, `reset_worktree_to`, `stage_index`, `commit_with_subject`, `newest_commit_with_prefix`, `START_FROM`, `START_FROM_GIVEN`, `START_INDEX`, `WORKTREE_RESUMED`, `restart_boundary` are spelled identically across the tasks that define and consume them. Backup-tag suffix is `${SLUG:-$ID}` in both helpers; `clean_worktree_to` is best-effort, while strict `reset_worktree_to` halts if the backup tag cannot be written before a commit-dropping reset. Marker filenames (`plan.json`, `implementation-base|head|ok`) match the script's existing names. Halt strings reuse the exact spec wording.
 
 **One existing test changes behavior:** `test_spec_review_resume_halts_before_committing_stale_dirty_worktree` asserted the pre-auto-clean wedge; Task 3 Step 1 rewrites it to `test_spec_review_contract_failure_autocleans_then_resumes`. All other existing tests assert only exit codes and unchanged halt strings, so they stay green because auto-clean runs *before* each halt.
 
