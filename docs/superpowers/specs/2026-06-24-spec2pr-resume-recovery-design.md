@@ -68,8 +68,9 @@ Decided in brainstorming; fixed scope.
   output after the captured pre-call boundary, including any commits or
   uncommitted edits from that call; the `.stderr`/`.stdout` captured in
   `META_DIR` keep the failure diagnosable.
-- **Backup tag before any commit-dropping reset.** `--start-from` tags the old
-  HEAD at `refs/spec2pr-backup/$SLUG` so a wrong rewind is recoverable.
+- **Backup tag before any commit-dropping reset.** `--start-from` creates or
+  updates the normal Git tag `spec2pr-backup/$SLUG` at the old HEAD (stored under
+  `refs/tags/spec2pr-backup/$SLUG`) so a wrong rewind is recoverable.
 - **Re-review skipping is out of scope.** Making the spec-review / plan-review
   loops skip-when-already-clean is a separate idea; `--start-from` already gives
   a manual skip. See Out of scope.
@@ -101,7 +102,7 @@ dirty-worktree wedge. The implement marker logic (`:303-343`) and pr-create
 ```bash
 # reset_worktree_to <commit-ish>
 # Hard-reset the worktree to <commit-ish> and remove untracked files. Tags the
-# pre-reset HEAD at refs/spec2pr-backup/$SLUG when the reset drops commits.
+# pre-reset HEAD as spec2pr-backup/$SLUG when the reset drops commits.
 reset_worktree_to() {
   local target="$1" head
   head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
