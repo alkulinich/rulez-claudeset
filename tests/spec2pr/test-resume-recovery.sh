@@ -69,3 +69,34 @@ EOF
     "$(git -C "$wt" log -1 --format=%s "spec2pr-backup/$slug")" \
     "backup tag points at the discarded failed commit"
 }
+
+test_autoclean_claude_failure_resumes() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+
+  # Reach the plan stage, then the claude planner leaves an uncommitted edit
+  # and exits nonzero (process failure -> rc 2).
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+printf 'half a plan\n' > docs/superpowers/plans/toy-spec-plan.md
+echo "claude boom" >&2
+exit 4
+EOF
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "run 1 halts on claude plan failure"
+  assert_contains "$OUT" "claude plan failed" "run 1 names the failed claude call"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "auto-clean leaves the worktree clean after claude failure"
+  assert_file_absent "$wt/docs/superpowers/plans/toy-spec-plan.md" \
+    "auto-clean removed the half-written plan"
+
+  # Run 2: plan stage re-authors cleanly; no dirty-worktree wedge.
+  queue_clean_spec_review 03-spec-review
+  queue_valid_planner 04-plan
+  queue_clean_plan_review 05-plan-review
+  queue_implementation_commit 06-implement
+  queue_clean_pr_review 07-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "run 2 resumes to DONE after claude auto-clean"
+  assert_not_contains "$OUT" "dirty worktree before" "run 2 never hits a dirty-worktree guard"
+}

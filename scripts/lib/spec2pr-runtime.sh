@@ -394,13 +394,18 @@ claude_json_attempt() {
   local tag="$1" prompt_file="$2" out="$3"
   local err="$META_DIR/$tag.stderr"
 
+  CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   progress "running claude $tag"
   if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" -p --output-format json \
       --dangerously-skip-permissions \
       < "$prompt_file" > "$out" 2> "$err"); then
+    clean_worktree_to "$CALL_START_HEAD"
     return 2
   fi
-  jq -e . "$out" > /dev/null 2>&1 || return 3
+  if ! jq -e . "$out" > /dev/null 2>&1; then
+    clean_worktree_to "$CALL_START_HEAD"
+    return 3
+  fi
 }
 
 run_claude_json() {
