@@ -70,7 +70,9 @@ Decided in brainstorming; fixed scope.
   `META_DIR` keep the failure diagnosable.
 - **Backup tag before any commit-dropping reset.** `--start-from` creates or
   updates the normal Git tag `spec2pr-backup/$SLUG` at the old HEAD (stored under
-  `refs/tags/spec2pr-backup/$SLUG`) so a wrong rewind is recoverable.
+  `refs/tags/spec2pr-backup/$SLUG`) so a wrong rewind is recoverable. Auto-clean
+  uses the same tag best-effort before discarding failed-call commits; reset
+  errors still must not mask the original model failure.
 - **Re-review skipping is out of scope.** Making the spec-review / plan-review
   loops skip-when-already-clean is a separate idea; `--start-from` already gives
   a manual skip. See Out of scope.
@@ -115,11 +117,11 @@ reset_worktree_to() {
 ```
 
 `--start-from` calls it with an earlier stage commit (drops committed stages;
-tags first). Auto-clean does the same reset-and-clean against the model call's
-recorded pre-call HEAD — but **best-effort and non-fatal** (see §2), because it
-runs inside an already-failing path and must not mask the original model error
-with a reset error. So the two share the *operation*, not literally the strict
-helper.
+tags first). Auto-clean uses the same sequence against the model call's recorded
+pre-call HEAD — backup tag when `HEAD` moved, then reset, then clean — but
+**best-effort and non-fatal** (see §2), because it runs inside an already-failing
+path and must not mask the original model error with a reset error. So the two
+share the *operation*, not literally the strict helper.
 
 ### 2. Auto-clean on model-call failure
 
@@ -133,10 +135,15 @@ branches), invalid JSON (`:304`), and schema violation (`validate_codex_output`,
 call_start_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
 ```
 
-Before each of those failure halts, reset the worktree back to that captured
-boundary:
+Before each of those failure halts, tag the current `HEAD` if it differs from
+the captured boundary, then reset the worktree back to that boundary:
 
 ```bash
+current_head="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
+target_head="$(git -C "$WORKTREE" rev-parse "$call_start_head" 2>/dev/null || true)"
+if [ -n "$current_head" ] && [ -n "$target_head" ] && [ "$current_head" != "$target_head" ]; then
+  git -C "$WORKTREE" tag -f "spec2pr-backup/$SLUG" "$current_head" >/dev/null 2>&1 || true
+fi
 git -C "$WORKTREE" reset --hard "$call_start_head" >/dev/null 2>&1 || true
 git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
 ```
@@ -224,15 +231,18 @@ Boundary resolution scans `git -C "$WORKTREE" log --format='%H %s' "$BASE_SHA..H
 | `spec-review` | subject `spec2pr: import spec` | `plan.json`, `implementation-base`, `implementation-head`, `implementation-ok` |
 | `plan` | first (newest) `spec2pr: spec-review review fixes *`, else the import-spec commit | `plan.json`, `implementation-*` |
 | `plan-review` | subject `spec2pr: write plan` | `implementation-*` |
-| `implementation` | `cat "$META_DIR/implementation-base"` if present and non-empty, else `HEAD` | `implementation-*` |
+| `implementation` | `cat "$META_DIR/implementation-base"` if present and non-empty; else first (newest) `spec2pr: plan-review review fixes *`; else subject `spec2pr: write plan` | `implementation-*` |
 
 `reset --hard` removes committed downstream files automatically — e.g. rewinding
 to `plan` drops the `spec2pr: write plan` commit, so the plan file disappears and
 the existing `[ ! -f plan ]` gate re-authors it. Markers live *outside* the
 worktree in `$META_DIR`, so they are deleted explicitly. The implement commits
-carry arbitrary subjects (`feat:`, `test:`, `docs:`), which is why the
-`implementation` boundary reads the `implementation-base` marker rather than
-grepping a subject.
+carry arbitrary subjects (`feat:`, `test:`, `docs:`), which is why the preferred
+`implementation` boundary is the `implementation-base` marker. When that marker
+does not exist (for example, an old failed implementation committed before
+returning invalid JSON), the reviewed-plan boundary is still discoverable from
+the newest plan-review fix commit or, if the plan-review passed cleanly with no
+fix commit, the `spec2pr: write plan` commit.
 
 ## Edge cases & invariants
 
@@ -243,14 +253,18 @@ grepping a subject.
   `halt "no plan committed; restart from plan instead"` — cannot review a plan
   that was never written.
 - **`--start-from implementation` with no `implementation-base` marker:** boundary
-  is HEAD, so the rewind only cleans the tree and the implement stage runs from
-  the current (reviewed-plan) state.
+  falls back to the newest `spec2pr: plan-review review fixes *` commit, then to
+  `spec2pr: write plan`. If neither exists, halt
+  `no reviewed plan boundary; restart from plan-review instead`. This preserves
+  the escape hatch for failed implementation calls that created commits before
+  markers were written.
 - **Dirty worktree on `--start-from` entry:** expected and fine — the reset
   discards it; that is the point.
 - **Auto-clean never fires on success:** only the model-call *failure* branches
   clean; `review_loop` success keeps and commits its edits as before.
-- **Backup tag:** present only when the reset moves HEAD (commit-dropping
-  rewinds). Recover with `git -C <worktree> reset --hard spec2pr-backup/$SLUG`.
+- **Backup tag:** present when a reset moves HEAD (commit-dropping rewinds),
+  including best-effort auto-clean. Recover with
+  `git -C <worktree> reset --hard spec2pr-backup/$SLUG`.
 - **`--fast` composes:** the flags are independent; both may be set.
 - **Lock held throughout:** the rewind runs inside the same locked process
   (`acquire_lock`, `:114`), so no concurrent run can race the reset.
