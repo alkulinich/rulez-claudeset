@@ -41,9 +41,10 @@ limit that caused the halt, and making a resume *look* like a restart.
 
 This feature adds two capabilities sharing one worktree-reset operation:
 
-- **Auto-clean** — on any model-call failure, discard the failed call's leftover
-  edits so the worktree is left clean at its last committed boundary. A plain
-  re-run then resumes with no flag. Fixes the deadlock.
+- **Auto-clean** — on any model-call failure, discard the failed call's output
+  after the pre-call boundary, including edits or commits, so the worktree is
+  left clean at its last known-good boundary. A plain re-run then resumes with
+  no flag. Fixes the deadlock.
 - **`--start-from <stage>`** — rewind the worktree to a chosen stage's commit
   boundary and re-enter the pipeline there, skipping earlier review loops. Gives
   deliberate redo (bad plan, fresh implementation) and an escape hatch for any
@@ -64,7 +65,8 @@ Decided in brainstorming; fixed scope.
   first. No `gh pr close`, no force-push, no remote teardown anywhere in the
   tool — **every rewind is local-only.**
 - **Auto-clean is unconditional, no flag.** It only discards a *failed* call's
-  uncommitted output, which is disposable; the `.stderr`/`.stdout` captured in
+  output after the captured pre-call boundary, including any commits or
+  uncommitted edits from that call; the `.stderr`/`.stdout` captured in
   `META_DIR` keep the failure diagnosable.
 - **Backup tag before any commit-dropping reset.** `--start-from` tags the old
   HEAD at `refs/spec2pr-backup/$SLUG` so a wrong rewind is recoverable.
@@ -75,8 +77,9 @@ Decided in brainstorming; fixed scope.
 ## Affected code
 
 - **`scripts/lib/spec2pr-runtime.sh`** — new `reset_worktree_to` helper; the
-  shared model-call layer (`codex_call`, `run_claude_json`) cleans the worktree
-  to HEAD before halting on a model-call failure.
+  shared model-call layer (`codex_call`, `run_claude_json`) records the
+  pre-call HEAD and cleans the worktree back to that boundary before halting on
+  a model-call failure.
 - **`scripts/spec2pr.sh`** — `--start-from` arg parsing; a rewind preamble
   between preflight and the spec-review loop; START_STAGE gating around the
   spec-review (`:249`), plan (`:251-283`), and plan-review (`:285`) blocks.
@@ -111,34 +114,48 @@ reset_worktree_to() {
 ```
 
 `--start-from` calls it with an earlier stage commit (drops committed stages;
-tags first). Auto-clean does the same reset-and-clean against `HEAD` (no commits
-lost, so no tag) — but **best-effort and non-fatal** (see §2), because it runs
-inside an already-failing path and must not mask the original model error with a
-reset error. So the two share the *operation*, not literally the strict helper.
+tags first). Auto-clean does the same reset-and-clean against the model call's
+recorded pre-call HEAD — but **best-effort and non-fatal** (see §2), because it
+runs inside an already-failing path and must not mask the original model error
+with a reset error. So the two share the *operation*, not literally the strict
+helper.
 
 ### 2. Auto-clean on model-call failure
 
-`codex_call` halts at three points where codex may have left worktree edits:
-exec failure (`spec2pr-runtime.sh:293`/`:300`, fast and non-fast branches),
-invalid JSON (`:304`), and schema violation (`validate_codex_output`, `:360`).
-`run_claude_json` halts on exit-failure or invalid JSON (`:386`, `:388`). Before
-each of these halts, reset the worktree to HEAD:
+`codex_call` halts at three points where codex may have left worktree edits or
+commits: exec failure (`spec2pr-runtime.sh:293`/`:300`, fast and non-fast
+branches), invalid JSON (`:304`), and schema violation (`validate_codex_output`,
+`:360`). `run_claude_json` halts on exit-failure or invalid JSON (`:386`,
+`:388`). Before launching each model process, capture the clean stage boundary:
 
 ```bash
-git -C "$WORKTREE" reset --hard HEAD >/dev/null 2>&1 || true
+call_start_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+```
+
+Before each of those failure halts, reset the worktree back to that captured
+boundary:
+
+```bash
+git -C "$WORKTREE" reset --hard "$call_start_head" >/dev/null 2>&1 || true
 git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
 ```
 
-Implemented as a single helper (`clean_worktree_head`) invoked in the failure
-branches, so success paths — where `review_loop` *intends* to keep and commit
-the edits — are untouched.
+Implemented as a single helper (`clean_worktree_to "$call_start_head"`) invoked
+in the failure branches, so success paths — where `review_loop` *intends* to
+keep and commit the edits — are untouched. The helper resets to the captured
+boundary rather than to current `HEAD` because the implementation and PR-fix
+prompts explicitly allow commits; a failed model call can therefore advance
+`HEAD` before returning nonzero, invalid JSON, or a schema-invalid message. Those
+commits are part of the failed call's output and must be discarded along with
+uncommitted edits.
 
 This is safe because **every stage boundary is clean by contract**:
 `review_loop` asserts a clean tree at each round's start (`:178`); the plan
 (`:262`) and implement (`:371`) paths capture `before_*_head` against a clean
-tree. So anything dirty *after* a failed call is exactly that call's own output,
-and is disposable — the implement stage records its resume marker only on a
-committed `done` (`:388-396`), so a mid-failure was already going to be redone.
+tree. So any worktree change or commit *after* the captured pre-call boundary and
+before a failed call returns is exactly that call's own output, and is
+disposable — the implement stage records its resume marker only on a committed
+`done` (`:388-396`), so a mid-failure was already going to be redone.
 
 ### 3. `--start-from` arg + START_STAGE gating (`spec2pr.sh`)
 
@@ -247,6 +264,12 @@ grepping a subject.
   whose fixture leaves an uncommitted edit; assert the run halts, then a second
   plain run does **not** hit `dirty worktree before spec-review review round` and
   reaches the next stage. (Reproduces the observed wedge and proves the fix.)
+- **Auto-clean discards failed-call commits:** enqueue an implement-stage codex
+  failure whose fixture creates a commit before exiting nonzero or returning
+  invalid JSON; assert the run halts with HEAD restored to the pre-call
+  implementation boundary, no `implementation-*` markers are written, and a
+  second plain run redoes implementation from that boundary instead of layering
+  on top of the failed commit.
 - **`--start-from <each stage>`** rewinds to the right boundary: after the flag
   run, assert HEAD's subject matches the boundary row, the plan file is present
   or absent as expected, and `implementation-*` markers are gone.
