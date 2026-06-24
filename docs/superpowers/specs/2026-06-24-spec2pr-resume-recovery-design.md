@@ -75,17 +75,21 @@ Decided in brainstorming; fixed scope.
 ## Affected code
 
 - **`scripts/lib/spec2pr-runtime.sh`** — new `reset_worktree_to` helper; the
-  model-call layer (`codex_call`, `run_claude_json`) cleans the worktree to HEAD
-  before halting on a model-call failure.
+  shared model-call layer (`codex_call`, `run_claude_json`) cleans the worktree
+  to HEAD before halting on a model-call failure.
 - **`scripts/spec2pr.sh`** — `--start-from` arg parsing; a rewind preamble
   between preflight and the spec-review loop; START_STAGE gating around the
   spec-review (`:249`), plan (`:251-283`), and plan-review (`:285`) blocks.
 - **`tests/spec2pr/`** — new auto-clean and `--start-from` tests; a no-flag
   regression check.
 
-**Not** affected: `pr_review_engine_run` and the pr-review stage (post-PR, out
-of scope); the implement marker logic (`:303-343`) and pr-create (`:409-424`),
-which keep their current guards and become the floor that always runs.
+**Not** affected structurally: `pr_review_engine_run` keeps its current stage
+flow, review prompts, commit/push behavior, and `pr-review` is still excluded as
+a `--start-from` target. Because `pr_review_engine_run` calls the shared
+model-call helpers, the best-effort clean-on-failure behavior applies there too;
+that is intentional and prevents a failed post-PR fixer from leaving the same
+dirty-worktree wedge. The implement marker logic (`:303-343`) and pr-create
+(`:409-424`) keep their current guards and become the floor that always runs.
 
 ## The change
 
