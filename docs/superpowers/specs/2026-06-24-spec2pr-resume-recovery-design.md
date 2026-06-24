@@ -71,8 +71,10 @@ Decided in brainstorming; fixed scope.
 - **Backup tag before any commit-dropping reset.** `--start-from` creates or
   updates the normal Git tag `spec2pr-backup/$SLUG` at the old HEAD (stored under
   `refs/tags/spec2pr-backup/$SLUG`) so a wrong rewind is recoverable. Auto-clean
-  uses the same tag best-effort before discarding failed-call commits; reset
-  errors still must not mask the original model failure.
+  uses the same tag shape best-effort before discarding failed-call commits; in
+  shared runtime code, derive the tag suffix from `${SLUG:-$ID}` so `review-pr.sh`
+  cleanup works even though that caller has no spec slug. Reset/tag errors still
+  must not mask the original model failure.
 - **Re-review skipping is out of scope.** Making the spec-review / plan-review
   loops skip-when-already-clean is a separate idea; `--start-from` already gives
   a manual skip. See Out of scope.
@@ -80,9 +82,9 @@ Decided in brainstorming; fixed scope.
 ## Affected code
 
 - **`scripts/lib/spec2pr-runtime.sh`** — new `reset_worktree_to` helper; the
-  shared model-call layer (`codex_call`, `run_claude_json`) records the
-  pre-call HEAD and cleans the worktree back to that boundary before halting on
-  a model-call failure.
+  shared model-call layer (`codex_call`, `claude_json_attempt`, and
+  `run_claude_json`) records the pre-call HEAD and cleans the worktree back to
+  that boundary before reporting a model-call failure.
 - **`scripts/spec2pr.sh`** — `--start-from` arg parsing; a rewind preamble
   between preflight and the spec-review loop; START_STAGE gating around the
   spec-review (`:249`), plan (`:251-283`), and plan-review (`:285`) blocks.
@@ -106,10 +108,11 @@ dirty-worktree wedge. The implement marker logic (`:303-343`) and pr-create
 # Hard-reset the worktree to <commit-ish> and remove untracked files. Tags the
 # pre-reset HEAD as spec2pr-backup/$SLUG when the reset drops commits.
 reset_worktree_to() {
-  local target="$1" head
+  local target="$1" head backup_suffix
+  backup_suffix="${SLUG:-$ID}"
   head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   if [ "$(git -C "$WORKTREE" rev-parse "$target")" != "$head" ]; then
-    git -C "$WORKTREE" tag -f "spec2pr-backup/$SLUG" "$head" >/dev/null 2>&1 || true
+    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$head" >/dev/null 2>&1 || true
   fi
   git -C "$WORKTREE" reset --hard "$target" >/dev/null 2>&1 || halt "reset to $target failed"
   git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || halt "clean failed"
@@ -128,8 +131,13 @@ share the *operation*, not literally the strict helper.
 `codex_call` halts at three points where codex may have left worktree edits or
 commits: exec failure (`spec2pr-runtime.sh:293`/`:300`, fast and non-fast
 branches), invalid JSON (`:304`), and schema violation (`validate_codex_output`,
-`:360`). `run_claude_json` halts on exit-failure or invalid JSON (`:386`,
-`:388`). Before launching each model process, capture the clean stage boundary:
+`:360`). The Claude side must be covered at the lower-level
+`claude_json_attempt`, not only in `run_claude_json`, because `pr-review-engine`
+calls `claude_json_attempt` directly for classifier retries. `claude_json_attempt`
+cleans before returning nonzero for process failure or invalid JSON; callers that
+halt (`run_claude_json`, classifier failure, malformed classifier exhaustion) then
+see a clean worktree. Before launching each model process, capture the clean
+stage boundary:
 
 ```bash
 call_start_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
@@ -139,23 +147,26 @@ Before each of those failure halts, tag the current `HEAD` if it differs from
 the captured boundary, then reset the worktree back to that boundary:
 
 ```bash
+backup_suffix="${SLUG:-$ID}"
 current_head="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
 target_head="$(git -C "$WORKTREE" rev-parse "$call_start_head" 2>/dev/null || true)"
 if [ -n "$current_head" ] && [ -n "$target_head" ] && [ "$current_head" != "$target_head" ]; then
-  git -C "$WORKTREE" tag -f "spec2pr-backup/$SLUG" "$current_head" >/dev/null 2>&1 || true
+  git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$current_head" >/dev/null 2>&1 || true
 fi
 git -C "$WORKTREE" reset --hard "$call_start_head" >/dev/null 2>&1 || true
 git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
 ```
 
 Implemented as a single helper (`clean_worktree_to "$call_start_head"`) invoked
-in the failure branches, so success paths — where `review_loop` *intends* to
-keep and commit the edits — are untouched. The helper resets to the captured
-boundary rather than to current `HEAD` because the implementation and PR-fix
-prompts explicitly allow commits; a failed model call can therefore advance
-`HEAD` before returning nonzero, invalid JSON, or a schema-invalid message. Those
-commits are part of the failed call's output and must be discarded along with
-uncommitted edits.
+in the failure branches. For `validate_codex_output`, either pass the captured
+boundary into the validator or have `codex_call` perform schema validation in a
+non-halting branch so the helper runs before the schema-violation halt. Success
+paths — where `review_loop` *intends* to keep and commit the edits — are
+untouched. The helper resets to the captured boundary rather than to current
+`HEAD` because the implementation and PR-fix prompts explicitly allow commits; a
+failed model call can therefore advance `HEAD` before returning nonzero, invalid
+JSON, or a schema-invalid message. Those commits are part of the failed call's
+output and must be discarded along with uncommitted edits.
 
 This is safe because **every stage boundary is clean by contract**:
 `review_loop` asserts a clean tree at each round's start (`:178`); the plan
@@ -208,13 +219,16 @@ rejects an unknown stage. Each pre-PR block runs only when its index is
 When a block is skipped, the rewind (below) guarantees its artifact already
 exists, so the always-run floor stays correct.
 
-### 4. The rewind preamble (`spec2pr.sh`, after preflight, before `review_loop spec-review`)
+### 4. The rewind preamble (`spec2pr.sh`, after metadata/worktree detection, before import/spec-review)
 
 Runs only when `--start-from` is given. Steps, in order:
 
 1. **Require an existing worktree.** The detection block (`:119`) sets a flag for
-   "resumed vs freshly created"; if freshly created (no prior run),
+   "resumed vs absent". If no prior worktree/metadata exists, halt before
+   `git worktree add`, metadata creation, or the import commit:
    `halt "no worktree to restart; run spec2pr without --start-from first"`.
+   `--start-from` must not create a new worktree as part of failing this
+   precondition.
 2. **Refuse on live PR / remote branch.** Reuse the existing checks: if
    `gh pr list --head "$BRANCH" --state open` returns a URL, or
    `git ls-remote --exit-code --heads origin "$BRANCH"` finds the branch,
