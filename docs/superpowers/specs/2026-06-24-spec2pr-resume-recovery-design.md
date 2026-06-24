@@ -136,8 +136,15 @@ branches), invalid JSON (`:304`), and schema violation (`validate_codex_output`,
 calls `claude_json_attempt` directly for classifier retries. `claude_json_attempt`
 cleans before returning nonzero for process failure or invalid JSON; callers that
 halt (`run_claude_json`, classifier failure, malformed classifier exhaustion) then
-see a clean worktree. Before launching each model process, capture the clean
-stage boundary:
+see a clean worktree. The same cleanup must also run in the immediate
+post-model failure paths that reject an otherwise parseable response before a
+stage boundary has been accepted: implementation `blocked`, `uncommitted changes
+after done`, `no implementation commit after done`, planner committed changes,
+planner missing the plan artifact, reviewer/classifier modified worktree, and
+pr-review fixer committed changes. Those are not process failures, but they are
+failed model outputs from the pipeline's perspective and can otherwise leave the
+same dirty or advanced-HEAD wedge. Before launching each model process, capture
+the clean stage boundary:
 
 ```bash
 call_start_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
@@ -160,13 +167,18 @@ git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
 Implemented as a single helper (`clean_worktree_to "$call_start_head"`) invoked
 in the failure branches. For `validate_codex_output`, either pass the captured
 boundary into the validator or have `codex_call` perform schema validation in a
-non-halting branch so the helper runs before the schema-violation halt. Success
-paths — where `review_loop` *intends* to keep and commit the edits — are
-untouched. The helper resets to the captured boundary rather than to current
+non-halting branch so the helper runs before the schema-violation halt. For
+post-model contract checks, reuse the caller's existing `before_*_head` value or
+have the model-call helper expose the captured boundary to the caller; clean to
+that boundary before halting. Success paths — where `review_loop` *intends* to
+keep and commit the edits, the planner writes a valid plan, implementation
+records valid markers, or the PR fixer leaves committable edits for the engine —
+are untouched. The helper resets to the captured boundary rather than to current
 `HEAD` because the implementation and PR-fix prompts explicitly allow commits; a
-failed model call can therefore advance `HEAD` before returning nonzero, invalid
-JSON, or a schema-invalid message. Those commits are part of the failed call's
-output and must be discarded along with uncommitted edits.
+failed model output can therefore advance `HEAD` before returning nonzero,
+invalid JSON, a schema-invalid message, or a valid JSON status that the pipeline
+must reject. Those commits are part of the failed output and must be discarded
+along with uncommitted edits.
 
 This is safe because **every stage boundary is clean by contract**:
 `review_loop` asserts a clean tree at each round's start (`:178`); the plan
@@ -274,8 +286,9 @@ fix commit, the `spec2pr: write plan` commit.
   markers were written.
 - **Dirty worktree on `--start-from` entry:** expected and fine — the reset
   discards it; that is the point.
-- **Auto-clean never fires on success:** only the model-call *failure* branches
-  clean; `review_loop` success keeps and commits its edits as before.
+- **Auto-clean never fires on accepted success:** only model-call failures and
+  immediate post-call contract failures clean; `review_loop` success keeps and
+  commits its edits as before.
 - **Backup tag:** present when a reset moves HEAD (commit-dropping rewinds),
   including best-effort auto-clean. Recover with
   `git -C <worktree> reset --hard spec2pr-backup/$SLUG`.
