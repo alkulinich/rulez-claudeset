@@ -88,7 +88,7 @@ pr_review_engine_run() {
 
   local round review_prompt review_json review_file review_blockers review_majors status_reviewer
   local classify_prompt classify_json classify_result classify_tmp
-  local malformed attempt classify_rc b m fix_prompt fix_history_preamble before_fix_head after_fix_head
+  local malformed attempt classify_rc b m fix_prompt fix_history_preamble after_model_head before_fix_head after_fix_head
 
   for round in $(seq 1 "$MAX_FIX_ROUNDS"); do
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
@@ -119,7 +119,9 @@ EOF
         clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer response missing result ($review_json)"
       fi
-      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+          || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
         clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer modified worktree"
       fi
@@ -143,7 +145,9 @@ EOF
         claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
         classify_rc=$?
         set -e
-        if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+        if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+            || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
           clean_worktree_to "$CALL_START_HEAD"
           halt "classifier modified worktree"
         fi
@@ -201,7 +205,9 @@ Diff:
 $(cat "$diff_file")
 EOF
       codex_call review "pr-review-r$round" "$review_prompt"
-      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+          || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
         clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer modified worktree"
       fi
