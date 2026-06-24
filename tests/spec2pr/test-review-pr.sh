@@ -477,9 +477,68 @@ test_review_pr_codex_reviewer_edit_halts() {
 
   assert_eq "1" "$RC" "codex reviewer edit exits 1"
   assert_contains "$OUT" "PRREVIEW HALT pr-review: reviewer modified worktree" "reviewer edit halt"
-  assert_file_exists "$PR_WT/reviewer-edit.txt" "codex reviewer edit remains for inspection"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "reviewer edit halt leaves tree clean"
+  assert_file_absent "$PR_WT/reviewer-edit.txt" "codex reviewer edit removed"
   assert_eq "1" "$(codex_calls)" "reviewer edit consumes one codex review call"
   assert_eq "0" "$(claude_calls)" "reviewer edit does not call claude fixer or classifier"
+}
+
+test_review_pr_codex_reviewer_self_commit_autocleans() {
+  make_pr_sandbox
+  enqueue 01-pr-codex-review-commit <<'EOF'
+printf 'codex reviewer commit\n' > codex-reviewer-commit.txt
+git add codex-reviewer-commit.txt
+git commit -qm 'codex reviewer self-commit'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"No findings, but committed."}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "codex reviewer self-commit exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: reviewer modified worktree" "codex reviewer self-commit halt"
+  assert_eq "$PR_HEAD_OID" "$(git -C "$PR_WT" rev-parse HEAD)" "codex reviewer commit dropped"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "codex reviewer self-commit halt leaves tree clean"
+  assert_file_absent "$PR_WT/codex-reviewer-commit.txt" "codex reviewer committed file removed"
+}
+
+test_review_pr_claude_reviewer_self_commit_autocleans() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf 'claude reviewer commit\n' > claude-reviewer-commit.txt
+git add claude-reviewer-commit.txt
+git commit -qm 'claude reviewer self-commit'
+printf '{"result":"No blocker or major findings, but committed."}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "claude reviewer self-commit exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: reviewer modified worktree" "claude reviewer self-commit halt"
+  assert_eq "$PR_HEAD_OID" "$(git -C "$PR_WT" rev-parse HEAD)" "claude reviewer commit dropped"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "claude reviewer self-commit halt leaves tree clean"
+  assert_file_absent "$PR_WT/claude-reviewer-commit.txt" "claude reviewer committed file removed"
+}
+
+test_review_pr_classifier_self_commit_autocleans() {
+  make_pr_sandbox
+  enqueue_claude 01-pr-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude 01-pr-b-classify <<'EOF'
+printf 'classifier commit\n' > classifier-commit.txt
+git add classifier-commit.txt
+git commit -qm 'classifier self-commit'
+printf '{"result":{"blockers_found":0,"majors_found":0}}'
+EOF
+  run_review_pr "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "classifier self-commit exits 1"
+  assert_contains "$OUT" "PRREVIEW HALT pr-review: classifier modified worktree" "classifier self-commit halt"
+  assert_eq "$PR_HEAD_OID" "$(git -C "$PR_WT" rev-parse HEAD)" "classifier commit dropped"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "classifier self-commit halt leaves tree clean"
+  assert_file_absent "$PR_WT/classifier-commit.txt" "classifier committed file removed"
 }
 
 test_review_pr_reviewer_flag_equals_form() {
@@ -517,4 +576,20 @@ test_review_pr_reviewer_flag_validation() {
   run_review_pr "$PR_NUMBER" extra
   assert_eq "1" "$RC" "extra positional exits 1"
   assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
+}
+
+test_review_pr_claude_fixer_missing_result_autocleans() {
+  make_pr_sandbox
+  queue_dirty_codex_pr_review 01-pr
+  enqueue_claude 02-pr-claude-fix <<'EOF'
+printf 'fix dirt\n' > fix-dirt.txt
+printf '{"summary":"missing result"}'
+EOF
+  run_review_pr --reviewer codex "$PR_NUMBER"
+
+  assert_eq "1" "$RC" "missing fixer result exits 1"
+  assert_contains "$OUT" "fixer response missing result" "fixer contract halt"
+  assert_eq "" "$(git -C "$PR_WT" status --porcelain --untracked-files=all)" \
+    "fixer missing-result halt leaves tree clean"
+  assert_file_absent "$PR_WT/fix-dirt.txt" "fixer dirt removed"
 }

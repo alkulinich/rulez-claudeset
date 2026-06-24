@@ -88,7 +88,7 @@ pr_review_engine_run() {
 
   local round review_prompt review_json review_file review_blockers review_majors status_reviewer
   local classify_prompt classify_json classify_result classify_tmp
-  local malformed attempt classify_rc b m fix_prompt fix_history_preamble before_fix_head after_fix_head
+  local malformed attempt classify_rc b m fix_prompt fix_history_preamble after_model_head before_fix_head after_fix_head
 
   for round in $(seq 1 "$MAX_FIX_ROUNDS"); do
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
@@ -115,9 +115,14 @@ Diff:
 $(cat "$diff_file")
 EOF
       run_claude_json "pr-review-r$round" "$review_prompt" "$review_json"
-      jq -er '.result' "$review_json" > "$review_file" \
-        || halt "reviewer response missing result ($review_json)"
-      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      if ! jq -er '.result' "$review_json" > "$review_file"; then
+        clean_worktree_to "$CALL_START_HEAD"
+        halt "reviewer response missing result ($review_json)"
+      fi
+      after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+          || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer modified worktree"
       fi
 
@@ -140,7 +145,10 @@ EOF
         claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
         classify_rc=$?
         set -e
-        if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+        if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+            || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+          clean_worktree_to "$CALL_START_HEAD"
           halt "classifier modified worktree"
         fi
         if [ "$classify_rc" -eq 2 ]; then
@@ -197,7 +205,10 @@ Diff:
 $(cat "$diff_file")
 EOF
       codex_call review "pr-review-r$round" "$review_prompt"
-      if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+      if [ "$after_model_head" != "$CALL_START_HEAD" ] \
+          || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "reviewer modified worktree"
       fi
       b="$(jq -r '.blockers_found' "$review_json")"
@@ -205,6 +216,7 @@ EOF
       review_blockers="$(jq '[.findings[]? | select(.severity == "blocker")] | length' "$review_json")"
       review_majors="$(jq '[.findings[]? | select(.severity == "major")] | length' "$review_json")"
       if [ "$b" -ne "$review_blockers" ] || [ "$m" -ne "$review_majors" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "review counts do not match findings ($review_json)"
       fi
       jq -r '
@@ -250,6 +262,7 @@ EOF
       codex_call pr-fix "pr-review-r$round.fix" "$fix_prompt"
       after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       if [ "$after_fix_head" != "$before_fix_head" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "pr-review fixer committed changes (contract violation)"
       fi
       jq -r '.summary' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"
@@ -267,10 +280,13 @@ EOF
       run_claude_json "pr-review-r$round.fix" "$fix_prompt" "$META_DIR/pr-review-r$round.fix.json"
       after_fix_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       if [ "$after_fix_head" != "$before_fix_head" ]; then
+        clean_worktree_to "$CALL_START_HEAD"
         halt "pr-review fixer committed changes (contract violation)"
       fi
-      jq -er '.result' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix" \
-        || halt "fixer response missing result ($META_DIR/pr-review-r$round.fix.json)"
+      if ! jq -er '.result' "$META_DIR/pr-review-r$round.fix.json" > "$META_DIR/pr-review-r$round.fix"; then
+        clean_worktree_to "$CALL_START_HEAD"
+        halt "fixer response missing result ($META_DIR/pr-review-r$round.fix.json)"
+      fi
     fi
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
       git -C "$WORKTREE" add -A

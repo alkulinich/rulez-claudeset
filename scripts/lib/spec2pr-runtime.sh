@@ -28,6 +28,7 @@ LOCK_DIR=""
 LOCK_PATH=""
 TMP_DIR=""
 STATUS_PATH="${STATUS_PATH:-}"
+CALL_START_HEAD="${CALL_START_HEAD:-}"
 
 cleanup_own_paths() {
   if [ -n "$LOCK_DIR" ] && [ -n "$LOCK_PATH" ] && [ -f "$LOCK_PATH" ]; then
@@ -273,6 +274,42 @@ codex_fast_enabled_for_role() {
   esac
 }
 
+# clean_worktree_to <boundary-commit>
+# Best-effort discard of a failed model call's output: tag the current HEAD as
+# a backup when it differs from <boundary>, then hard-reset to <boundary> and
+# remove untracked files. NEVER halts - it runs inside an already-failing path
+# and must not mask the original model error with a reset error. The backup tag
+# suffix derives from ${SLUG:-$ID} so review-pr.sh (no spec slug) still tags.
+clean_worktree_to() {
+  local boundary="$1"
+  local backup_suffix current_head target_head
+  backup_suffix="${SLUG:-$ID}"
+  current_head="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
+  target_head="$(git -C "$WORKTREE" rev-parse "$boundary" 2>/dev/null || true)"
+  if [ -n "$current_head" ] && [ -n "$target_head" ] && [ "$current_head" != "$target_head" ]; then
+    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$current_head" >/dev/null 2>&1 || true
+  fi
+  git -C "$WORKTREE" reset --hard "$boundary" >/dev/null 2>&1 || true
+  git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || true
+}
+
+# reset_worktree_to <commit-ish>
+# Strict rewind for --start-from: tag the pre-reset HEAD as
+# spec2pr-backup/${SLUG:-$ID} when the reset drops commits, then hard-reset to
+# <commit-ish> and remove untracked files. Halts on any git failure -- the
+# caller wants a hard stop, not best-effort recovery.
+reset_worktree_to() {
+  local target="$1" head backup_suffix
+  backup_suffix="${SLUG:-$ID}"
+  head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  if [ "$(git -C "$WORKTREE" rev-parse "$target")" != "$head" ]; then
+    git -C "$WORKTREE" tag -f "spec2pr-backup/$backup_suffix" "$head" >/dev/null 2>&1 \
+      || halt "backup tag failed"
+  fi
+  git -C "$WORKTREE" reset --hard "$target" >/dev/null 2>&1 || halt "reset to $target failed"
+  git -C "$WORKTREE" clean -fd >/dev/null 2>&1 || halt "clean failed"
+}
+
 codex_call() {
   local role="$1" tag="$2" prompt_file="$3"
   local last="$META_DIR/$tag.json"
@@ -286,11 +323,13 @@ codex_call() {
   fi
 
   progress "running codex $tag$progress_suffix"
+  CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   if [ "$use_fast" -eq 1 ]; then
     if ! "$SPEC2PR_CODEX_BIN" exec --enable fast_mode -c 'service_tier="fast"' --cd "$WORKTREE" \
         --output-schema "$TMP_DIR/$role.json" \
         --output-last-message "$last" \
         < "$prompt_file" > "$META_DIR/$tag.stdout" 2> "$err"; then
+      clean_worktree_to "$CALL_START_HEAD"
       halt "codex $tag failed (stderr: $err)"
     fi
   else
@@ -298,11 +337,18 @@ codex_call() {
         --output-schema "$TMP_DIR/$role.json" \
         --output-last-message "$last" \
         < "$prompt_file" > "$META_DIR/$tag.stdout" 2> "$err"; then
+      clean_worktree_to "$CALL_START_HEAD"
       halt "codex $tag failed (stderr: $err)"
     fi
   fi
-  jq -e . "$last" > /dev/null 2>&1 || halt "codex $tag returned invalid JSON ($last)"
-  validate_codex_output "$role" "$tag" "$last"
+  if ! jq -e . "$last" > /dev/null 2>&1; then
+    clean_worktree_to "$CALL_START_HEAD"
+    halt "codex $tag returned invalid JSON ($last)"
+  fi
+  if ! validate_codex_output "$role" "$tag" "$last"; then
+    clean_worktree_to "$CALL_START_HEAD"
+    halt "codex $tag violated $role schema ($last)"
+  fi
 }
 
 validate_codex_output() {
@@ -358,20 +404,25 @@ validate_codex_output() {
   esac
 
   jq -e "$filter" "$path" > /dev/null 2>&1 \
-    || halt "codex $tag violated $role schema ($path)"
+    || return 1
 }
 
 claude_json_attempt() {
   local tag="$1" prompt_file="$2" out="$3"
   local err="$META_DIR/$tag.stderr"
 
+  CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   progress "running claude $tag"
   if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" -p --output-format json \
       --dangerously-skip-permissions \
       < "$prompt_file" > "$out" 2> "$err"); then
+    clean_worktree_to "$CALL_START_HEAD"
     return 2
   fi
-  jq -e . "$out" > /dev/null 2>&1 || return 3
+  if ! jq -e . "$out" > /dev/null 2>&1; then
+    clean_worktree_to "$CALL_START_HEAD"
+    return 3
+  fi
 }
 
 run_claude_json() {

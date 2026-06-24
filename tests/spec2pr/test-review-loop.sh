@@ -61,25 +61,30 @@ EOF
   assert_contains "$OUT" "counts do not match findings" "mismatch message"
 }
 
-test_spec_review_resume_halts_before_committing_stale_dirty_worktree() {
+test_spec_review_contract_failure_autocleans_then_resumes() {
   make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  # Run 1: reviewer leaves a stale edit AND violates the count contract.
   enqueue 01-spec-r1 <<'EOF'
 echo stale >> docs/superpowers/specs/toy-spec.md
 printf '{"blockers_found":2,"majors_found":0,"findings":[],"notes":""}'
 EOF
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "first mismatched run exits 1"
-  assert_contains "$OUT" "counts do not match findings" "first run leaves contract error"
+  assert_contains "$OUT" "counts do not match findings" "first run halts on contract violation"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "auto-clean leaves the worktree clean after the contract failure"
+  assert_eq "spec2pr: import spec" "$(git -C "$wt" log -1 --format=%s)" \
+    "stale change is not committed"
 
-  enqueue 02-spec-r2 <<'EOF'
-printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"docs/superpowers/specs/toy-spec.md","summary":"s","evidence":"e"}],"notes":""}'
-EOF
+  # Run 2: a clean reviewer round now proceeds instead of wedging on dirt.
+  printf '%s\n' "$CLEAN_REVIEW" | enqueue 02-spec-r2
   run_spec2pr "$SPEC"
-  local wt="$SPEC2PR_WORKTREES/$ID"
-  assert_eq "1" "$RC" "dirty resume exits 1"
-  assert_contains "$OUT" "dirty worktree before spec-review review round" "dirty resume halted before review"
-  assert_eq "1" "$(codex_calls)" "resume does not call codex with stale changes"
-  assert_eq "spec2pr: import spec" "$(git -C "$wt" log -1 --format=%s)" "stale dirty change is not committed"
+  assert_eq "1" "$RC" "second run advances to the plan stage (no planner queued)"
+  assert_not_contains "$OUT" "dirty worktree before spec-review review round" \
+    "second run does not wedge on a leftover dirty worktree"
+  assert_contains "$OUT" "claude plan failed" "second run reached the plan stage"
+  assert_eq "2" "$(codex_calls)" "both runs called codex (resume re-ran the review)"
 }
 
 test_spec_review_unrelated_file_change_halts() {
