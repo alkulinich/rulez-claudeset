@@ -6,6 +6,11 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.7.0 - from v1.6.2
+
+**Action:** None. Two new spec2pr split-recovery tools ship automatically:
+the `/rulez:spec2pr-split` command and the `git-publish-spec.sh` helper.
+
 ## To v1.6.2 - from v1.6.1
 
 **Action:** None. `bin/setup` migrates the default `spec2pr` state dir
