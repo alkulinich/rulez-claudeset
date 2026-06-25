@@ -31,11 +31,12 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - every `changed_file=...`
 
 2. Compute split targets from `spec_path`:
-   - The source spec path must match:
-     `docs/superpowers/specs/<slug>-design.md`
+   - Treat `spec_path` as a normal `...-design.md` spec path.
    - Insert `-part-N` before `-design` to produce:
      - `docs/superpowers/specs/<slug>-part-1-design.md`
      - `docs/superpowers/specs/<slug>-part-2-design.md`
+   - If `spec_path` does not end in `-design.md`, stop and report that there is
+     no `-design.md` suffix to split against.
    - If either target path already exists, refuse to continue.
    - Name the colliding path explicitly.
    - Tell the operator to rename, remove, or archive the stale draft first.
@@ -84,3 +85,7 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - `git pull --ff-only origin main`
      - `git-publish-spec.sh docs/superpowers/specs/<slug>-part-2-design.md`
      - `run spec2pr part-2 -> review -> merge`
+
+## Verification
+
+Verify this command by manual dry-run and read-through, not unit tests.
