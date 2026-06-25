@@ -36,6 +36,7 @@ test_publish_spec_spec_only_publish() {
 
   assert_eq "0" "$RC" "spec-only publish exits 0"
   assert_eq "docs: spec — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "spec-only commit subject matches"
+  assert_not_contains "$(git -C "$PROJECT" log -1 --pretty=%B)" "Co-Authored-By" "spec-only commit omits co-author trailer"
   assert_eq "$(git -C "$PROJECT" rev-parse HEAD)" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "spec-only publish pushes to origin main"
 }
 
@@ -119,4 +120,20 @@ test_publish_spec_reports_manual_push_on_failure() {
   assert_eq "1" "$RC" "push failure exits 1"
   assert_contains "$OUT" "push failed — committed locally; push manually with: git push origin main" "push failure reports manual push guidance"
   assert_eq "docs: spec — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "push failure still creates the local commit"
+}
+
+test_publish_spec_ignores_pre_staged_unrelated_file() {
+  make_sandbox
+  install_passthrough_rtk
+  local spec="$PROJECT/docs/superpowers/specs/feature-x-design.md"
+  printf '# Feature X spec\n' > "$spec"
+  printf 'pre-staged change\n' >> "$PROJECT/README.md"
+  git -C "$PROJECT" add -- README.md
+
+  run_publish_spec "$PROJECT" "docs/superpowers/specs/feature-x-design.md"
+
+  assert_eq "0" "$RC" "publish with pre-staged unrelated file exits 0"
+  assert_eq "docs: spec — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "pre-staged unrelated file does not change commit subject"
+  assert_not_contains "$(git -C "$PROJECT" show --stat --format= --name-only HEAD)" "README.md" "pre-staged unrelated file is not part of the publish commit"
+  assert_contains "$(git -C "$PROJECT" status --short)" "M  README.md" "pre-staged unrelated file remains staged after publish"
 }

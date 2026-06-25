@@ -90,7 +90,7 @@ else
 fi
 
 subject="docs: $kind — $subject_stem"
-rtk git commit -m "$subject"
+rtk git commit --only -m "$subject" -- "$@"
 
 if ! rtk git push origin main; then
   echo "git-publish-spec.sh: push failed — committed locally; push manually with: git push origin main" >&2
