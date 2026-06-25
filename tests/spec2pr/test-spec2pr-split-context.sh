@@ -14,7 +14,12 @@ run_split_context() {
   ERR="$(cat "$SANDBOX/stderr.txt")"
 }
 
-test_context_extracts_diff_gate_from_messy_paste() {
+assert_exact_stdout() {
+  local expected="$1" msg="$2"
+  assert_eq "$expected" "$OUT" "$msg"
+}
+
+test_context_emits_exact_key_block_without_plan_or_pr() {
   make_sandbox
   printf '# Import design\n' > "$PROJECT/docs/superpowers/specs/import-design.md"
   write_blob <<'EOF'
@@ -24,10 +29,15 @@ SPEC2PR SPLIT diff size=166010 limit=131072
 EOF
   run_split_context "$SANDBOX/blob.txt"
 
-  assert_eq "0" "$RC" "diff gate parse exits 0"
-  assert_contains "$OUT" "spec_path=docs/superpowers/specs/import-design.md" "spec path emitted"
-  assert_contains "$OUT" "plan_path=" "plan path empty when absent"
-  assert_contains "$OUT" "gate=diff" "gate extracted as diff"
+  assert_eq "0" "$RC" "no-plan no-pr parse exits 0"
+  assert_exact_stdout "$(cat <<'EOF'
+spec_path=docs/superpowers/specs/import-design.md
+plan_path=
+gate=diff
+pr_number=
+EOF
+)" "no-plan no-pr stdout matches exact key block order"
+  assert_eq "" "$ERR" "successful no-plan no-pr case keeps stderr empty"
   rm -rf "$SANDBOX"
 }
 
@@ -110,17 +120,27 @@ EOF
 test_context_fetches_changed_files_via_gh() {
   make_sandbox
   printf '# Import design\n' > "$PROJECT/docs/superpowers/specs/import-design.md"
+  printf '# Import plan\n' > "$PROJECT/docs/superpowers/plans/import-plan.md"
   printf 'src/import.sh\ntests/test-import.sh\n' > "$SPEC2PR_TEST_GH/pr-diff-files"
   write_blob <<'EOF'
 spec docs/superpowers/specs/import-design.md
+plan docs/superpowers/plans/import-plan.md
 dead PR #98
 SPEC2PR SPLIT diff size=166010 limit=131072
 EOF
   run_split_context "$SANDBOX/blob.txt"
 
   assert_eq "0" "$RC" "gh diff parse exits 0"
-  assert_contains "$OUT" "changed_file=src/import.sh" "changed file 1 emitted"
-  assert_contains "$OUT" "changed_file=tests/test-import.sh" "changed file 2 emitted"
+  assert_exact_stdout "$(cat <<'EOF'
+spec_path=docs/superpowers/specs/import-design.md
+plan_path=docs/superpowers/plans/import-plan.md
+gate=diff
+pr_number=98
+changed_file=src/import.sh
+changed_file=tests/test-import.sh
+EOF
+)" "plan+pr diff stdout matches exact key and changed_file order"
+  assert_eq "" "$ERR" "successful pr diff case keeps stderr empty"
   assert_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "args=pr diff 98 --name-only" "gh pr diff called with PR number"
   rm -rf "$SANDBOX"
 }
@@ -162,11 +182,17 @@ EOF
   run_split_context "$SANDBOX/blob.txt"
 
   assert_eq "0" "$RC" "gh diff failure still exits 0"
-  assert_contains "$OUT" "spec_path=docs/superpowers/specs/import-design.md" "other fields still emitted"
-  assert_contains "$OUT" "gate=diff" "gate still emitted"
-  assert_contains "$OUT" "pr_number=98" "PR number still emitted"
+  assert_exact_stdout "$(cat <<'EOF'
+spec_path=docs/superpowers/specs/import-design.md
+plan_path=
+gate=diff
+pr_number=98
+EOF
+)" "gh diff failure keeps only the key block on stdout"
   assert_not_contains "$OUT" "changed_file=" "changed-files omitted on gh failure"
   assert_contains "$ERR" "gh pr diff 98 failed" "gh failure warning emitted"
+  assert_contains "$ERR" "diff backend unavailable" "gh failure stderr stays on stderr"
+  assert_not_contains "$OUT" "warning:" "warnings stay off stdout"
   rm -rf "$SANDBOX"
 }
 
@@ -180,7 +206,14 @@ EOF
   run_split_context "$SANDBOX/blob.txt"
 
   assert_eq "0" "$RC" "missing gate token still exits 0"
-  assert_contains "$OUT" "gate=spec" "gate defaults to spec"
+  assert_exact_stdout "$(cat <<'EOF'
+spec_path=docs/superpowers/specs/import-design.md
+plan_path=
+gate=spec
+pr_number=
+EOF
+)" "missing gate keeps the key block on stdout"
   assert_contains "$ERR" "defaulting gate=spec" "missing gate warning emitted"
+  assert_not_contains "$OUT" "defaulting gate=spec" "missing gate warning stays off stdout"
   rm -rf "$SANDBOX"
 }
