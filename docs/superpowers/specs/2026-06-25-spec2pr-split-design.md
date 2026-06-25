@@ -50,6 +50,9 @@ This spec adds two tools to make that recovery a repeatable workflow.
   gate-specific commands; it never closes a PR or deletes anything.
 - **The terminal state for these sub-specs is the brainstorming review gate**,
   not `writing-plans`. spec2pr derives the plans and implements each half.
+- **Existing part files are protected.** Tool 2 refuses to proceed if any target
+  sub-spec path already exists; the operator must rename, remove, or archive the
+  stale draft first.
 
 ## Affected code
 
@@ -107,13 +110,17 @@ command is pure orchestration:
      sub-specs that minimize shared files."
    - **Write both files, one pass:** `<stem-without-design>-part-1-design.md` and
      `…-part-2-design.md`, inserting `-part-N` before the `-design` suffix so
-     each slug → branch → plan path stays distinct.
+     each slug → branch → plan path stays distinct. Before invoking
+     brainstorming, refuse if either target path already exists; do not overwrite
+     drafts or already-published specs.
    - **Each sub-spec:** house style (Context / Settled decisions / Affected code /
      The change / Edge cases & invariants / Testing / Out of scope), **under
      32 KB** so it clears spec2pr's own spec gate on first run.
    - **Coverage map:** every requirement in the original → exactly one part (no
-     gaps), and the parts' file sets are disjoint (cross-checked against the
-     changed-files list when available — no overlap).
+     gaps). The parts should minimize shared files; when overlap is necessary
+     (for example shared tests, docs, or integration glue), the map must list the
+     overlapping paths and explain why each part needs them. Cross-check against
+     the changed-files list when available.
    - **Sequential constraint in part-2's prose:** "part-1 is already merged into
      `main`; build on it, do not re-specify its changes."
    - Leave both sub-specs uncommitted; do **not** push. The publish script will
@@ -190,9 +197,12 @@ Tool 1 on the part-2 path.
 - **Slug distinctness** — `-part-N` inserted before `-design` yields distinct
   slugs, hence distinct `spec2pr/<slug>` branches and `<slug>-plan.md` paths; the
   second run cannot clobber the first.
-- **Coverage map** — no gaps (every requirement maps to exactly one part) and no
-  overlap (disjoint file sets, cross-checked against the changed-files list when
-  a PR exists).
+- **Output collision guard** — Tool 2 refuses before invoking brainstorming if
+  any target part path already exists. It must name the colliding path and leave
+  existing files untouched.
+- **Coverage map** — no gaps (every requirement maps to exactly one part).
+  Shared implementation files are allowed only when justified in the map, with
+  the overlap cross-checked against the changed-files list when a PR exists.
 - **Watcher caveat** — the tools do not prevent a manual `git add . && git
   commit && git push` of both part files. On a repo where the spec2pr watcher
   auto-runs, publishing both specs at once starts both runs simultaneously,
@@ -225,7 +235,9 @@ Both deterministic scripts use the existing `tests/spec2pr/` harness
 - `gh pr diff` failure → other fields emitted, changed-files omitted, warning.
 
 The interactive brainstorming hand-off in `spec2pr-split.md` is verified by
-manual dry-run, not unit-tested.
+manual dry-run, not unit-tested. The same dry-run covers the output collision
+guard: an existing target part file must produce a non-zero stop before
+brainstorming, name the colliding path, and leave the file untouched.
 
 ## Out of scope
 
