@@ -73,16 +73,14 @@ for path in "$@"; do
   fi
 done
 
-status_output="$(rtk git status --porcelain -- "$@" | awk 'NF && $0 != "ok"')"
-if [ -z "$status_output" ]; then
-  exit 0
-fi
-
 temp_index="$(mktemp "${TMPDIR:-/tmp}/git-publish-spec-index.XXXXXX")"
 trap 'rm -f "$temp_index"' EXIT
 
 GIT_INDEX_FILE="$temp_index" rtk git read-tree HEAD
 GIT_INDEX_FILE="$temp_index" rtk git add -- "$@"
+if GIT_INDEX_FILE="$temp_index" rtk git diff --cached --quiet -- "$@"; then
+  exit 0
+fi
 
 kind=""
 if [ "$spec_count" -gt 0 ] && [ "$plan_count" -gt 0 ]; then

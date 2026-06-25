@@ -78,6 +78,27 @@ test_publish_spec_noop_when_unchanged() {
   assert_eq "$first_head" "$(git -C "$PROJECT" rev-parse HEAD)" "unchanged publish does not create another commit"
 }
 
+test_publish_spec_noop_when_named_path_is_staged_only() {
+  make_sandbox
+  install_passthrough_rtk
+  local spec_rel="docs/superpowers/specs/feature-x-design.md"
+  local spec="$PROJECT/$spec_rel"
+  printf '# Feature X spec\n' > "$spec"
+  run_publish_spec "$PROJECT" "$spec_rel"
+  local first_head
+  first_head="$(git -C "$PROJECT" rev-parse HEAD)"
+
+  printf '# Feature X spec\n\nStaged only.\n' > "$spec"
+  git -C "$PROJECT" add -- "$spec_rel"
+  git -C "$PROJECT" restore --worktree --source=HEAD -- "$spec_rel"
+
+  run_publish_spec "$PROJECT" "$spec_rel"
+
+  assert_eq "0" "$RC" "staged-only named path exits 0 as a no-op"
+  assert_eq "$first_head" "$(git -C "$PROJECT" rev-parse HEAD)" "staged-only named path does not create another commit"
+  assert_contains "$(git -C "$PROJECT" diff --cached --name-only -- "$spec_rel")" "$spec_rel" "staged-only named path remains staged"
+}
+
 test_publish_spec_rejects_out_of_scope_readme() {
   make_sandbox
   install_passthrough_rtk
