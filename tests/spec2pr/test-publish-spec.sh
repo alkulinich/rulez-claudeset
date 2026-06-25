@@ -26,6 +26,14 @@ test_publish_spec_uses_exact_rtk_proxy_pattern() {
   assert_eq "$expected" "$actual" "script uses the exact RTK proxy pattern"
 }
 
+test_publish_spec_uses_plain_commit_invocation() {
+  local script_text
+  script_text="$(cat "$PUBLISH_SPEC_SCRIPT")"
+
+  assert_contains "$script_text" 'git commit -m "$SUBJECT"' "script uses git commit -m SUBJECT"
+  assert_not_contains "$script_text" 'git commit --only' "script does not use git commit --only"
+}
+
 test_publish_spec_spec_only_publish() {
   make_sandbox
   install_passthrough_rtk

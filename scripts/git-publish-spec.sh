@@ -78,7 +78,11 @@ if [ -z "$status_output" ]; then
   exit 0
 fi
 
-rtk git add -- "$@"
+temp_index="$(mktemp "${TMPDIR:-/tmp}/git-publish-spec-index.XXXXXX")"
+trap 'rm -f "$temp_index"' EXIT
+
+GIT_INDEX_FILE="$temp_index" rtk git read-tree HEAD
+GIT_INDEX_FILE="$temp_index" rtk git add -- "$@"
 
 kind=""
 if [ "$spec_count" -gt 0 ] && [ "$plan_count" -gt 0 ]; then
@@ -89,8 +93,9 @@ else
   kind="plan"
 fi
 
-subject="docs: $kind — $subject_stem"
-rtk git commit --only -m "$subject" -- "$@"
+SUBJECT="docs: $kind — $subject_stem"
+GIT_INDEX_FILE="$temp_index" rtk git commit -m "$SUBJECT"
+rtk git add -- "$@"
 
 if ! rtk git push origin main; then
   echo "git-publish-spec.sh: push failed — committed locally; push manually with: git push origin main" >&2
