@@ -33,8 +33,13 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - every `changed_file=...`
    - Treat missing or duplicate required scalar keys as fatal:
      `spec_path`, `gate`.
-   - Optional scalar keys may be empty, but should not be duplicated:
+   - Optional scalar keys may be empty, but duplicate optional scalar keys are
+     also fatal:
      `plan_path`, `pr_number`.
+   - After parsing `gate`, validate that it is exactly one of `spec`, `plan`,
+     or `diff`.
+   - Any other `gate` value is fatal; stop before invoking
+     `superpowers:brainstorming`.
    - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
      line and extract `size` and `limit` when present.
    - Show helper warnings or errors from stderr, but do not parse stderr lines
