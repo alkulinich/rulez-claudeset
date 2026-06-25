@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--start-from <stage>] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
