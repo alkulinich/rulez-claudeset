@@ -2,6 +2,8 @@
 # Fake gh CLI. Driven by $SPEC2PR_TEST_GH:
 #   pr-list-url   - if present, its content is the `pr list` output (else empty)
 #   pr-create-url - its content is the `pr create` output (URL)
+#   pr-diff-files - if present, its content is the `pr diff --name-only` output
+#   pr-diff-fail  - if present, `pr diff` prints it to stderr and exits 9
 #   pr-view-json  - if present, its content is the `pr view --json` output
 #   pr-view-fail  - if present, `pr view` prints it to stderr and exits 9
 #   pr-review-fail / pr-ready-fail - if present, `pr review` / `pr ready`
@@ -27,6 +29,13 @@ case "${1:-} ${2:-}" in
       exit 9
     fi
     cat "$dir/pr-create-url"
+    ;;
+  "pr diff")
+    if [ -f "$dir/pr-diff-fail" ]; then
+      cat "$dir/pr-diff-fail" >&2
+      exit 9
+    fi
+    if [ -f "$dir/pr-diff-files" ]; then cat "$dir/pr-diff-files"; fi
     ;;
   "pr comment")
     if [ -f "$dir/pr-comment-fail" ]; then

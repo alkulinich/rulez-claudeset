@@ -29,17 +29,19 @@ This spec adds two tools to make that recovery a repeatable workflow.
 ## Settled decisions
 
 - **Two independent tools.** A publish script (Tool 1) and a split command
-  (Tool 2). Tool 2 does **not** call Tool 1 — it commits its own output.
+  (Tool 2). Tool 2 does **not** call Tool 1 and does **not** commit; Tool 1 is
+  the only place that commits and pushes a sub-spec.
 - **Tool 1 publishes a spec/plan to `origin/main`**, push-and-stop, no PR
   involvement. It is the standalone "get a brainstormed spec onto main so it can
   be picked up" helper.
 - **Tool 2 leans on `superpowers:brainstorming`** (prime-and-delegate) rather
   than reimplementing decomposition. The interactive seam-finding — asking
   proper questions when the cut is unclear — is the harness's job.
-- **Both sub-specs are written and committed locally in one brainstorming pass.**
-- **Sequencing is enforced at the push level.** Both sub-spec commits sit on
-  local `main`; publishing one path at a time keeps part-2 off `origin/main`
-  until its turn. No force-push, no commit-range surgery.
+- **Both sub-specs are written in one brainstorming pass, left uncommitted.**
+- **Sequencing is enforced at commit+push time.** Tool 1 stages only the named
+  path, commits it, and pushes it to `origin/main`. The part-2 file stays as
+  untracked local draft content until part-1's implementation PR has merged and
+  local `main` is fast-forwarded to the new `origin/main`.
 - **Split the spec, never the plan.** spec2pr re-derives a fresh, internally
   coherent plan per sub-spec.
 - **Default two parts** (the model may propose more); strictly sequential with a
@@ -48,6 +50,9 @@ This spec adds two tools to make that recovery a repeatable workflow.
   gate-specific commands; it never closes a PR or deletes anything.
 - **The terminal state for these sub-specs is the brainstorming review gate**,
   not `writing-plans`. spec2pr derives the plans and implements each half.
+- **Existing part files are protected.** Tool 2 refuses to proceed if any target
+  sub-spec path already exists; the operator must rename, remove, or archive the
+  stale draft first.
 
 ## Affected code
 
@@ -105,17 +110,22 @@ command is pure orchestration:
      sub-specs that minimize shared files."
    - **Write both files, one pass:** `<stem-without-design>-part-1-design.md` and
      `…-part-2-design.md`, inserting `-part-N` before the `-design` suffix so
-     each slug → branch → plan path stays distinct.
+     each slug → branch → plan path stays distinct. Before invoking
+     brainstorming, refuse if either target path already exists; do not overwrite
+     drafts or already-published specs.
    - **Each sub-spec:** house style (Context / Settled decisions / Affected code /
      The change / Edge cases & invariants / Testing / Out of scope), **under
      32 KB** so it clears spec2pr's own spec gate on first run.
    - **Coverage map:** every requirement in the original → exactly one part (no
-     gaps), and the parts' file sets are disjoint (cross-checked against the
-     changed-files list when available — no overlap).
+     gaps). The parts should minimize shared files; when overlap is necessary
+     (for example shared tests, docs, or integration glue), the map must list the
+     overlapping paths and explain why each part needs them. Cross-check against
+     the changed-files list when available.
    - **Sequential constraint in part-2's prose:** "part-1 is already merged into
      `main`; build on it, do not re-specify its changes."
-   - **Commit both** sub-specs locally; do **not** push.
-   - **Terminal state = the review gate.** Stop after writing+committing; do
+   - Leave both sub-specs uncommitted; do **not** push. The publish script will
+     commit exactly one named path at a time.
+   - **Terminal state = the review gate.** Stop after writing the files; do
      **not** chain to `writing-plans`.
 3. **On return**, surface the two paths + the coverage map, and print a manual
    next-steps reminder keyed to the gate (executing nothing destructive):
@@ -124,7 +134,8 @@ command is pure orchestration:
    - `spec`/`plan` → "no PR; remove the local worktree/meta for `<old-slug>` if a
      run started."
    - then: `git-publish-spec.sh …-part-1-design.md` → run spec2pr → merge →
-     `git-publish-spec.sh …-part-2-design.md` → run → merge.
+     `git pull --ff-only origin main` → `git-publish-spec.sh
+     …-part-2-design.md` → run → merge.
 
 The "write both files in one pass instead of one" is the only deviation the
 command asks of the harness, driven entirely by the priming prompt.
@@ -149,24 +160,29 @@ other fields, omit changed-files, and warn (degraded seam).
 
 ### Publishing & sequencing model
 
-Once Tool 2 has committed both sub-specs to local `main`, the operator drives:
+Once Tool 2 has written both sub-specs as uncommitted local files on `main`, the
+operator drives:
 
 1. `git-publish-spec.sh …-part-1-design.md` — pushes part-1's spec to
    `origin/main`.
 2. Run spec2pr on part-1 → review → **merge** its implementation PR.
-3. `git-publish-spec.sh …-part-2-design.md` — only now does part-2 reach
-   `origin/main`.
-4. Run spec2pr on part-2 → review → merge.
+3. `git pull --ff-only origin main` — fast-forwards local `main` over the
+   merged part-1 implementation while leaving the untracked part-2 spec file in
+   place.
+4. `git-publish-spec.sh …-part-2-design.md` — only now does Tool 1 commit and
+   push part-2 to `origin/main`.
+5. Run spec2pr on part-2 → review → merge.
 
-Because `git-publish-spec.sh` stages only the path it is handed, publishing
-part-1 leaves part-2's commit on local `main`, unpushed. That per-path staging
-*is* the "merge between" mechanism at the push level.
+Because `git-publish-spec.sh` stages and commits only the path it is handed,
+publishing part-1 creates a one-file commit and pushes only that commit. Part-2
+is not part of Git history until after part-1 is merged and the operator runs
+Tool 1 on the part-2 path.
 
 ## Edge cases & invariants
 
-- **Per-path staging is the sequencing mechanism.** `origin/main` only ever sees
-  the path explicitly published; part-2's local commit is a staged draft until
-  its turn.
+- **Per-path commit+push is the sequencing mechanism.** `origin/main` only ever
+  sees the path explicitly published; part-2 remains uncommitted draft content
+  until its turn.
 - **Scope + branch guards** on Tool 1: only `docs/superpowers/{specs,plans}`
   paths; must be on `main`. Protects against staging WIP or publishing from the
   wrong branch.
@@ -181,14 +197,17 @@ part-1 leaves part-2's commit on local `main`, unpushed. That per-path staging
 - **Slug distinctness** — `-part-N` inserted before `-design` yields distinct
   slugs, hence distinct `spec2pr/<slug>` branches and `<slug>-plan.md` paths; the
   second run cannot clobber the first.
-- **Coverage map** — no gaps (every requirement maps to exactly one part) and no
-  overlap (disjoint file sets, cross-checked against the changed-files list when
-  a PR exists).
-- **Watcher caveat** — the tools do not prevent a manual wholesale `git push` of
-  `main`. On a repo where the spec2pr watcher auto-runs, pushing both commits at
-  once starts both runs simultaneously, competing for the same model limits —
-  the failure mode this workflow exists to avoid. `git-publish-spec.sh` is the
-  path that keeps publishing safe.
+- **Output collision guard** — Tool 2 refuses before invoking brainstorming if
+  any target part path already exists. It must name the colliding path and leave
+  existing files untouched.
+- **Coverage map** — no gaps (every requirement maps to exactly one part).
+  Shared implementation files are allowed only when justified in the map, with
+  the overlap cross-checked against the changed-files list when a PR exists.
+- **Watcher caveat** — the tools do not prevent a manual `git add . && git
+  commit && git push` of both part files. On a repo where the spec2pr watcher
+  auto-runs, publishing both specs at once starts both runs simultaneously,
+  competing for the same model limits — the failure mode this workflow exists
+  to avoid. `git-publish-spec.sh` is the path that keeps publishing safe.
 
 ## Testing
 
@@ -216,7 +235,9 @@ Both deterministic scripts use the existing `tests/spec2pr/` harness
 - `gh pr diff` failure → other fields emitted, changed-files omitted, warning.
 
 The interactive brainstorming hand-off in `spec2pr-split.md` is verified by
-manual dry-run, not unit-tested.
+manual dry-run, not unit-tested. The same dry-run covers the output collision
+guard: an existing target part file must produce a non-zero stop before
+brainstorming, name the colliding path, and leave the file untouched.
 
 ## Out of scope
 
