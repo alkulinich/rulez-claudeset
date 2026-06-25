@@ -18,6 +18,13 @@ run_publish_spec() {
   RC=$?
 }
 
+run_publish_spec_no_args() {
+  local project="$1"
+  set +e
+  OUT="$(cd "$project" && bash "$PUBLISH_SPEC_SCRIPT" 2>&1)"
+  RC=$?
+}
+
 test_publish_spec_uses_exact_rtk_proxy_pattern() {
   local actual
   actual="$(sed -n '5p' "$PUBLISH_SPEC_SCRIPT")"
@@ -63,6 +70,18 @@ test_publish_spec_spec_and_plan_publish() {
   assert_eq "$(git -C "$PROJECT" rev-parse HEAD)" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "spec+plan publish pushes to origin main"
 }
 
+test_publish_spec_plan_only_publish() {
+  make_sandbox
+  install_passthrough_rtk
+  local plan="$PROJECT/docs/superpowers/plans/feature-x-plan.md"
+  printf '# Feature X plan\n' > "$plan"
+
+  run_publish_spec "$PROJECT" "docs/superpowers/plans/feature-x-plan.md"
+
+  assert_eq "0" "$RC" "plan-only publish exits 0"
+  assert_eq "docs: plan — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "plan-only commit subject matches"
+}
+
 test_publish_spec_noop_when_unchanged() {
   make_sandbox
   install_passthrough_rtk
@@ -99,6 +118,16 @@ test_publish_spec_noop_when_named_path_is_staged_only() {
   assert_contains "$(git -C "$PROJECT" diff --cached --name-only -- "$spec_rel")" "$spec_rel" "staged-only named path remains staged"
 }
 
+test_publish_spec_usage_error_on_no_args() {
+  make_sandbox
+  install_passthrough_rtk
+
+  run_publish_spec_no_args "$PROJECT"
+
+  assert_eq "1" "$RC" "no-args publish exits 1"
+  assert_contains "$OUT" "Usage: scripts/git-publish-spec.sh <path> [<path> ...]" "no-args publish prints usage"
+}
+
 test_publish_spec_rejects_out_of_scope_readme() {
   make_sandbox
   install_passthrough_rtk
@@ -121,6 +150,19 @@ test_publish_spec_rejects_non_main_branch() {
 
   assert_eq "1" "$RC" "non-main branch exits 1"
   assert_contains "$OUT" "feature/publish-spec" "non-main branch error names current branch"
+}
+
+test_publish_spec_rejects_detached_head() {
+  make_sandbox
+  install_passthrough_rtk
+  git -C "$PROJECT" checkout -q --detach HEAD
+  local spec="$PROJECT/docs/superpowers/specs/feature-x-design.md"
+  printf '# Feature X spec\n' > "$spec"
+
+  run_publish_spec "$PROJECT" "docs/superpowers/specs/feature-x-design.md"
+
+  assert_eq "1" "$RC" "detached HEAD exits 1"
+  assert_contains "$OUT" "detached HEAD" "detached HEAD error names detached HEAD"
 }
 
 test_publish_spec_ignores_stray_dirty_file() {
