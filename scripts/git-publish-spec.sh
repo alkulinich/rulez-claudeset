@@ -2,11 +2,7 @@
 
 set -euo pipefail
 
-if command -v rtk &>/dev/null; then
-  rtk() { command rtk "$@"; }
-else
-  rtk() { "$@"; }
-fi
+if command -v rtk &>/dev/null; then rtk() { command rtk "$@"; }; else rtk() { "$@"; }; fi
 
 usage() {
   echo "Usage: scripts/git-publish-spec.sh <path> [<path> ...]" >&2
@@ -97,6 +93,6 @@ subject="docs: $kind — $subject_stem"
 rtk git commit -m "$subject"
 
 if ! rtk git push origin main; then
-  echo "git-publish-spec.sh: push failed; commit was created locally" >&2
+  echo "git-publish-spec.sh: push failed — committed locally; push manually with: git push origin main" >&2
   exit 1
 fi

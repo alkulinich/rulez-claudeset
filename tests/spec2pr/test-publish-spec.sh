@@ -18,6 +18,14 @@ run_publish_spec() {
   RC=$?
 }
 
+test_publish_spec_uses_exact_rtk_proxy_pattern() {
+  local actual
+  actual="$(sed -n '5p' "$PUBLISH_SPEC_SCRIPT")"
+  local expected='if command -v rtk &>/dev/null; then rtk() { command rtk "$@"; }; else rtk() { "$@"; }; fi'
+
+  assert_eq "$expected" "$actual" "script uses the exact RTK proxy pattern"
+}
+
 test_publish_spec_spec_only_publish() {
   make_sandbox
   install_passthrough_rtk
@@ -97,4 +105,18 @@ test_publish_spec_ignores_stray_dirty_file() {
   assert_eq "0" "$RC" "publish with stray dirty file exits 0"
   assert_eq "docs: spec — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "stray dirty file does not change commit subject"
   assert_contains "$(git -C "$PROJECT" status --short)" " M README.md" "stray dirty file remains unstaged and uncommitted"
+}
+
+test_publish_spec_reports_manual_push_on_failure() {
+  make_sandbox
+  install_passthrough_rtk
+  local spec="$PROJECT/docs/superpowers/specs/feature-x-design.md"
+  printf '# Feature X spec\n' > "$spec"
+  git -C "$PROJECT" remote set-url origin "$SANDBOX/does-not-exist.git"
+
+  run_publish_spec "$PROJECT" "docs/superpowers/specs/feature-x-design.md"
+
+  assert_eq "1" "$RC" "push failure exits 1"
+  assert_contains "$OUT" "push failed — committed locally; push manually with: git push origin main" "push failure reports manual push guidance"
+  assert_eq "docs: spec — feature-x" "$(git -C "$PROJECT" log -1 --pretty=%s)" "push failure still creates the local commit"
 }
