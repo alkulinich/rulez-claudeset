@@ -74,19 +74,21 @@ If no blob argument is given, ask the user to paste the halt output and stop.
 
 5. Manual next steps:
    - If `gate=diff` and `pr_number` is present:
-     - Print this manual cleanup command only; do not execute it here:
-       `dead PR #<pr_number>: gh pr close <pr_number> --delete-branch`
+     - Print this manual cleanup note and standalone command; do not execute
+       them here:
+       `dead PR #<pr_number>`
+       `gh pr close <pr_number> --delete-branch`
      - Then tell the operator to remove stale worktree and metadata.
    - If `gate=spec` or `gate=plan`:
      - State that there is no PR to clean up.
      - Tell the operator to remove local worktree and metadata only if the
        original run created them.
    - Always print the sequencing recipe, one path at a time:
-     - `git-publish-spec.sh docs/superpowers/specs/<slug>-part-1-design.md`
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh docs/superpowers/specs/<slug>-part-1-design.md`
      - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-1-design.md`, then
        review and merge that PR
      - `git pull --ff-only origin main`
-     - `git-publish-spec.sh docs/superpowers/specs/<slug>-part-2-design.md`
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh docs/superpowers/specs/<slug>-part-2-design.md`
      - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-2-design.md`, then
        review and merge that PR
 
