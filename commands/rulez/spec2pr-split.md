@@ -31,6 +31,10 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - `gate`
      - `pr_number`
      - every `changed_file=...`
+   - Treat missing or duplicate required scalar keys as fatal:
+     `spec_path`, `gate`.
+   - Optional scalar keys may be empty, but should not be duplicated:
+     `plan_path`, `pr_number`.
    - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
      line and extract `size` and `limit` when present.
    - Show helper warnings or errors from stderr, but do not parse stderr lines
@@ -74,6 +78,9 @@ If no blob argument is given, ask the user to paste the halt output and stop.
    - Do not chain to `writing-plans`.
 
 4. When `brainstorming` returns:
+   - Verify both computed part files now exist and are each under `32 KB`.
+   - If either file is missing or too large, stop and fix the split through
+     `brainstorming` revision before printing any publish steps.
    - Surface both part paths.
    - Surface the coverage map.
    - Print manual next steps keyed to `gate`.
@@ -85,11 +92,28 @@ If no blob argument is given, ask the user to paste the halt output and stop.
        them here:
        `dead PR #<pr_number>`
        `gh pr close <pr_number> --delete-branch`
-     - Then tell the operator to remove stale worktree and metadata.
+     - Then tell the operator to surface the stale worktree or metadata
+       identifier/path from the original run evidence if available; otherwise
+       state that it was not parsed and cleanup must be found manually.
+     - Keep all cleanup commands print-only and manual; do not execute them
+       here.
+   - If `gate=diff` and `pr_number` is missing:
+     - State that no PR number was parsed.
+     - Do not print a PR close command.
+     - Tell the operator to manually identify and close any stale PR only if
+       one is actually applicable.
+     - Then tell the operator to surface the stale worktree or metadata
+       identifier/path from the original run evidence if available; otherwise
+       state that it was not parsed and cleanup must be found manually.
+     - Keep all cleanup commands print-only and manual; do not execute them
+       here.
    - If `gate=spec` or `gate=plan`:
      - State that there is no PR to clean up.
-     - Tell the operator to remove local worktree and metadata only if the
-       original run created them.
+     - Tell the operator to surface any stale local worktree or metadata
+       identifier/path from the original run evidence if available; otherwise
+       state that it was not parsed and cleanup must be found manually.
+     - Keep all cleanup commands print-only and manual; do not execute them
+       here.
    - Always print the sequencing recipe using the actual concrete part paths
      computed in step 2, one path at a time. In the example commands below,
      replace `<part-1-path>` and `<part-2-path>` with those computed paths:
