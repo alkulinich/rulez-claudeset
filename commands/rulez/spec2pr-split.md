@@ -19,16 +19,18 @@ If no blob argument is given, ask the user to paste the halt output and stop.
 
 1. Gather context from the pasted blob:
    - Write the blob to a temporary file referenced by `BLOB`.
-   - Run exactly:
+   - Run exactly. Command files intentionally use the installed tilde path:
      `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-split-context.sh "$BLOB"`
    - Remove the temporary file after the call returns.
    - If the script exits nonzero, show the error and stop.
-   - Read the emitted `key=value` block and collect:
+   - Parse the helper's stdout `key=value` block only and collect:
      - `spec_path`
      - `plan_path`
      - `gate`
      - `pr_number`
      - every `changed_file=...`
+   - Show helper warnings or errors from stderr, but do not mix stderr lines
+     into the parsed keys.
 
 2. Compute split targets from `spec_path`:
    - Treat `spec_path` as a normal `...-design.md` spec path.
@@ -72,7 +74,7 @@ If no blob argument is given, ask the user to paste the halt output and stop.
 
 5. Manual next steps:
    - If `gate=diff` and `pr_number` is present:
-     - Print:
+     - Print this manual cleanup command only; do not execute it here:
        `dead PR #<pr_number>: gh pr close <pr_number> --delete-branch`
      - Then tell the operator to remove stale worktree and metadata.
    - If `gate=spec` or `gate=plan`:
@@ -81,10 +83,12 @@ If no blob argument is given, ask the user to paste the halt output and stop.
        original run created them.
    - Always print the sequencing recipe, one path at a time:
      - `git-publish-spec.sh docs/superpowers/specs/<slug>-part-1-design.md`
-     - `run spec2pr part-1 -> review -> merge`
+     - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-1-design.md`, then
+       review and merge that PR
      - `git pull --ff-only origin main`
      - `git-publish-spec.sh docs/superpowers/specs/<slug>-part-2-design.md`
-     - `run spec2pr part-2 -> review -> merge`
+     - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-2-design.md`, then
+       review and merge that PR
 
 ## Verification
 
