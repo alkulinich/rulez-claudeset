@@ -208,3 +208,23 @@ test_publish_spec_ignores_pre_staged_unrelated_file() {
   assert_not_contains "$(git -C "$PROJECT" show --stat --format= --name-only HEAD)" "README.md" "pre-staged unrelated file is not part of the publish commit"
   assert_contains "$(git -C "$PROJECT" status --short)" "M  README.md" "pre-staged unrelated file remains staged after publish"
 }
+
+test_publish_spec_preserves_named_path_mm_staged_state() {
+  make_sandbox
+  install_passthrough_rtk
+  local spec_rel="docs/superpowers/specs/feature-x-design.md"
+  local spec="$PROJECT/$spec_rel"
+  printf '# Feature X spec\n' > "$spec"
+  run_publish_spec "$PROJECT" "$spec_rel"
+
+  printf '# Feature X spec\n\nStaged version.\n' > "$spec"
+  git -C "$PROJECT" add -- "$spec_rel"
+  printf '# Feature X spec\n\nWorktree version.\n' > "$spec"
+
+  run_publish_spec "$PROJECT" "$spec_rel"
+
+  assert_eq "0" "$RC" "MM named path publish exits 0"
+  assert_contains "$(git -C "$PROJECT" show HEAD:"$spec_rel")" "Worktree version." "publish commit contains the worktree version"
+  assert_eq "$(printf '# Feature X spec\n\nStaged version.\n')" "$(git -C "$PROJECT" show :0:"$spec_rel")" "MM named path keeps previously staged content in the index"
+  assert_eq "$(printf '# Feature X spec\n\nWorktree version.\n')" "$(cat "$spec")" "MM named path keeps worktree content after publish"
+}

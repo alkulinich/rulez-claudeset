@@ -51,6 +51,7 @@ plan_root="$repo_root/docs/superpowers/plans/"
 spec_count=0
 plan_count=0
 subject_stem=""
+paths_to_clean=()
 
 for path in "$@"; do
   [ -f "$path" ] || die "path must exist as a file: $path"
@@ -70,6 +71,10 @@ for path in "$@"; do
 
   if [ -z "$subject_stem" ]; then
     subject_stem="$(stem_from_path "$canonical")"
+  fi
+
+  if rtk git diff --cached --quiet -- "$path"; then
+    paths_to_clean+=("$path")
   fi
 done
 
@@ -93,7 +98,9 @@ fi
 
 SUBJECT="docs: $kind — $subject_stem"
 GIT_INDEX_FILE="$temp_index" rtk git commit -m "$SUBJECT"
-rtk git add -- "$@"
+if [ "${#paths_to_clean[@]}" -gt 0 ]; then
+  rtk git add -- "${paths_to_clean[@]}"
+fi
 
 if ! rtk git push origin main; then
   echo "git-publish-spec.sh: push failed — committed locally; push manually with: git push origin main" >&2
