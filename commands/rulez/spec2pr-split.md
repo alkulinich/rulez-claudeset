@@ -19,18 +19,22 @@ If no blob argument is given, ask the user to paste the halt output and stop.
 
 1. Gather context from the pasted blob:
    - Write the blob to a temporary file referenced by `BLOB`.
+   - Preserve the original blob text as evidence for the downstream
+     `brainstorming` prompt.
    - Run exactly. Command files intentionally use the installed tilde path:
      `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-split-context.sh "$BLOB"`
    - Remove the temporary file after the call returns.
    - If the script exits nonzero, show the error and stop.
-   - Parse the helper's stdout `key=value` block only and collect:
+   - Parse only helper stdout lines matching `^[a-z_]+=.*$` and collect:
      - `spec_path`
      - `plan_path`
      - `gate`
      - `pr_number`
      - every `changed_file=...`
-   - Show helper warnings or errors from stderr, but do not mix stderr lines
-     into the parsed keys.
+   - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
+     line and extract `size` and `limit` when present.
+   - Show helper warnings or errors from stderr, but do not parse stderr lines
+     as keys.
 
 2. Compute split targets from `spec_path`:
    - Treat `spec_path` as a normal `...-design.md` spec path.
@@ -47,7 +51,10 @@ If no blob argument is given, ask the user to paste the halt output and stop.
 
 3. Delegate the split to `superpowers:brainstorming` via the Skill tool.
    Prime it with the extracted evidence and these directives:
+   - Preserve and include the original pasted blob text as evidence.
    - `spec2pr`'s `<gate>` gate rejected this spec because size `N > limit M`.
+     If the pasted evidence did not include `size` and `limit`, say that they
+     were not present in the pasted evidence.
      Decompose it into sequential, independently implementable sub-specs;
      default to `2`; minimize shared files.
    - Write both files in one pass to the computed part paths.
@@ -83,13 +90,15 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - State that there is no PR to clean up.
      - Tell the operator to remove local worktree and metadata only if the
        original run created them.
-   - Always print the sequencing recipe, one path at a time:
-     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh docs/superpowers/specs/<slug>-part-1-design.md`
-     - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-1-design.md`, then
+   - Always print the sequencing recipe using the actual concrete part paths
+     computed in step 2, one path at a time. In the example commands below,
+     replace `<part-1-path>` and `<part-2-path>` with those computed paths:
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh <part-1-path>`
+     - `/rulez:spec2pr <part-1-path>`, then
        review and merge that PR
      - `git pull --ff-only origin main`
-     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh docs/superpowers/specs/<slug>-part-2-design.md`
-     - `/rulez:spec2pr docs/superpowers/specs/<slug>-part-2-design.md`, then
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh <part-2-path>`
+     - `/rulez:spec2pr <part-2-path>`, then
        review and merge that PR
 
 ## Verification
