@@ -6,6 +6,14 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.7.1 - from v1.7.0
+
+**Action:** None.
+
+**Caveat:** `git-publish-spec.sh` now also accepts spec/plan paths that live in
+a worktree and copies them into the current repo before committing. Run it from
+the repo root on `main`, as before.
+
 ## To v1.7.0 - from v1.6.2
 
 **Action:** None. Two new spec2pr split-recovery tools ship automatically:

@@ -36,6 +36,10 @@ stem_from_path() {
 
 repo_root="$(rtk git rev-parse --show-toplevel)"
 cd "$repo_root"
+# Normalize to the physical path so destinations compare equal to
+# canonical_path() output (git --show-toplevel and pwd -P can disagree on
+# symlinked roots, e.g. /var vs /private/var on macOS).
+repo_root="$(pwd -P)"
 
 branch="$(rtk git symbolic-ref --short -q HEAD || true)"
 if [ -z "$branch" ]; then
@@ -45,23 +49,27 @@ if [ "$branch" != "main" ]; then
   die "current branch is $branch; expected main"
 fi
 
-spec_root="$repo_root/docs/superpowers/specs/"
-plan_root="$repo_root/docs/superpowers/plans/"
+spec_dir="$repo_root/docs/superpowers/specs"
+plan_dir="$repo_root/docs/superpowers/plans"
 
 spec_count=0
 plan_count=0
 subject_stem=""
+dest_paths=()
 paths_to_clean=()
 
 for path in "$@"; do
   [ -f "$path" ] || die "path must exist as a file: $path"
 
   canonical="$(canonical_path "$path")"
+  base="$(basename "$canonical")"
   case "$canonical" in
-    "$spec_root"*)
+    */docs/superpowers/specs/*)
+      dest="$spec_dir/$base"
       spec_count=$((spec_count + 1))
       ;;
-    "$plan_root"*)
+    */docs/superpowers/plans/*)
+      dest="$plan_dir/$base"
       plan_count=$((plan_count + 1))
       ;;
     *)
@@ -69,12 +77,20 @@ for path in "$@"; do
       ;;
   esac
 
+  # A worktree source lives outside repo_root; an in-repo source resolves to
+  # dest itself, so skip the copy and keep the original behavior.
+  if [ "$canonical" != "$dest" ]; then
+    mkdir -p "$(dirname "$dest")"
+    cp -- "$canonical" "$dest"
+  fi
+  dest_paths+=("$dest")
+
   if [ -z "$subject_stem" ]; then
     subject_stem="$(stem_from_path "$canonical")"
   fi
 
-  if rtk git diff --cached --quiet -- "$path"; then
-    paths_to_clean+=("$path")
+  if rtk git diff --cached --quiet -- "$dest"; then
+    paths_to_clean+=("$dest")
   fi
 done
 
@@ -82,8 +98,8 @@ temp_index="$(mktemp "${TMPDIR:-/tmp}/git-publish-spec-index.XXXXXX")"
 trap 'rm -f "$temp_index"' EXIT
 
 GIT_INDEX_FILE="$temp_index" rtk git read-tree HEAD
-GIT_INDEX_FILE="$temp_index" rtk git add -- "$@"
-if GIT_INDEX_FILE="$temp_index" rtk git diff --cached --quiet -- "$@"; then
+GIT_INDEX_FILE="$temp_index" rtk git add -- "${dest_paths[@]}"
+if GIT_INDEX_FILE="$temp_index" rtk git diff --cached --quiet -- "${dest_paths[@]}"; then
   exit 0
 fi
 
