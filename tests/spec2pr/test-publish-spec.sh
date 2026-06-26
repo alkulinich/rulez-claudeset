@@ -228,3 +228,39 @@ test_publish_spec_preserves_named_path_mm_staged_state() {
   assert_eq "$(printf '# Feature X spec\n\nStaged version.\n')" "$(git -C "$PROJECT" show :0:"$spec_rel")" "MM named path keeps previously staged content in the index"
   assert_eq "$(printf '# Feature X spec\n\nWorktree version.\n')" "$(cat "$spec")" "MM named path keeps worktree content after publish"
 }
+
+test_publish_spec_copies_external_worktree_spec() {
+  make_sandbox
+  install_passthrough_rtk
+  local ext="$SANDBOX/wt-ext"
+  mkdir -p "$ext/docs/superpowers/specs"
+  local ext_spec="$ext/docs/superpowers/specs/feature-y-design.md"
+  printf '# Feature Y spec\n\nFrom worktree.\n' > "$ext_spec"
+
+  run_publish_spec "$PROJECT" "$ext_spec"
+
+  assert_eq "0" "$RC" "external spec publish exits 0"
+  assert_file_exists "$PROJECT/docs/superpowers/specs/feature-y-design.md" "external spec copied into repo"
+  assert_eq "$(printf '# Feature Y spec\n\nFrom worktree.\n')" "$(cat "$PROJECT/docs/superpowers/specs/feature-y-design.md")" "copied spec matches worktree content"
+  assert_eq "docs: spec — feature-y" "$(git -C "$PROJECT" log -1 --pretty=%s)" "external spec commit subject matches"
+  assert_eq "$(git -C "$PROJECT" rev-parse HEAD)" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "external spec publish pushes to origin main"
+}
+
+test_publish_spec_copies_external_worktree_spec_and_plan() {
+  make_sandbox
+  install_passthrough_rtk
+  local ext="$SANDBOX/wt-ext"
+  mkdir -p "$ext/docs/superpowers/specs" "$ext/docs/superpowers/plans"
+  printf '# Feature Y spec\n' > "$ext/docs/superpowers/specs/feature-y-design.md"
+  printf '# Feature Y plan\n' > "$ext/docs/superpowers/plans/feature-y-design-plan.md"
+
+  run_publish_spec "$PROJECT" \
+    "$ext/docs/superpowers/specs/feature-y-design.md" \
+    "$ext/docs/superpowers/plans/feature-y-design-plan.md"
+
+  assert_eq "0" "$RC" "external spec+plan publish exits 0"
+  assert_file_exists "$PROJECT/docs/superpowers/specs/feature-y-design.md" "external spec copied into repo"
+  assert_file_exists "$PROJECT/docs/superpowers/plans/feature-y-design-plan.md" "external plan copied into repo"
+  assert_eq "docs: spec+plan — feature-y" "$(git -C "$PROJECT" log -1 --pretty=%s)" "external spec+plan commit subject matches"
+  assert_eq "$(git -C "$PROJECT" rev-parse HEAD)" "$(git -C "$ORIGIN" rev-parse refs/heads/main)" "external spec+plan publish pushes to origin main"
+}
