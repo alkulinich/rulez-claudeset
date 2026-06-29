@@ -139,7 +139,9 @@ object with string `plan_sha256`, string `spec_sha256`, array `files` whose
 items have string `path` and non-negative integer `loc`, non-negative integer
 `total_loc`, non-negative integer `implementation_est_bytes`, non-negative
 integer `current_diff_bytes`, non-negative integer `est_bytes`, and `verdict`
-equal to `fits` or `exceeds`. Also require
+equal to `fits` or `exceeds`. Also require `total_loc` to equal the sum of
+`files[].loc`, `implementation_est_bytes` to equal
+`total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE`, and
 `est_bytes == current_diff_bytes + implementation_est_bytes`. When `verdict` is
 `exceeds`, require non-empty string `summary` and a non-empty array of string
 `parts`; when it is `fits`, `summary` and `parts` may be absent. A valid claude
@@ -201,6 +203,12 @@ flags, not merely document them. Its usage becomes
 parses those optional flags before the spec path, rejects unknown flags, and
 forwards the accepted flags to `scripts/spec2pr.sh` in the background command.
 `/rulez:spec2pr status` remains unchanged and takes no flags.
+
+The `mctl add spec2pr` runner is also an operator entry point and must forward
+the same spec2pr-only override flags. Its usage becomes
+`mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md>`;
+it accepts the two flags only for the `spec2pr` target, forwards them to
+`scripts/spec2pr.sh`, and rejects them for `review-pr`.
 
 ### 5. Split-tooling compatibility
 
@@ -297,6 +305,10 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
 - forecast attempts to modify, commit, or leave untracked files → worktree is
   cleaned, `WARN`, and implement proceeds from the pre-forecast boundary.
 - `SPEC2PR_FORECAST=0` → forecast step skipped entirely.
+- forecast payload whose `total_loc` does not equal the sum of `files[].loc` or
+  whose `implementation_est_bytes` does not equal
+  `total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE` → `WARN` + proceeds
+  (fail-soft).
 - cached forecast with matching plan/spec hashes → reused without a new claude
   call.
 - cached forecast with stale plan or spec hash → discarded/regenerated before
@@ -304,6 +316,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
 - regenerated forecast with mismatched hashes or inconsistent
   `est_bytes != current_diff_bytes + implementation_est_bytes` → `WARN` +
   proceeds (fail-soft).
+- `mctl add spec2pr --ignore-pr-limit <spec>` and
+  `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded;
+  `mctl add review-pr --ignore-pr-limit <pr>` → rejected.
 
 ## Versioning
 
@@ -320,8 +335,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   exceeds the diff limit it stops early (SPEC2PR SPLIT forecast) and prints a
   recommended split instead of running implement. New flags --ignore-plan-limit
   and --ignore-pr-limit force a run past the respective size limit;
-  --ignore-pr-limit also applies to review-pr. Set SPEC2PR_FORECAST=0 to disable
-  the forecast step.
+  --ignore-pr-limit also applies to review-pr. The /rulez:spec2pr command and
+  mctl add spec2pr forward the spec2pr override flags. Set SPEC2PR_FORECAST=0
+  to disable the forecast step.
   ```
 
 ## Files
@@ -339,6 +355,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   `review-pr.sh --ignore-pr-limit` in `UPGRADE.md` and the script usage instead.
   Also update the command wrapper to forward the accepted spec2pr flags and to
   recognize `SPLIT forecast est=<n> limit=<n>` completion output.
+- **edit** `scripts/mctl.sh` and `tests/mctl/test-add.sh` — accept and forward
+  `--ignore-plan-limit` / `--ignore-pr-limit` for `mctl add spec2pr`, while
+  rejecting those flags for `review-pr`.
 - **edit** `commands/rulez/spec2pr-split.md`,
   `scripts/spec2pr-split-context.sh`, and
   `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
