@@ -10,6 +10,8 @@
 SPEC2PR_MAX_SPEC="${SPEC2PR_MAX_SPEC:-32768}"
 SPEC2PR_MAX_PLAN="${SPEC2PR_MAX_PLAN:-65536}"
 SPEC2PR_MAX_DIFF="${SPEC2PR_MAX_DIFF:-131072}"
+SPEC2PR_FORECAST="${SPEC2PR_FORECAST:-1}"
+SPEC2PR_FORECAST_BYTES_PER_LINE="${SPEC2PR_FORECAST_BYTES_PER_LINE:-40}"
 SPEC2PR_CODEX_BIN="${SPEC2PR_CODEX_BIN:-codex}"
 SPEC2PR_CLAUDE_BIN="${SPEC2PR_CLAUDE_BIN:-claude}"
 RULEZ_CLAUDESET_HOME="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
@@ -96,6 +98,13 @@ halt() {
 
 split() {
   finish 2 "SPLIT $1 size=$2 limit=$3"
+}
+
+# Forecast early-stop: an ESTIMATE, not a measured size. Distinct token
+# (`SPLIT forecast est=`) so split tooling never confuses it with a measured
+# `SPLIT <gate> size=` gate.
+split_forecast() {
+  finish 2 "SPLIT forecast est=$1 limit=$2"
 }
 
 dirty() {
@@ -437,6 +446,75 @@ run_claude_json() {
     2) halt "claude $tag failed (stderr: $META_DIR/$tag.stderr)" ;;
     *) halt "claude $tag returned invalid JSON ($out)" ;;
   esac
+}
+
+# forecast_claude_attempt <tag> <prompt-file> <out>
+# Optional, read-only claude call for the forecast step. Reuses
+# claude_json_attempt (claude invocation, worktree cleanup, envelope JSON
+# check) but returns a status code instead of halting, and additionally
+# enforces the read-only contract: the prompt edits nothing, yet claude runs
+# with write permissions, so a HEAD change or any dirty/untracked file is a
+# contract failure. Return codes: 0 ok; 2 claude process failure; 3 invalid
+# envelope JSON; 4 worktree modified (cleaned back to the pre-call HEAD).
+forecast_claude_attempt() {
+  local tag="$1" prompt_file="$2" out="$3"
+  local pre_head post_head rc
+
+  pre_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  if claude_json_attempt "$tag" "$prompt_file" "$out"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    return "$rc"
+  fi
+
+  post_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+  if [ "$post_head" != "$pre_head" ] \
+      || [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    clean_worktree_to "$pre_head"
+    return 4
+  fi
+  return 0
+}
+
+# forecast_payload_valid <forecast.json> <plan-sha> <spec-sha> <current-diff-bytes>
+# Exit 0 iff <forecast.json> is a structurally valid forecast payload whose
+# plan_sha256/spec_sha256 equal the shell-computed shas, whose current_diff_bytes
+# equals the shell-measured diff from this run, and whose LOC/byte arithmetic is
+# internally consistent. Used for both a freshly extracted payload and a cached
+# one.
+forecast_payload_valid() {
+  local f="$1" plan_sha="$2" spec_sha="$3" current_diff="$4"
+
+  jq -e --arg ps "$plan_sha" --arg ss "$spec_sha" \
+      --argjson current_diff "$current_diff" \
+      --argjson bytes_per_line "$SPEC2PR_FORECAST_BYTES_PER_LINE" '
+    type == "object"
+    and (.plan_sha256 | type == "string") and (.plan_sha256 == $ps)
+    and (.spec_sha256 | type == "string") and (.spec_sha256 == $ss)
+    and (.files | type == "array")
+    and ([.files[] | (
+      type == "object"
+      and (.path | type == "string")
+      and (.loc | type == "number" and . == floor and . >= 0)
+    )] | all)
+    and (.total_loc | type == "number" and . == floor and . >= 0)
+    and (.implementation_est_bytes | type == "number" and . == floor and . >= 0)
+    and (.current_diff_bytes | type == "number" and . == floor and . >= 0)
+    and (.current_diff_bytes == $current_diff)
+    and (.est_bytes | type == "number" and . == floor and . >= 0)
+    and (.total_loc == ([.files[].loc] | add // 0))
+    and (.implementation_est_bytes == (.total_loc * $bytes_per_line))
+    and (.est_bytes == (.current_diff_bytes + .implementation_est_bytes))
+    and (.verdict == "fits" or .verdict == "exceeds")
+    and (if .verdict == "exceeds"
+         then ((.summary | type == "string" and . != "")
+               and (.parts | type == "array" and length > 0)
+               and ([.parts[] | type == "string"] | all))
+         else true end)
+  ' "$f" > /dev/null 2>&1
 }
 
 extract_json_object() {
