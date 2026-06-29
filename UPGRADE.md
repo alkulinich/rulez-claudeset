@@ -6,7 +6,7 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
-## To v1.8.0 - from v1.7.1
+## To v1.8.0 - from v1.7.2
 
 **Action:** None.
 
@@ -18,6 +18,15 @@ and --ignore-pr-limit force a run past the respective size limit;
 --ignore-pr-limit also applies to review-pr. The /rulez:spec2pr command and
 mctl add spec2pr forward the spec2pr override flags; mctl add review-pr forwards
 --ignore-pr-limit. Set SPEC2PR_FORECAST=0 to disable the forecast step.
+
+## To v1.7.2 - from v1.7.1
+
+**Action:** None.
+
+**Caveat:** spec2pr's PR-review diff-size gate (and the diff sent to the
+reviewer) now measures only the implementation, excluding the committed spec and
+plan files. Runs whose spec+plan previously pushed an otherwise-reasonable
+implementation over the 128 KB limit now pass. `review-pr.sh` is unaffected.
 
 ## To v1.7.1 - from v1.7.0
 

@@ -49,6 +49,21 @@ EOF
   done
 }
 
+# pr_review_engine_write_diff <out-file>
+# Writes the BASE_SHA..HEAD review diff to <out-file>, excluding the committed
+# spec and plan artifacts when spec2pr set them (review-pr.sh leaves both empty,
+# so the diff is byte-for-byte unchanged there). The size gate and the reviewer
+# prompt then see implementation-only bytes, not the spec/plan docs that ride
+# along in the branch.
+pr_review_engine_write_diff() {
+  local out="$1"
+  local -a args=("$BASE_SHA...HEAD")
+  if [ -n "${WT_SPEC_REL:-}" ] && [ -n "${WT_PLAN_REL:-}" ]; then
+    args+=(-- . ":(exclude)$WT_SPEC_REL" ":(exclude)$WT_PLAN_REL")
+  fi
+  git -C "$WORKTREE" diff "${args[@]}" > "$out"
+}
+
 pr_review_engine_run() {
   if [ "$#" -gt 1 ]; then
     halt "usage: pr_review_engine_run [claude|codex]"
@@ -79,7 +94,7 @@ pr_review_engine_run() {
 
   STAGE="pr-review"
   local diff_file="$META_DIR/pr-review.diff"
-  git -C "$WORKTREE" diff "$BASE_SHA...HEAD" > "$diff_file"
+  pr_review_engine_write_diff "$diff_file"
   local diff_size
   diff_size="$(wc -c < "$diff_file" | tr -d ' ')"
   if [ "$diff_size" -gt "$SPEC2PR_MAX_DIFF" ]; then
@@ -295,7 +310,7 @@ EOF
       git -C "$WORKTREE" add -A
       git -C "$WORKTREE" commit -q -m "$commit_prefix: pr-review review fixes r$round"
       git -C "$WORKTREE" push -q origin "$push_refspec" || halt "git push failed"
-      git -C "$WORKTREE" diff "$BASE_SHA...HEAD" > "$diff_file"
+      pr_review_engine_write_diff "$diff_file"
     fi
 
     if [ "$round" -eq "$MAX_FIX_ROUNDS" ]; then
