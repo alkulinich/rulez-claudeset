@@ -6,6 +6,16 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.9.0 - from v1.8.2
+
+**Action:** None.
+
+**Caveat:** on any non-DONE halt (HALT/SPLIT/DIRTY) spec2pr now publishes the
+worktree's spec & plan to main via git-publish-spec.sh (commits + pushes
+origin/main), so you no longer dig into the worktree to recover them. Requires
+the repo on main; on failure it WARNs and leaves them for manual publish. Set
+SPEC2PR_PUBLISH_ON_HALT=0 to disable.
+
 ## To v1.8.2 - from v1.8.1
 
 **Action:** None.
