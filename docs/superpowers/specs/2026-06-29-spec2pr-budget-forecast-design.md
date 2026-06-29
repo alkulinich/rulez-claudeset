@@ -39,8 +39,8 @@ Two further observations shape the design:
 ## Goals
 
 1. Move the most expensive size failure (diff gate) **earlier** — forecast the
-   implementation diff after `plan-review`, before `implement`, and stop early
-   with a split recommendation when it won't fit.
+   final PR diff after `plan-review`, before `implement`, and stop early with a
+   split recommendation when it won't fit.
 2. Give the operator manual override flags to force a run through a size limit
    they judge acceptable (e.g. a few percent over).
 
@@ -89,22 +89,32 @@ codex review/implement calls — one of the observed failures was codex `usage
 limit` exhaustion, and the forecast is an extra call on every run, so it must
 not pile onto the quota that already failed. Claude also authored the plan.
 
+Before the forecast call, measure the bytes already present in the eventual PR
+diff with `git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c`. This current
+diff includes the imported spec, plan, and any spec/plan-review commits, so it
+must be included in the forecast: the hard gate later measures the same
+`$BASE_SHA...HEAD` surface, not just implementation changes.
+
 Prompt (read-only): read the plan at `$WT_PLAN_REL` and the spec at
-`$WT_SPEC_REL`; edit nothing; list every file you would create or modify with
-rough added/changed LOC each; sum; multiply by the bytes-per-line constant for
-an estimated diff size in bytes; return the verdict as the JSON object below in
-the claude envelope's `result` field. Store the raw claude envelope separately,
-for example at `META_DIR/forecast.claude.json`; extract and validate the
-forecast payload into `META_DIR/forecast.json`, which must contain the forecast
-object itself, not the claude envelope:
+`$WT_SPEC_REL`; edit nothing; list every implementation file you would create or
+modify with rough added/changed LOC each; sum; multiply by the bytes-per-line
+constant for an estimated implementation diff size in bytes; add the
+shell-provided current diff bytes to produce an estimated final PR diff size;
+return the verdict as the JSON object below in the claude envelope's `result`
+field. Store the raw claude envelope separately, for example at
+`META_DIR/forecast.claude.json`; extract and validate the forecast payload into
+`META_DIR/forecast.json`, which must contain the forecast object itself, not the
+claude envelope:
 
 ```json
 {
   "plan_sha256": "6c1f...",
   "spec_sha256": "e3b0...",
+  "current_diff_bytes": 18000,
   "files": [{"path": "lib/storage/pool.ts", "loc": 180}, ...],
   "total_loc": 550,
-  "est_bytes": 22000,
+  "implementation_est_bytes": 22000,
+  "est_bytes": 40000,
   "verdict": "fits",
   "parts": ["part-1: helpers + types", "part-2: wiring + tests"],
   "summary": "Forecast exceeds diff limit. Recommended split: part-1 helpers + types; part-2 wiring + tests."
@@ -117,16 +127,21 @@ recommended split parts are visible in normal output even when
 `SPEC2PR_VERBOSE` is unset. `plan_sha256` and `spec_sha256` are computed by the
 shell before the call and included in the forecast metadata for cache
 validation. The bytes-per-line factor (`~40`) is a named constant, tunable in
-one place.
+one place. `est_bytes` is the estimated final PR diff size compared against
+`SPEC2PR_MAX_DIFF`; `implementation_est_bytes` is the implementation-only
+component.
 
 Validate `META_DIR/forecast.json` before making a decision: it must be an
 object with string `plan_sha256`, string `spec_sha256`, array `files` whose
 items have string `path` and non-negative integer `loc`, non-negative integer
-`total_loc`, non-negative integer `est_bytes`, and `verdict` equal to `fits` or
-`exceeds`. When `verdict` is `exceeds`, require non-empty string `summary` and a
-non-empty array of string `parts`; when it is `fits`, `summary` and `parts` may
-be absent. A valid claude envelope whose `result` cannot be parsed and validated
-into this payload is a malformed forecast payload (§6).
+`total_loc`, non-negative integer `implementation_est_bytes`, non-negative
+integer `current_diff_bytes`, non-negative integer `est_bytes`, and `verdict`
+equal to `fits` or `exceeds`. Also require
+`est_bytes == current_diff_bytes + implementation_est_bytes`. When `verdict` is
+`exceeds`, require non-empty string `summary` and a non-empty array of string
+`parts`; when it is `fits`, `summary` and `parts` may be absent. A valid claude
+envelope whose `result` cannot be parsed and validated into this payload is a
+malformed forecast payload (§6).
 
 Also validate the forecast hashes before any decision, not only during cache
 reuse: `plan_sha256` must equal the shell-computed sha256 of the current
@@ -247,6 +262,13 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
 - forecast attempts to modify, commit, or leave untracked files → worktree is
   cleaned, `WARN`, and implement proceeds from the pre-forecast boundary.
 - `SPEC2PR_FORECAST=0` → forecast step skipped entirely.
+- cached forecast with matching plan/spec hashes → reused without a new claude
+  call.
+- cached forecast with stale plan or spec hash → discarded/regenerated before
+  decision.
+- regenerated forecast with mismatched hashes or inconsistent
+  `est_bytes != current_diff_bytes + implementation_est_bytes` → `WARN` +
+  proceeds (fail-soft).
 
 ## Versioning
 
@@ -259,7 +281,7 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   **Action:** None.
 
   **Caveat:** spec2pr now spends one extra claude call per run, after
-  plan-review, to forecast the implementation diff size. If the forecast
+  plan-review, to forecast the final PR diff size. If the forecast
   exceeds the diff limit it stops early (SPEC2PR SPLIT forecast) and prints a
   recommended split instead of running implement. New flags --ignore-plan-limit
   and --ignore-pr-limit force a run past the respective size limit;
