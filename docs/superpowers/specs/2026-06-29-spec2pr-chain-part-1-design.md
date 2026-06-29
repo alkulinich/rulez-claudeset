@@ -65,10 +65,13 @@ succeed on the first optimistic attempt is a `CHAIN HALT`.
 
 ### Orchestrator `scripts/spec2pr-chain.sh`
 
-Sources `lib/spec2pr-runtime.sh` to reuse `status` / `finish` / `halt`,
-`acquire_lock`, `sanitize`, and the model-call layer, with
-`CONTRACT_PREFIX=CHAIN`. Arg parse: `--fast` (forwarded to each `spec2pr.sh`),
-a `status` subcommand, and the ordered spec list.
+Sources `lib/spec2pr-runtime.sh` to reuse `finish` / `halt`, `acquire_lock`,
+`sanitize`, and dependency/default handling, with `CONTRACT_PREFIX=CHAIN`. The
+chain uses a small local `chain_status` helper instead of runtime `status`,
+because chain contract lines are intentionally stage-free (for example
+`CHAIN OK started specs=<n>`), while runtime `status` always inserts
+`$STAGE:`. Arg parse: `--fast` (forwarded to each `spec2pr.sh`), a `status`
+subcommand, and the ordered spec list.
 
 Before taking the lock, preflight every spec path: resolve its absolute path,
 confirm it exists, derive `GIT_ROOT` with
@@ -80,9 +83,12 @@ scope.
 
 Takes a repo-scoped lock from that single validated repo so two chains cannot
 race on the same `main`:
-`acquire_lock "$SPEC2PR_HOME/<repo-slug>.chain.lock"`. Different repos do not
-block each other because each valid chain has exactly one repo; this is separate
-from spec2pr's per-spec locks.
+`acquire_lock "$SPEC2PR_HOME/<repo-id>.chain.lock"`, where `repo-id` is
+`sanitize(basename(GIT_ROOT))-<short hash of GIT_ROOT's canonical path>`.
+The hash prevents unrelated checkouts that happen to share the same directory
+basename from blocking each other. Different repos do not block each other
+because each valid chain has exactly one repo; this is separate from spec2pr's
+per-spec locks.
 
 The loop, for each spec in order:
 
@@ -111,7 +117,11 @@ From the spec's worktree:
 gh pr merge <url> --squash --delete-branch
 ```
 
-- On **success** → write the marker, tear down, continue.
+- On **success** → resolve the merge commit from the remote main ref:
+  `git -C <repo> ls-remote origin refs/heads/main` (first field), write the
+  marker with that commit, tear down, continue. If the ref cannot be read, halt
+  with `CHAIN HALT <slug>: merge commit lookup failed` before writing the
+  marker.
 - On **any failure** → `CHAIN HALT <slug>: merge failed (<gh stderr>)`; stop.
   (Part 2 replaces this blanket halt with merge-state inspection and
   resolution.)
