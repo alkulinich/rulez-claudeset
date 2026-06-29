@@ -78,6 +78,36 @@ show_review() {
   sed 's/^/    /' "$1" 2>/dev/null || true
 }
 
+# On a non-DONE terminal state, publish the worktree's committed spec & plan to
+# main so the operator need not dig into the worktree to recover them. Best-
+# effort: always returns 0 and never changes the terminal exit code or the
+# contract line (finish() already printed it). Disabled by
+# SPEC2PR_PUBLISH_ON_HALT=0. A no-op for review-pr (WT_SPEC_REL empty) and for
+# halts before the spec/plan exist. Detail goes to a log, not stdout, so the
+# contract output stays machine-parseable.
+maybe_publish_on_halt() {
+  [ "${SPEC2PR_PUBLISH_ON_HALT:-1}" = "0" ] && return 0
+  [ -n "${WT_SPEC_REL:-}" ] && [ -n "${WORKTREE:-}" ] && [ -d "${WORKTREE:-}" ] || return 0
+
+  local -a paths=()
+  [ -f "$WORKTREE/$WT_SPEC_REL" ] && paths+=("$WORKTREE/$WT_SPEC_REL")
+  [ -n "${WT_PLAN_REL:-}" ] && [ -f "$WORKTREE/$WT_PLAN_REL" ] && paths+=("$WORKTREE/$WT_PLAN_REL")
+  [ "${#paths[@]}" -gt 0 ] || return 0
+
+  local publish
+  publish="$(dirname "$0")/git-publish-spec.sh"
+  [ -f "$publish" ] || publish="$HOME/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh"
+
+  STAGE="publish"
+  local log="${META_DIR:-$WORKTREE}/publish-on-halt.log"
+  if (cd "$GIT_ROOT" && bash "$publish" "${paths[@]}") >"$log" 2>&1; then
+    status "OK" "published ${#paths[@]} file(s) to main (log: $log)"
+  else
+    status "WARN" "publish failed; see $log; recover manually from $GIT_ROOT on main"
+  fi
+  return 0
+}
+
 finish() { # <exit-code> <contract-words...>
   local rc="$1"
   shift
@@ -88,6 +118,7 @@ finish() { # <exit-code> <contract-words...>
     mkdir -p "$(dirname "$STATUS_PATH")"
     printf '%s\n' "$line" >> "$STATUS_PATH"
   fi
+  if [ "$rc" -ne 0 ]; then maybe_publish_on_halt; fi
   cleanup_own_paths
   exit "$rc"
 }

@@ -6,7 +6,7 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
-## To v1.9.0 - from v1.8.0
+## To v1.10.0 - from v1.9.0
 
 **Action:** None.
 
@@ -15,6 +15,31 @@ auto-merging each PR (squash, delete branch) before the next so each builds on
 its predecessors; it stops at the first spec that does not reach DONE or whose
 PR does not merge cleanly, and re-running resumes past the specs already
 merged.
+
+## To v1.9.0 - from v1.8.2
+
+**Action:** None.
+
+**Caveat:** on any non-DONE halt (HALT/SPLIT/DIRTY) spec2pr now publishes the
+worktree's spec & plan to main via git-publish-spec.sh (commits + pushes
+origin/main), so you no longer dig into the worktree to recover them. Requires
+the repo on main; on failure it WARNs and leaves them for manual publish. Set
+SPEC2PR_PUBLISH_ON_HALT=0 to disable.
+
+## To v1.8.2 - from v1.8.1
+
+**Action:** None.
+
+**Caveat:** the co-author trailer on commits made by /rulez:create-pr and
+/rulez:push-fixes now reads "Claude Opus 4.8 (1M context)" (was a stale "4.6").
+
+## To v1.8.1 - from v1.8.0
+
+**Action:** None.
+
+**Caveat:** spec2pr's budget forecast now recovers its JSON when the model wraps
+it in prose or a ```json fence (previously it warned "malformed forecast JSON"
+and skipped the budget check for that run). review-pr.sh is unaffected.
 
 ## To v1.8.0 - from v1.7.2
 

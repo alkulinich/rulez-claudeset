@@ -105,6 +105,10 @@ make_sandbox() {
   export SPEC2PR_WORKTREES="$SANDBOX/wt"
   export SPEC2PR_CODEX_BIN="$SANDBOX/bin/stub-codex"
   export SPEC2PR_CLAUDE_BIN="$SANDBOX/bin/stub-claude"
+  # Publish-on-halt is ON in production; keep it OFF by default in the harness so
+  # existing halt tests don't push to the sandbox origin. The dedicated
+  # test-publish-on-halt.sh cases opt in with SPEC2PR_PUBLISH_ON_HALT=1.
+  export SPEC2PR_PUBLISH_ON_HALT=0
   export PATH="$SANDBOX/bin:$PATH"
 }
 
