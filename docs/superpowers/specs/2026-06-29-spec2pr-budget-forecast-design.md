@@ -71,6 +71,15 @@ continue (§6). The wrapper should reuse the existing claude invocation,
 worktree-cleanup, and JSON-validation behavior from `claude_json_attempt`, but
 return a status code to the caller instead of halting.
 
+Because the forecast prompt is read-only but claude still runs with repository
+write permissions, the wrapper must enforce that contract after every successful
+claude process. Capture the pre-call `HEAD` and require both that `HEAD` is
+unchanged and `git status --porcelain --untracked-files=all` is empty after the
+call. If claude edits, commits, or leaves untracked files, clean back to the
+pre-call boundary using the same cleanup path as other model-call contract
+failures, emit `SPEC2PR WARN forecast: claude modified worktree; proceeding to
+implement`, and do not trust or reuse that forecast output.
+
 Claude is chosen over codex deliberately: it spends a *separate quota* from the
 codex review/implement calls — one of the observed failures was codex `usage
 limit` exhaustion, and the forecast is an extra call on every run, so it must
@@ -114,9 +123,11 @@ one place.
   existing `split()` helper for this path: its contract is measured `size=<n>`,
   which is correct for spec/plan/diff gates but wrong for an estimate. The
   `forecast` label distinguishes an estimate from a measured diff.
-  `forecast.json`'s recommended `parts` print to the operator via
-  `show_summary`. **No implement call is spent.** The parts are advisory input
-  for a manual `spec2pr-split` run.
+  Print `forecast.json`'s recommended `parts` to the operator by calling
+  `show_summary "$META_DIR/forecast.json"` **before** invoking
+  `split_forecast`; `finish` exits, so printing after the split helper would be
+  unreachable. **No implement call is spent.** The parts are advisory input for
+  a manual `spec2pr-split` run.
 
 ### 4. Override flags
 
@@ -159,6 +170,8 @@ calling the fail-soft forecast wrapper from §2 and branching on its return code
   invalid claude JSON; proceeding to implement`.
 - valid envelope but missing/malformed forecast payload → `SPEC2PR WARN
   forecast: malformed forecast JSON; proceeding to implement`.
+- claude modified the worktree despite the read-only prompt → `SPEC2PR WARN
+  forecast: claude modified worktree; proceeding to implement`.
 
 A transient claude hiccup must not block an otherwise-good run, and the backstop
 still protects correctness. This is the one deliberate deviation from the
@@ -188,6 +201,8 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   plan gate.
 - `review-pr --ignore-pr-limit` → diff over 128 KB but review proceeds.
 - forecast call error / malformed JSON → `WARN` + proceeds (fail-soft).
+- forecast attempts to modify, commit, or leave untracked files → worktree is
+  cleaned, `WARN`, and implement proceeds from the pre-forecast boundary.
 - `SPEC2PR_FORECAST=0` → forecast step skipped entirely.
 
 ## Versioning
