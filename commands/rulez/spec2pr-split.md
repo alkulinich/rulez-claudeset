@@ -145,6 +145,10 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh <part-2-path>`
      - `/rulez:spec2pr <part-2-path>`, then
        review and merge that PR
+   - One-shot alternative to the manual sequence above: after publishing the
+     part specs, run
+     `/rulez:spec2pr-chain <part-1-path> <part-2-path>`
+     to process both parts in order, auto-merging each PR before the next.
 
 ## Verification
 

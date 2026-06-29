@@ -65,14 +65,47 @@ succeed on the first optimistic attempt is a `CHAIN HALT`.
 
 ### Orchestrator `scripts/spec2pr-chain.sh`
 
-Sources `lib/spec2pr-runtime.sh` to reuse `status` / `finish` / `halt`,
-`acquire_lock`, `sanitize`, and the model-call layer, with
-`CONTRACT_PREFIX=CHAIN`. Arg parse: `--fast` (forwarded to each `spec2pr.sh`),
-a `status` subcommand, and the ordered spec list.
+Sources `lib/spec2pr-runtime.sh` with `CONTRACT_PREFIX=CHAIN` to reuse
+`sanitize` and dependency/default handling. The chain must not use runtime
+`status`, `finish`, or `halt` for user-visible chain outcomes:
+runtime `status` and `halt` always insert `$STAGE:`, while chain contract lines
+are intentionally stage-free (for example `CHAIN OK started specs=<n>` and
+`CHAIN HALT <slug>: <reason>`). Implement small local `chain_status` /
+`chain_finish` helpers that write the exact `CHAIN` lines below to stdout and
+the chain log, then clean up the acquired lock before exiting. Because sourcing
+`spec2pr-runtime.sh` also installs its `on_exit` trap, `chain_finish` must set
+the runtime `FINISHED=1` before it exits; otherwise the runtime trap will append
+a bogus `CHAIN HALT preflight: unexpected exit` after every intentional chain
+outcome. Arg parse: `--fast` (forwarded to each `spec2pr.sh`), a `status`
+subcommand, and the ordered spec list.
 
-Takes a repo-scoped lock so two chains cannot race on the same `main`:
-`acquire_lock "$SPEC2PR_HOME/<repo-slug>.chain.lock"`. Different repos do not
-block each other; this is separate from spec2pr's per-spec locks.
+Before taking the lock, preflight every spec path: resolve its absolute path,
+confirm it exists, derive `GIT_ROOT` with
+`git -C <specdir> rev-parse --show-toplevel`, and require all specs to share the
+same `GIT_ROOT`. A mixed-repository invocation is a terminal
+`CHAIN HALT: preflight all specs must be in the same git repository`. This
+chain is for dependent specs in one repo; multi-repo orchestration is out of
+scope. Preflight also derives every spec's `ID` using the exact same
+repo-slug/spec-slug formula below and rejects duplicates before any spec runs:
+`CHAIN HALT: preflight duplicate spec id <ID>`. The single-spec tool stores
+worktrees, metadata, branches, and markers by that slug family, so two ordered
+inputs that collide on ID cannot be chained safely.
+
+Takes a repo-scoped lock from that single validated repo so two chains cannot
+race on the same `main`:
+`chain_acquire_lock "$SPEC2PR_HOME/<repo-id>.chain.lock"`, where `repo-id` is
+`sanitize(basename(GIT_ROOT))-<short hash of GIT_ROOT's canonical path>`.
+The hash prevents unrelated checkouts that happen to share the same directory
+basename from blocking each other. Different repos do not block each other
+because each valid chain has exactly one repo; this is separate from spec2pr's
+per-spec locks. Do **not** call runtime `acquire_lock` for the chain lock:
+runtime lock failures call `halt`, which exits immediately and emits a
+stage-bearing runtime line before the chain can translate it. Instead implement a
+small local `chain_acquire_lock` that mirrors runtime's mkdir/pid/stale-lock
+logic, sets chain-local lock variables on success, and returns non-zero on
+contention or an initializing lock. On non-zero, emit exactly
+`CHAIN HALT: chain already running for <repo>`. `chain_finish` removes the lock
+only when the pid file still contains the current process id.
 
 The loop, for each spec in order:
 
@@ -80,8 +113,19 @@ The loop, for each spec in order:
 1. ID = <repo-slug>-<spec-slug>     # sanitize(basename(GIT_ROOT)) + "-" + sanitize(stem),
                                      # GIT_ROOT via `git -C <specdir> rev-parse --show-toplevel`,
                                      # mirroring spec2pr.sh:62-70.
-   If "$SPEC2PR_HOME/<ID>.merged" exists → CHAIN OK skipped <slug>; continue.
-2. Run, capturing stdout:  bash <dir>/spec2pr.sh [--fast] <spec>
+   If "$SPEC2PR_HOME/<ID>.merged" exists:
+      - read its merge commit field,
+      - read current origin/main via `git -C <repo> ls-remote origin refs/heads/main`,
+      - fetch `refs/heads/main` and, if missing locally, the marker commit,
+      - verify the marker commit is an ancestor of the fetched current
+        origin/main with `git merge-base --is-ancestor`.
+      Valid marker → CHAIN OK skipped <slug>; continue.
+      Missing/unparseable marker commit or commit not reachable from current
+      origin/main → CHAIN HALT <slug>: stale merged marker; stop.
+2. Run, capturing stdout:  bash "$SCRIPT_DIR/spec2pr.sh" [--fast] <spec>
+   where `SCRIPT_DIR` is the directory containing `spec2pr-chain.sh`. Never
+   resolve the runner relative to the spec path; specs normally live under
+   `docs/superpowers/specs/`, not beside `spec2pr.sh`.
 3. Branch on its exit code:
      0  DONE   → parse `pr=<url> worktree=<wt>` from the captured terminal line → merge.
      1/2/3     → CHAIN HALT <slug>: <spec2pr's terminal line>; stop.
@@ -101,17 +145,22 @@ From the spec's worktree:
 gh pr merge <url> --squash --delete-branch
 ```
 
-- On **success** → write the marker, tear down, continue.
+- On **success** → resolve the merge commit from the remote main ref:
+  `git -C <repo> ls-remote origin refs/heads/main` (first field), write the
+  marker with that commit, tear down, continue. If the ref cannot be read, halt
+  with `CHAIN HALT <slug>: merge commit lookup failed` before writing the
+  marker.
 - On **any failure** → `CHAIN HALT <slug>: merge failed (<gh stderr>)`; stop.
   (Part 2 replaces this blanket halt with merge-state inspection and
   resolution.)
 
 ### Merged markers, resume, cleanup
 
-On a successful merge write `"$SPEC2PR_HOME/<ID>.merged"` containing the PR URL,
-the merge commit, and a timestamp. Step 1 skips any spec whose marker exists, so
-re-running after a `HALT` skips everything already merged and restarts at the
-offender — resume needs no stored cursor.
+On a successful merge write `"$SPEC2PR_HOME/<ID>.merged"` containing parseable
+`pr=`, `merge=`, and `merged_at=` lines. Step 1 skips only specs whose marker's
+`merge=` commit is still reachable from the current remote `main`, so re-running
+after a `HALT` skips everything already merged and restarts at the offender
+without trusting a stale local marker — resume needs no stored cursor.
 
 Then tear down (the chain owns the cleanup the single-spec tool skips):
 
@@ -153,11 +202,18 @@ one-shot alternative: `/rulez:spec2pr-chain <part-1-path> <part-2-path>`.
 - **`spec2pr.sh` is never modified** — the orchestrator only invokes it and
   reads its contract.
 - **Resume is idempotent**: a merged spec is skipped (marker) and cannot be
-  re-pushed (branch + worktree torn down, remote branch deleted).
+  re-pushed (branch + worktree torn down, remote branch deleted), but only while
+  the marker's recorded merge commit is still reachable from current
+  `origin/main`.
 - **Any non-clean merge halts** in this part — no partial/auto recovery. The
   chain leaves merged specs merged and the failing spec's PR open.
 - **Repo lock** prevents two concurrent chains from interleaving merges into one
   `main`; `CHAIN HALT: chain already running for <repo>` if held.
+- **Single-repo input** is required and checked before any spec runs. The chain
+  must not silently process specs from different repositories under one lock.
+- **Duplicate derived IDs are rejected** before any spec runs. A duplicate ID
+  would collide on spec2pr branch/worktree/metadata/marker names, so it is a
+  preflight halt rather than a resume shortcut.
 - **stdout capture** is the source for the PR URL + worktree path; the
   orchestrator does not read spec2pr's internal meta files.
 
@@ -169,15 +225,30 @@ one-shot alternative: `/rulez:spec2pr-chain <part-1-path> <part-2-path>`.
 real `spec2pr.sh`; only model and `gh` boundaries are stubbed.
 
 - **Happy chain** — 3 toy specs all reach DONE → 3 `gh pr merge` calls logged, 3
-  `<ID>.merged` markers, 3 worktrees removed, `CHAIN DONE merged=3/3`.
+  `<ID>.merged` markers, 3 worktrees removed, `CHAIN DONE merged=3/3`. The
+  stubbed merge must also advance the bare origin's `main` from the PR
+  worktree, and the test must assert each later spec2pr worktree's base includes
+  a file or commit introduced by the previous spec. This proves the next spec
+  really branches from a freshly merged `main`, not just that merge commands
+  were logged.
 - **Mid-chain stop** — spec 2 forced to `DIRTY` → `CHAIN HALT`, spec 1 merged,
   spec 3 never runs (its fixtures unconsumed).
 - **Resume** — re-run the mid-chain case after spec 2 is made fixable → spec 1
   skipped (marker present, no second merge), runs from spec 2 to `CHAIN DONE`.
+- **Mixed-repo rejection** — two valid spec paths from different git roots halt
+  in preflight before any `spec2pr.sh` run or merge attempt, with no merged
+  markers written.
+- **Duplicate-ID rejection** — two spec paths in the same repo that derive the
+  same `<repo-slug>-<spec-slug>` halt in preflight before any `spec2pr.sh` run
+  or merge attempt.
+- **Stale marker rejection** — a marker whose recorded `merge=` commit is absent
+  from current `origin/main` halts instead of skipping that spec.
 
 Supporting: `stub-gh.sh` gains a `pr merge` case (success default;
-`pr-merge-fail` fixture → stderr + exit 9). `helpers.sh` gains `add_spec <name>`
-to scaffold several toy specs in one sandbox.
+`pr-merge-fail` fixture → stderr + exit 9). On success it simulates GitHub's
+merge by updating the bare origin's `main` from the current PR worktree so the
+next real `spec2pr.sh` fetch observes the predecessor. `helpers.sh` gains
+`add_spec <name>` to scaffold several toy specs in one sandbox.
 
 ## Versioning
 

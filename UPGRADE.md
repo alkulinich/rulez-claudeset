@@ -6,6 +6,16 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.10.0 - from v1.9.0
+
+**Action:** None.
+
+**Caveat:** new `/rulez:spec2pr-chain <spec…>` processes specs in order,
+auto-merging each PR (squash, delete branch) before the next so each builds on
+its predecessors; it stops at the first spec that does not reach DONE or whose
+PR does not merge cleanly, and re-running resumes past the specs already
+merged.
+
 ## To v1.9.0 - from v1.8.2
 
 **Action:** None.
