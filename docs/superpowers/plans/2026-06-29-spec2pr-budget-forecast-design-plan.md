@@ -40,7 +40,7 @@ These apply to every task. Copy values verbatim.
 | `scripts/lib/pr-review-engine.sh` | `IGNORE_PR_LIMIT` guard on the diff gate | 1 |
 | `scripts/spec2pr-split-context.sh` | recognize `SPLIT forecast`, emit `gate=forecast` | 5 |
 | `commands/rulez/spec2pr-split.md` | document forecast splits | 5 |
-| `commands/rulez/spec2pr.md` | document new flags + forecast behavior | 6 |
+| `commands/rulez/spec2pr.md` | document and forward new flags + forecast behavior | 6 |
 | `tests/spec2pr/helpers.sh` | `queue_clean_forecast` shared fixture helper | 3 |
 | `tests/spec2pr/test-forecast.sh` (new) | forecast unit + integration cases | 2, 3, 4 |
 | `tests/spec2pr/test-spec2pr-split-context.sh` | `SPLIT forecast` fixture | 5 |
@@ -1024,9 +1024,12 @@ and --ignore-pr-limit force a run past the respective size limit;
 the forecast step.
 ```
 
-- [ ] **Step 3: Document the flags + forecast in `commands/rulez/spec2pr.md`**
+- [ ] **Step 3: Document and forward the flags + forecast in `commands/rulez/spec2pr.md`**
 
-In the `## Usage` list, add a flags line; and extend the outcome-reaction list to cover the forecast split. Add after the `## Usage` block:
+In the `## Usage` list, add the flag forms; update the command instructions so
+the slash command treats these as optional pass-through flags instead of part of
+the spec path; and extend the outcome-reaction list to cover the forecast split.
+Add after the existing start/resume usage line:
 
 ```markdown
 - `/rulez:spec2pr --ignore-plan-limit <spec-path>` — proceed even if the plan
@@ -1034,6 +1037,28 @@ In the `## Usage` list, add a flags line; and extend the outcome-reaction list t
 - `/rulez:spec2pr --ignore-pr-limit <spec-path>` — proceed even if the
   forecast (or the final diff) exceeds the PR diff limit
 ```
+
+Then replace the "Otherwise the argument is a spec path" setup with instructions
+equivalent to:
+
+```markdown
+Otherwise parse optional leading flags from the argument list:
+
+- Accepted flags are `--ignore-plan-limit` and `--ignore-pr-limit`.
+- Require exactly one remaining value, the spec path.
+- If any other flag is present, or no spec path remains, show the Usage forms
+  and stop.
+- Preserve the accepted flags in their original order as `SPEC2PR_FLAGS`.
+```
+
+Update the background launch command so the accepted flags are passed through:
+
+```markdown
+`bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh ${SPEC2PR_FLAGS} <spec-path>`
+```
+
+If no flags were supplied, this is the existing launch command with only
+`<spec-path>`.
 
 And in the "When the background task completes" reaction list, add a bullet for the forecast split (the recommended parts are printed before the split line):
 
