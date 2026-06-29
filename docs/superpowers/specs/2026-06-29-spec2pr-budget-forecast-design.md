@@ -63,11 +63,18 @@ A `SPEC2PR_FORECAST=0` env kill-switch skips the step entirely.
 
 ### 2. Forecast call (claude, JSON)
 
-The forecast runs on **claude** via the existing `run_claude_json` path. Claude
-is chosen over codex deliberately: it spends a *separate quota* from the codex
-review/implement calls — one of the observed failures was codex `usage limit`
-exhaustion, and the forecast is an extra call on every run, so it must not pile
-onto the quota that already failed. Claude also authored the plan.
+The forecast runs on **claude** through a new fail-soft wrapper around
+`claude_json_attempt`, not through `run_claude_json`. `run_claude_json` is the
+right path for required claude calls because it `halt`s on process failure or
+invalid JSON; forecast is optional optimization and must be able to warn and
+continue (§6). The wrapper should reuse the existing claude invocation,
+worktree-cleanup, and JSON-validation behavior from `claude_json_attempt`, but
+return a status code to the caller instead of halting.
+
+Claude is chosen over codex deliberately: it spends a *separate quota* from the
+codex review/implement calls — one of the observed failures was codex `usage
+limit` exhaustion, and the forecast is an extra call on every run, so it must
+not pile onto the quota that already failed. Claude also authored the plan.
 
 Prompt (read-only): read the plan at `$WT_PLAN_REL` and the spec at
 `$WT_SPEC_REL`; edit nothing; list every file you would create or modify with
@@ -101,9 +108,13 @@ one place.
 - `est_bytes <= SPEC2PR_MAX_DIFF` → status `SPEC2PR OK forecast: fits
   est=22000 limit=131072`; continue to implement.
 - `est_bytes > SPEC2PR_MAX_DIFF` **and** not `--ignore-pr-limit` → terminal
-  **`SPEC2PR SPLIT forecast est=<n> limit=131072`** via the existing `split()`
-  helper (exit 2). The `forecast` label distinguishes an *estimate* from a
-  measured diff. `forecast.json`'s recommended `parts` print to the operator via
+  **`SPEC2PR SPLIT forecast est=<n> limit=131072`** via a new forecast-specific
+  split helper, for example `split_forecast "$est_bytes" "$SPEC2PR_MAX_DIFF"`
+  implemented as `finish 2 "SPLIT forecast est=$1 limit=$2"`. Do not use the
+  existing `split()` helper for this path: its contract is measured `size=<n>`,
+  which is correct for spec/plan/diff gates but wrong for an estimate. The
+  `forecast` label distinguishes an estimate from a measured diff.
+  `forecast.json`'s recommended `parts` print to the operator via
   `show_summary`. **No implement call is spent.** The parts are advisory input
   for a manual `spec2pr-split` run.
 
@@ -138,11 +149,20 @@ the hash validation above. Valid resumes do not re-pay the claude call.
 ### 6. Error handling — fail-soft
 
 The forecast is an optimization; the hard `SPEC2PR_MAX_DIFF` gate remains as a
-backstop. If the forecast call errors or returns malformed JSON (after
-`run_claude_json`'s existing validation), emit a `WARN` status and **continue to
-implement** rather than `halt`. A transient claude hiccup must not block an
-otherwise-good run, and the backstop still protects correctness. This is the one
-deliberate deviation from the pipeline's usual fail-loud stance.
+backstop. If the forecast call errors or returns malformed JSON, emit a `WARN`
+status and **continue to implement** rather than `halt`. Implement this by
+calling the fail-soft forecast wrapper from §2 and branching on its return code:
+
+- claude process failure (`claude_json_attempt` rc 2) → `SPEC2PR WARN forecast:
+  claude failed; proceeding to implement`.
+- invalid envelope JSON (`claude_json_attempt` rc 3) → `SPEC2PR WARN forecast:
+  invalid claude JSON; proceeding to implement`.
+- valid envelope but missing/malformed forecast payload → `SPEC2PR WARN
+  forecast: malformed forecast JSON; proceeding to implement`.
+
+A transient claude hiccup must not block an otherwise-good run, and the backstop
+still protects correctness. This is the one deliberate deviation from the
+pipeline's usual fail-loud stance.
 
 ### 7. Status / contract surface
 
