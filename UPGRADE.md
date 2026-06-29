@@ -6,6 +6,19 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.8.0 - from v1.7.2
+
+**Action:** None.
+
+**Caveat:** spec2pr now spends one extra claude call per run, after
+plan-review, to forecast the final PR diff size. If the forecast
+exceeds the diff limit it stops early (SPEC2PR SPLIT forecast) and prints a
+recommended split instead of running implement. New flags --ignore-plan-limit
+and --ignore-pr-limit force a run past the respective size limit;
+--ignore-pr-limit also applies to review-pr. The /rulez:spec2pr command and
+mctl add spec2pr forward the spec2pr override flags; mctl add review-pr forwards
+--ignore-pr-limit. Set SPEC2PR_FORECAST=0 to disable the forecast step.
+
 ## To v1.7.2 - from v1.7.1
 
 **Action:** None.

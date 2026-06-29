@@ -28,15 +28,16 @@ test_full_happy_path_done() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
   assert_eq "0" "$RC" "full happy path exits 0"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "final done contract"
   assert_eq "3" "$(codex_calls)" "happy path makes three codex calls"
-  assert_eq "3" "$(claude_calls)" "happy path makes plan, review, and classify calls"
+  assert_eq "4" "$(claude_calls)" "happy path makes plan, forecast, review, and classify calls"
   assert_contains "$(last_status_line)" "SPEC2PR DONE" "status ends with done"
   assert_file_absent "$SPEC2PR_HOME/$ID.lock" "lock released"
   assert_not_contains "$(cat "$SPEC2PR_TEST_GH/gh.log")" "--approve" "spec2pr never self-approves its own PR"
@@ -47,11 +48,12 @@ test_pr_review_verbose_prints_clean_review() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"VERBOSE_CLEAN_PR_REVIEW"}'
 EOF
-  enqueue_claude 05-pr-review-b-classify <<'EOF'
+  enqueue_claude 06-pr-review-b-classify <<'EOF'
 printf '{"result":{"blockers_found":0,"majors_found":0}}'
 EOF
   SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
@@ -67,9 +69,10 @@ test_pr_review_dirty_round_pushes() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_dirty_pr_review 05-pr-review
-  queue_clean_pr_review 06-pr-review-clean
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_dirty_pr_review 06-pr-review
+  queue_clean_pr_review 07-pr-review-clean
   run_spec2pr "$SPEC"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
@@ -88,9 +91,10 @@ test_spec2pr_pr_review_ignores_ambient_reviewer_variables() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_dirty_pr_review 05-pr-review
-  queue_clean_pr_review 06-pr-review-clean
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_dirty_pr_review 06-pr-review
+  queue_clean_pr_review 07-pr-review-clean
   PR_REVIEWER=codex PR_REVIEWER_SELECTABLE=1 run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "ambient reviewer variables do not change spec2pr topology"
@@ -98,7 +102,7 @@ test_spec2pr_pr_review_ignores_ambient_reviewer_variables() {
   assert_contains "$OUT" "pr-review r1 blockers=1 majors=0" "default status has no reviewer label"
   assert_not_contains "$OUT" "reviewer=codex" "spec2pr does not switch to codex reviewer"
   assert_eq "4" "$(codex_calls)" "spec2pr uses codex for spec review, plan review, implementation, and pr fix"
-  assert_eq "5" "$(claude_calls)" "spec2pr uses claude for plan plus pr review/classify twice"
+  assert_eq "6" "$(claude_calls)" "spec2pr uses claude for plan, forecast, and pr review/classify twice"
   assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "schema=pr-fix.json" "spec2pr still uses codex pr-fix schema"
 }
 
@@ -107,14 +111,15 @@ test_pr_review_fix_schema_violation_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"MAJOR: missing review fix. Evidence: review-fix.txt absent."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify <<'EOF'
+  enqueue_claude 06-pr-review-b-classify <<'EOF'
 printf '{"result":{"blockers_found":0,"majors_found":1}}'
 EOF
-  enqueue 05-pr-review-fix <<'EOF'
+  enqueue 06-pr-review-fix <<'EOF'
 printf 'review fix\n' > review-fix.txt
 printf '{}'
 EOF
@@ -131,14 +136,15 @@ test_pr_review_fix_self_commit_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"MAJOR: missing review fix. Evidence: review-fix.txt absent."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify <<'EOF'
+  enqueue_claude 06-pr-review-b-classify <<'EOF'
 printf '{"result":{"blockers_found":0,"majors_found":1}}'
 EOF
-  enqueue 05-pr-review-fix <<'EOF'
+  enqueue 06-pr-review-fix <<'EOF'
 printf 'review fix\n' > review-fix.txt
 git add review-fix.txt
 git commit -q -m "codex self-committed pr fix"
@@ -157,8 +163,9 @@ test_pr_review_reviewer_edit_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf 'reviewer edit\n' > reviewer-edit.txt
 printf '{"result":"No issues, but I edited a file."}'
 EOF
@@ -173,11 +180,12 @@ test_pr_review_classifier_edit_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"No issues."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify <<'EOF'
+  enqueue_claude 06-pr-review-b-classify <<'EOF'
 printf 'classifier edit\n' > classifier-edit.txt
 printf '{"result":{"blockers_found":0,"majors_found":0}}'
 EOF
@@ -192,20 +200,21 @@ test_pr_review_malformed_classifier_retries_once() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"No issues."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify-bad <<'EOF'
+  enqueue_claude 06-pr-review-b-classify-bad <<'EOF'
 printf '{"result":"not json"}'
 EOF
-  enqueue_claude 05-pr-review-c-classify-good <<'EOF'
+  enqueue_claude 06-pr-review-c-classify-good <<'EOF'
 printf '%s' '{"result":"Here: {\"blockers_found\":0,\"majors_found\":0}"}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "malformed classifier retry exits 0"
-  assert_eq "4" "$(claude_calls)" "classifier malformed reply retried once after claude plan"
+  assert_eq "5" "$(claude_calls)" "classifier malformed reply retried once after claude plan + forecast"
   assert_contains "$OUT" "SPEC2PR DONE" "retry still finishes done"
 }
 
@@ -214,20 +223,21 @@ test_pr_review_fractional_classifier_count_retries_once() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"No issues."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify-bad <<'EOF'
+  enqueue_claude 06-pr-review-b-classify-bad <<'EOF'
 printf '{"result":{"blockers_found":0.5,"majors_found":0}}'
 EOF
-  enqueue_claude 05-pr-review-c-classify-good <<'EOF'
+  enqueue_claude 06-pr-review-c-classify-good <<'EOF'
 printf '{"result":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "fractional classifier count is retried"
-  assert_eq "4" "$(claude_calls)" "fractional classifier reply retried once after claude plan"
+  assert_eq "5" "$(claude_calls)" "fractional classifier reply retried once after claude plan + forecast"
   assert_contains "$OUT" "SPEC2PR DONE" "fractional retry still finishes done"
 }
 
@@ -236,14 +246,15 @@ test_pr_review_malformed_classifier_halts_after_retry() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review-a-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"No issues."}'
 EOF
-  enqueue_claude 05-pr-review-b-classify-bad <<'EOF'
+  enqueue_claude 06-pr-review-b-classify-bad <<'EOF'
 printf '{"result":"not json"}'
 EOF
-  enqueue_claude 05-pr-review-c-classify-bad <<'EOF'
+  enqueue_claude 06-pr-review-c-classify-bad <<'EOF'
 printf 'not a json envelope'
 EOF
   run_spec2pr "$SPEC"
@@ -257,7 +268,8 @@ test_oversized_diff_splits() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  enqueue 04-implement <<'EOF'
+  queue_clean_forecast 04-forecast
+  enqueue 05-implement <<'EOF'
 perl -e 'print "x" x 200000' > large-diff.txt
 git add large-diff.txt
 git commit -qm 'large implementation diff'
@@ -282,8 +294,13 @@ mkdir -p docs/superpowers/plans
 printf '{"result":"wrote plan"}'
 EOF
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  # The forecast gates on the implementation estimate alone (40 B here), so it
+  # fits under the lowered cap and the run proceeds to the pr-review diff gate --
+  # the same impl-only measurement this test exercises. The gate excludes the
+  # committed spec + plan (~5 KB), so the tiny implementation does not split.
   SPEC2PR_MAX_DIFF=4096 run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "large spec+plan with tiny impl does not split the diff"
@@ -297,7 +314,8 @@ test_review_fix_after_pushed_implementation_halts_before_pr() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "first run fails after pushed implementation"
   assert_contains "$OUT" "SPEC2PR HALT pr-create: gh pr create failed" "first run reaches PR create"
@@ -325,8 +343,9 @@ test_open_pr_with_review_fix_after_implementation_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review <<'EOF'
 printf 'pr-review failed\n' >&2
 exit 9
 EOF
@@ -335,14 +354,14 @@ EOF
   assert_contains "$OUT" "SPEC2PR HALT pr-review: claude pr-review-r1 failed" "first run halts in pr-review"
 
   printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
-  queue_clean_spec_review 06-spec-review
-  enqueue 07-plan-review <<'EOF'
+  queue_clean_spec_review 07-spec-review
+  enqueue 08-plan-review <<'EOF'
 printf '\nOpen PR review fix.\n' >> docs/superpowers/plans/toy-spec-plan.md
 printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"plan","summary":"plan needs update","evidence":"missing open PR fix"}],"notes":"fixed"}'
 EOF
-  queue_clean_plan_review 08-plan-review-clean
-  queue_implementation_commit 09-implement
-  queue_clean_pr_review 10-pr-review
+  queue_clean_plan_review 09-plan-review-clean
+  queue_implementation_commit 10-implement
+  queue_clean_pr_review 11-pr-review
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "open PR with stale implementation exits 1"
@@ -357,9 +376,10 @@ test_open_pr_resume_allows_prior_pr_review_fix_commits() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_dirty_pr_review 05-pr-review
-  enqueue_claude 06-pr-review-fail <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_dirty_pr_review 06-pr-review
+  enqueue_claude 07-pr-review-fail <<'EOF'
 printf 'second pr-review failed\n' >&2
 exit 9
 EOF
@@ -369,10 +389,10 @@ EOF
     "spec2pr: pr-review review fixes r1" "first run commits pr-review fix"
 
   printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
-  queue_clean_spec_review 07-spec-review
-  queue_clean_plan_review 08-plan-review
-  queue_clean_pr_review 09-pr-review
-  queue_implementation_commit 10-implement
+  queue_clean_spec_review 08-spec-review
+  queue_clean_plan_review 09-plan-review
+  queue_clean_pr_review 10-pr-review
+  queue_implementation_commit 11-implement
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "open PR resume after pr-review fix exits 0"
@@ -386,8 +406,9 @@ test_verbose_begin_markers_go_to_output_not_status_contract() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
 
   local out_file="$SANDBOX/verbose.out"
   local err_file="$SANDBOX/verbose.err"

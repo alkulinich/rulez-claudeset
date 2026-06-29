@@ -98,7 +98,10 @@ pr_review_engine_run() {
   local diff_size
   diff_size="$(wc -c < "$diff_file" | tr -d ' ')"
   if [ "$diff_size" -gt "$SPEC2PR_MAX_DIFF" ]; then
-    split diff "$diff_size" "$SPEC2PR_MAX_DIFF"
+    if [ "${IGNORE_PR_LIMIT:-}" != "1" ]; then
+      split diff "$diff_size" "$SPEC2PR_MAX_DIFF"
+    fi
+    status "OK" "diff size=$diff_size exceeds limit; overridden"
   fi
 
   local round review_prompt review_json review_file review_blockers review_majors status_reviewer

@@ -37,11 +37,14 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      also fatal:
      `plan_path`, `pr_number`.
    - After parsing `gate`, validate that it is exactly one of `spec`, `plan`,
-     or `diff`.
+     `diff`, or `forecast`.
    - Any other `gate` value is fatal; stop before invoking
      `superpowers:brainstorming`.
    - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
      line and extract `size` and `limit` when present.
+   - When `gate=forecast`, inspect the pasted blob evidence for
+     `SPLIT forecast est=N limit=M`; extract `est` as the size evidence and
+     treat it as `size=N` for downstream prompts.
    - Show helper warnings or errors from stderr, but do not parse stderr lines
      as keys.
 
@@ -62,8 +65,10 @@ If no blob argument is given, ask the user to paste the halt output and stop.
    Prime it with the extracted evidence and these directives:
    - Preserve and include the original pasted blob text as evidence.
    - `spec2pr`'s `<gate>` gate rejected this spec because size `N > limit M`.
-     If the pasted evidence did not include `size` and `limit`, say that they
-     were not present in the pasted evidence.
+     For `gate=forecast`, `N` comes from the pasted `est=` evidence rather than
+     a measured `size=` payload. If the pasted evidence did not include the
+     relevant size/limit pair, say that they were not present in the pasted
+     evidence.
      Decompose it into sequential, independently implementable sub-specs;
      default to `2`; minimize shared files.
    - Write both files in one pass to the computed part paths.
@@ -114,6 +119,17 @@ If no blob argument is given, ask the user to paste the halt output and stop.
        here.
    - If `gate=spec` or `gate=plan`:
      - State that there is no PR to clean up.
+     - Tell the operator to surface any stale local worktree or metadata
+       identifier/path from the original run evidence if available; otherwise
+       state that it was not parsed and cleanup must be found manually.
+     - Keep all cleanup commands print-only and manual; do not execute them
+       here.
+   - If `gate=forecast`:
+     - State that there is no PR to clean up because forecast stopped before
+       implement.
+     - Note that recommended split parts come from the forecast `summary` or
+       `parts` evidence, not a measured `size=<n>` payload; prefer them as a
+       brainstorming seed.
      - Tell the operator to surface any stale local worktree or metadata
        identifier/path from the original run evidence if available; otherwise
        state that it was not parsed and cleanup must be found manually.

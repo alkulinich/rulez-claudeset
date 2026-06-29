@@ -30,7 +30,7 @@ fi
 
 plan_path="$(grep -oE 'docs/superpowers/plans/[^[:space:]]+\.md' <<<"$content" | head -n1 || true)"
 
-gate="$(grep -oE 'SPLIT[[:space:]]+(spec|plan|diff)' <<<"$content" | head -n1 | awk '{print $2}' || true)"
+gate="$(grep -oE 'SPLIT[[:space:]]+(spec|plan|diff|forecast)([[:space:]]|$)' <<<"$content" | head -n1 | awk '{print $2}' || true)"
 if [ -z "$gate" ]; then
   gate="spec"
   warn "no SPLIT gate token found; defaulting gate=spec"

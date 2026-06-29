@@ -39,7 +39,7 @@ die() {
 }
 
 add_usage() {
-  die "usage: mctl add [--fast] spec2pr <spec.md> | mctl add [--fast] review-pr <pr#> [--reviewer <claude|codex>]"
+  die "usage: mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md> | mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]"
 }
 
 require_cmd() {
@@ -81,7 +81,7 @@ meta_get() {
 }
 
 write_meta() {
-  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}" fast="${11:-}"
+  local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}" fast="${11:-}" override_flags="${12:-}"
   cat > "$run_dir/meta" <<EOF
 kind=$kind
 token=$token
@@ -97,6 +97,9 @@ EOF
   fi
   if [ -n "$fast" ]; then
     printf 'fast=%s\n' "$fast" >> "$run_dir/meta"
+  fi
+  if [ -n "$override_flags" ]; then
+    printf 'override_flags=%s\n' "$override_flags" >> "$run_dir/meta"
   fi
 }
 
@@ -125,7 +128,7 @@ build_inner_runner_command() {
   local run_dir meta
   run_dir="$1"
   meta="$run_dir/meta"
-  local kind repo target spec_home wt_home reviewer fast runner exit_path runner_args
+  local kind repo target spec_home wt_home reviewer fast override_flags runner exit_path runner_args
   kind="$(meta_get "$meta" kind)"
   repo="$(meta_get "$meta" repo)"
   target="$(meta_get "$meta" target)"
@@ -133,11 +136,15 @@ build_inner_runner_command() {
   wt_home="$(meta_get "$meta" spec2pr_worktrees)"
   reviewer="$(meta_get "$meta" reviewer)"
   fast="$(meta_get "$meta" fast)"
+  override_flags="$(meta_get "$meta" override_flags)"
   runner="$(runner_for_kind "$kind")"
   exit_path="$run_dir/exit"
   runner_args="$(shell_quote "$target")"
   if [ -n "$fast" ]; then
     runner_args="--fast $runner_args"
+  fi
+  if [ -n "$override_flags" ]; then
+    runner_args="$override_flags $runner_args"
   fi
   if [ "$kind" = "review-pr" ] && [ -n "$reviewer" ]; then
     runner_args="--reviewer $(shell_quote "$reviewer") $runner_args"
@@ -191,6 +198,7 @@ cmd_add() {
   require_cmd script
 
   local fast="" reviewer="" kind arg repo target repo_slug name token session run_dir started
+  local ignore_plan_limit="" ignore_pr_limit="" override_flags=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --fast)
@@ -204,12 +212,37 @@ cmd_add() {
   done
   [ "$#" -ge 2 ] || add_usage
   kind="$1"
-  arg="$2"
-  shift 2
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ignore-plan-limit)
+        ignore_plan_limit=1
+        shift
+        ;;
+      --ignore-pr-limit)
+        ignore_pr_limit=1
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  [ "$#" -ge 1 ] || add_usage
+  arg="$1"
+  shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --fast)
         fast="1"
+        shift
+        ;;
+      --ignore-plan-limit)
+        ignore_plan_limit=1
+        shift
+        ;;
+      --ignore-pr-limit)
+        ignore_pr_limit=1
         shift
         ;;
       --reviewer)
@@ -230,6 +263,8 @@ cmd_add() {
   case "$kind" in
     spec2pr)
       [ -z "$reviewer" ] || die "--reviewer is only supported for review-pr"
+      [ -n "$ignore_plan_limit" ] && override_flags="${override_flags:+$override_flags }--ignore-plan-limit"
+      [ -n "$ignore_pr_limit" ] && override_flags="${override_flags:+$override_flags }--ignore-pr-limit"
       [ -f "$arg" ] || die "spec not found: $arg"
       repo="$(git_root_for_path "$arg")" || die "spec is not inside a git repository"
       target="$(canonical_file_path "$arg")" || die "could not resolve spec path: $arg"
@@ -253,6 +288,8 @@ cmd_add() {
           reviewer=""
         fi
       fi
+      [ -z "$ignore_plan_limit" ] || die "--ignore-plan-limit is only supported for spec2pr"
+      [ -n "$ignore_pr_limit" ] && override_flags="--ignore-pr-limit"
       [[ "$arg" =~ ^[0-9]+$ ]] || die "pr number must be numeric: $arg"
       repo="$(git_root_for_cwd)" || die "not inside a git repository"
       target="$arg"
@@ -274,7 +311,7 @@ cmd_add() {
   : > "$run_dir/brief.log"
   started="$(utc_now)"
   write_meta "$run_dir" "$kind" "$token" "$session" "$repo" "$started" \
-    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target" "$reviewer" "$fast"
+    "$(effective_spec2pr_home)" "$(effective_spec2pr_worktrees)" "$target" "$reviewer" "$fast" "$override_flags"
 
   launch_run "$run_dir"
   printf '%s\n' "$name"

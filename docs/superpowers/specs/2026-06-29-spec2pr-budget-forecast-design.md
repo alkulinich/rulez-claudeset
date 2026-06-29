@@ -39,8 +39,8 @@ Two further observations shape the design:
 ## Goals
 
 1. Move the most expensive size failure (diff gate) **earlier** — forecast the
-   implementation diff after `plan-review`, before `implement`, and stop early
-   with a split recommendation when it won't fit.
+   final PR diff after `plan-review`, before `implement`, and stop early with a
+   split recommendation when it won't fit.
 2. Give the operator manual override flags to force a run through a size limit
    they judge acceptable (e.g. a few percent over).
 
@@ -52,59 +52,142 @@ a split; the operator runs `spec2pr-split` by hand.
 
 ### 1. A new `forecast` step
 
-Runs **after `plan-review`, before the implement marker block** (between
-`spec2pr.sh:428` and `:430`). It is **not** a `--start-from` target — it runs
-automatically on the way to implement, so the `--start-from` surface
-(`spec-review|plan|plan-review|implementation`) is unchanged. The planner prompt
-at `spec2pr.sh:387` is **untouched** (approach B: a separate forecast call, not
-a budget baked into the planner).
+Runs automatically on the way to a **new** implement call, after `plan-review`
+has completed and after the existing implementation/PR resume checks prove that
+there is no valid local implementation, remote branch, or open PR to reuse. Put
+the decision point immediately before the code path that creates
+`$META_DIR/implement.prompt` and invokes `codex_call implement`, so a resumed run
+with valid implementation markers does not spend a forecast call or stop on a
+forecast split. It is **not** a `--start-from` target, so the `--start-from`
+surface (`spec-review|plan|plan-review|implementation`) is unchanged. The
+planner prompt at `spec2pr.sh:387` is **untouched** (approach B: a separate
+forecast call, not a budget baked into the planner).
 
 A `SPEC2PR_FORECAST=0` env kill-switch skips the step entirely.
 
 ### 2. Forecast call (claude, JSON)
 
-The forecast runs on **claude** via the existing `run_claude_json` path. Claude
-is chosen over codex deliberately: it spends a *separate quota* from the codex
-review/implement calls — one of the observed failures was codex `usage limit`
-exhaustion, and the forecast is an extra call on every run, so it must not pile
-onto the quota that already failed. Claude also authored the plan.
+The forecast runs on **claude** through a new fail-soft wrapper around
+`claude_json_attempt`, not through `run_claude_json`. `run_claude_json` is the
+right path for required claude calls because it `halt`s on process failure or
+invalid JSON; forecast is optional optimization and must be able to warn and
+continue (§7). The wrapper should reuse the existing claude invocation,
+worktree-cleanup, and JSON-validation behavior from `claude_json_attempt`, but
+return a status code to the caller instead of halting.
+
+Because the forecast prompt is read-only but claude still runs with repository
+write permissions, the wrapper must enforce that contract after every successful
+claude process. Capture the pre-call `HEAD` and require both that `HEAD` is
+unchanged and `git status --porcelain --untracked-files=all` is empty after the
+call. If claude edits, commits, or leaves untracked files, clean back to the
+pre-call boundary using the same cleanup path as other model-call contract
+failures, emit `SPEC2PR WARN forecast: claude modified worktree; proceeding to
+implement`, and do not trust or reuse that forecast output.
+
+Claude is chosen over codex deliberately: it spends a *separate quota* from the
+codex review/implement calls — one of the observed failures was codex `usage
+limit` exhaustion, and the forecast is an extra call on every run, so it must
+not pile onto the quota that already failed. Claude also authored the plan.
+
+Before the forecast call, measure the bytes already present in the eventual PR
+diff with `git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c`. This current
+diff includes the imported spec, plan, and any spec/plan-review commits, so it
+must be included in the forecast: the hard gate later measures the same
+`$BASE_SHA...HEAD` surface, not just implementation changes.
 
 Prompt (read-only): read the plan at `$WT_PLAN_REL` and the spec at
-`$WT_SPEC_REL`; edit nothing; list every file you would create or modify with
-rough added/changed LOC each; sum; multiply by the bytes-per-line constant for
-an estimated diff size in bytes; return the verdict. Output →
-`META_DIR/forecast.json`:
+`$WT_SPEC_REL`; edit nothing; list every implementation file you would create or
+modify with rough added/changed LOC each; sum; multiply by the bytes-per-line
+constant for an estimated implementation diff size in bytes; add the
+shell-provided current diff bytes to produce an estimated final PR diff size;
+return the verdict as the JSON object below in the claude envelope's `result`
+field. Store the raw claude envelope separately, for example at
+`META_DIR/forecast.claude.json`; extract and validate the forecast payload into
+`META_DIR/forecast.json`, which must contain the forecast object itself, not the
+claude envelope:
 
 ```json
 {
-  "files": [{"path": "lib/storage/pool.ts", "loc": 180}, ...],
-  "total_loc": 550,
-  "est_bytes": 22000,
-  "verdict": "fits",
-  "parts": ["part-1: helpers + types", "part-2: wiring + tests"]
+  "plan_sha256": "6c1f...",
+  "spec_sha256": "e3b0...",
+  "current_diff_bytes": 110000,
+  "files": [
+    {"path": "lib/storage/pool.ts", "loc": 180},
+    {"path": "tests/storage/pool.test.ts", "loc": 820}
+  ],
+  "total_loc": 1000,
+  "implementation_est_bytes": 40000,
+  "est_bytes": 150000,
+  "verdict": "exceeds",
+  "parts": ["part-1: helpers + types", "part-2: wiring + tests"],
+  "summary": "Forecast exceeds diff limit. Recommended split: part-1 helpers + types; part-2 wiring + tests."
 }
 ```
 
-`parts` is present only when `verdict` is `exceeds`. The bytes-per-line factor
-(`~40`) is a named constant, tunable in one place.
+`parts` and `summary` are present only when `verdict` is `exceeds`. The
+`summary` field is the operator-facing text printed before a forecast split, so
+recommended split parts are visible in normal output even when
+`SPEC2PR_VERBOSE` is unset. `plan_sha256` and `spec_sha256` are computed by the
+shell before the call and included in the forecast metadata for cache
+validation. The bytes-per-line factor (`~40`) is a named constant, tunable in
+one place. `est_bytes` is the estimated final PR diff size compared against
+`SPEC2PR_MAX_DIFF`; `implementation_est_bytes` is the implementation-only
+component.
+
+Validate `META_DIR/forecast.json` before making a decision: it must be an
+object with string `plan_sha256`, string `spec_sha256`, array `files` whose
+items have string `path` and non-negative integer `loc`, non-negative integer
+`total_loc`, non-negative integer `implementation_est_bytes`, non-negative
+integer `current_diff_bytes`, non-negative integer `est_bytes`, and `verdict`
+equal to `fits` or `exceeds`. Also require `total_loc` to equal the sum of
+`files[].loc`, `implementation_est_bytes` to equal
+`total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE`, and
+`est_bytes == current_diff_bytes + implementation_est_bytes`. Also require
+`current_diff_bytes` to equal the shell-measured
+`git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c` value from the current run;
+otherwise a stale or hallucinated current-diff component could make the
+forecast decision against the wrong final PR size. When `verdict` is `exceeds`,
+require non-empty string `summary` and a non-empty array of string `parts`; when
+it is `fits`, `summary` and `parts` may be absent. A valid claude envelope whose
+`result` cannot be parsed and validated into this payload is a malformed
+forecast payload (§7).
+
+Also validate the forecast hashes before any decision, not only during cache
+reuse: `plan_sha256` must equal the shell-computed sha256 of the current
+`$WT_PLAN_REL`, and `spec_sha256` must equal the shell-computed sha256 of the
+current `$WT_SPEC_REL`. A freshly generated forecast with mismatched hashes is a
+malformed forecast payload (§7) and must not be used to stop or continue the
+run.
 
 ### 3. Decision + early stop
 
 - `est_bytes <= SPEC2PR_MAX_DIFF` → status `SPEC2PR OK forecast: fits
   est=22000 limit=131072`; continue to implement.
 - `est_bytes > SPEC2PR_MAX_DIFF` **and** not `--ignore-pr-limit` → terminal
-  **`SPEC2PR SPLIT forecast est=<n> limit=131072`** via the existing `split()`
-  helper (exit 2). The `forecast` label distinguishes an *estimate* from a
-  measured diff. `forecast.json`'s recommended `parts` print to the operator via
-  `show_summary`. **No implement call is spent.** The parts are advisory input
+  **`SPEC2PR SPLIT forecast est=<n> limit=131072`** via a new forecast-specific
+  split helper, for example `split_forecast "$est_bytes" "$SPEC2PR_MAX_DIFF"`
+  implemented as `finish 2 "SPLIT forecast est=$1 limit=$2"`. Do not use the
+  existing `split()` helper for this path: its contract is measured `size=<n>`,
+  which is correct for spec/plan/diff gates but wrong for an estimate. The
+  `forecast` label distinguishes an estimate from a measured diff.
+  Print `forecast.json`'s recommended split summary to stdout
+  **unconditionally** before invoking `split_forecast`; do not rely on the
+  existing `show_summary` helper for this path because it is intentionally gated
+  by `SPEC2PR_VERBOSE`. `finish` exits, so printing after the split helper would
+  be unreachable. **No implement call is spent.** The parts are advisory input
   for a manual `spec2pr-split` run.
+- `est_bytes > SPEC2PR_MAX_DIFF` **and** `--ignore-pr-limit` → status
+  `SPEC2PR OK forecast: est=<n> exceeds limit; overridden`; continue to
+  implement.
 
 ### 4. Override flags
 
 - **`--ignore-plan-limit`** (spec2pr only) → sets `IGNORE_PLAN_LIMIT=1`. The
   plan-file gate at `spec2pr.sh:412` gains `&& [ -z "${IGNORE_PLAN_LIMIT:-}" ]`.
   Plan-file size has no forecast component (it is measured post-write), so this
-  flag touches only the hard gate.
+  flag touches only the hard gate. If the measured plan size exceeds
+  `SPEC2PR_MAX_PLAN` and this flag is set, emit
+  `SPEC2PR OK plan: size=<n> exceeds limit; overridden` before continuing.
 - **`--ignore-pr-limit`** (spec2pr **and** review-pr) → sets `IGNORE_PR_LIMIT=1`,
   which suppresses **both** the forecast early-stop (§3) **and** the hard diff
   gate at `pr-review-engine.sh:85` (`&& [ "${IGNORE_PR_LIMIT:-}" != 1 ]`). In
@@ -112,39 +195,116 @@ an estimated diff size in bytes; return the verdict. Output →
   is the `pr-103` case (a `review-pr` SPLIT at `diff size=140462`).
 
 The flags slot into the existing `while/case` arg loops at `spec2pr.sh:13` and
-`review-pr.sh:30`. When a flag forces past a limit, the status line records it,
-e.g. `SPEC2PR OK forecast: est=140000 exceeds limit; overridden`.
+`review-pr.sh:30`. When a flag forces past a measured diff limit, the shared
+engine emits the caller's contract prefix:
+`SPEC2PR OK pr-review: diff size=<n> exceeds limit; overridden` from spec2pr,
+or `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` from
+review-pr.
 
-### 5. Resume / caching
+The `/rulez:spec2pr` command wrapper must expose the same spec2pr override
+flags, not merely document them. Its usage becomes
+`/rulez:spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec-path>`; it
+parses those optional flags before the spec path, rejects unknown flags, and
+forwards the accepted flags to `scripts/spec2pr.sh` in the background command.
+`/rulez:spec2pr status` remains unchanged and takes no flags.
 
-On a re-run, if `forecast.json` already exists, reuse it and skip the call —
-mirroring the existing `plan exists` skip (`spec2pr.sh:419`) and the
-implementation markers. Resumes do not re-pay the claude call.
+The `mctl add` runner is also an operator entry point and must forward the same
+override flags as the underlying script it launches. Its usage becomes
+`mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md>`
+and
+`mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]`.
+It accepts and forwards both override flags for the `spec2pr` target, accepts
+and forwards only `--ignore-pr-limit` for the `review-pr` target, and rejects
+`--ignore-plan-limit` for `review-pr`.
 
-### 6. Error handling — fail-soft
+### 5. Split-tooling compatibility
+
+`SPEC2PR SPLIT forecast est=<n> limit=<n>` is a new split gate token. Update the
+manual split tooling that consumes spec2pr output so forecast splits are treated
+as first-class split events rather than falling through to a default gate:
+
+- `scripts/spec2pr-split-context.sh` must recognize `SPLIT forecast` in addition
+  to `SPLIT spec|plan|diff` and emit `gate=forecast` in its structured context.
+- `commands/rulez/spec2pr-split.md` must accept `gate=forecast` wherever it
+  currently validates `spec|plan|diff`, extract `est=N limit=M` from
+  `SPLIT forecast est=N limit=M` as the size evidence for the brainstorming
+  hand-off, and describe forecast splits as plan/spec-based manual split
+  requests whose recommended parts come from the forecast summary, not from a
+  measured `size=<n>` payload.
+- The split-context tests must include a `SPEC2PR SPLIT forecast est=<n>
+  limit=<n>` fixture so the helper does not regress to the old default behavior.
+
+### 6. Resume / caching
+
+On a re-run, reuse `forecast.json` and skip the call only when its
+`plan_sha256` matches the current `$WT_PLAN_REL` content and its `spec_sha256`
+matches the current `$WT_SPEC_REL` content, and its `current_diff_bytes` matches
+the current shell-measured `$BASE_SHA...HEAD` diff size. If either hash is
+missing or mismatched, or the stored current diff size is missing or mismatched,
+discard/regenerate the forecast before deciding whether to implement. If a
+regenerated forecast still has mismatched hashes or current diff bytes, treat it
+as a malformed forecast payload (§7) and continue to implement. This mirrors the
+existing `plan exists` skip (`spec2pr.sh:419`) and the implementation markers
+without letting a restarted or re-reviewed plan use stale size data.
+`--start-from spec-review|plan|plan-review` cleanup should remove
+all forecast artifacts, including `forecast.json`, `forecast.claude.json`, and
+any forecast extraction/temp files; `--start-from implementation` may keep them,
+subject to the hash validation above. Valid resumes do not re-pay the claude
+call.
+
+### 7. Error handling — fail-soft
 
 The forecast is an optimization; the hard `SPEC2PR_MAX_DIFF` gate remains as a
-backstop. If the forecast call errors or returns malformed JSON (after
-`run_claude_json`'s existing validation), emit a `WARN` status and **continue to
-implement** rather than `halt`. A transient claude hiccup must not block an
-otherwise-good run, and the backstop still protects correctness. This is the one
-deliberate deviation from the pipeline's usual fail-loud stance.
+backstop. If the forecast call errors or returns malformed JSON, emit a `WARN`
+status and **continue to implement** rather than `halt`. Implement this by
+calling the fail-soft forecast wrapper from §2 and branching on its return code:
 
-### 7. Status / contract surface
+- claude process failure (`claude_json_attempt` rc 2) → `SPEC2PR WARN forecast:
+  claude failed; proceeding to implement`.
+- invalid envelope JSON (`claude_json_attempt` rc 3) → `SPEC2PR WARN forecast:
+  invalid claude JSON; proceeding to implement`.
+- valid envelope but missing/malformed forecast payload → `SPEC2PR WARN
+  forecast: malformed forecast JSON; proceeding to implement`.
+- claude modified the worktree despite the read-only prompt → `SPEC2PR WARN
+  forecast: claude modified worktree; proceeding to implement`.
+
+A transient claude hiccup must not block an otherwise-good run, and the backstop
+still protects correctness. This is the one deliberate deviation from the
+pipeline's usual fail-loud stance.
+
+### 8. Status / contract surface
 
 New lines on the `spec2pr` contract:
 
 - `SPEC2PR OK forecast: fits est=<n> limit=131072`
 - `SPEC2PR OK forecast: est=<n> exceeds limit; overridden` (with
   `--ignore-pr-limit`)
+- `SPEC2PR OK plan: size=<n> exceeds limit; overridden` (with
+  `--ignore-plan-limit`)
+- `SPEC2PR OK pr-review: diff size=<n> exceeds limit; overridden` (with
+  `--ignore-pr-limit`)
 - `SPEC2PR WARN forecast: <reason>; proceeding to implement` (forecast error)
 - `SPEC2PR SPLIT forecast est=<n> limit=131072` (terminal; recommended parts
-  follow)
+  are printed before this line because `finish` exits)
+
+Update the `/rulez:spec2pr` completion handling so the new terminal
+`SPLIT forecast est=<n> limit=<n>` line is recognized as a split outcome and
+the user is directed to split the spec. Keep the existing measured-size
+handling for `SPLIT spec|plan|diff size=<n> limit=<n>` unchanged; forecast uses
+`est=<n>` because it is an estimate, not a measured size.
+
+New line on the `review-pr` contract:
+
+- `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` (with
+  `--ignore-pr-limit`)
 
 ## Testing
 
-Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
-`stub-codex.sh` model stubs. New cases:
+Forecast and script-level tests live in `tests/spec2pr/`, using the existing
+`stub-claude.sh` / `stub-codex.sh` model stubs. `mctl` coverage lives in
+`tests/mctl/`; command-wrapper behavior that is not currently exercised by a
+unit harness must be covered by read-through or manual dry-run verification.
+New cases:
 
 - forecast **fits** → run proceeds to implement.
 - forecast **exceeds** → `SPEC2PR SPLIT forecast`, no implement call spent,
@@ -154,7 +314,32 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   plan gate.
 - `review-pr --ignore-pr-limit` → diff over 128 KB but review proceeds.
 - forecast call error / malformed JSON → `WARN` + proceeds (fail-soft).
+- forecast attempts to modify, commit, or leave untracked files → worktree is
+  cleaned, `WARN`, and implement proceeds from the pre-forecast boundary.
 - `SPEC2PR_FORECAST=0` → forecast step skipped entirely.
+- forecast payload whose `total_loc` does not equal the sum of `files[].loc` or
+  whose `implementation_est_bytes` does not equal
+  `total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE` → `WARN` + proceeds
+  (fail-soft).
+- cached forecast with matching plan/spec hashes → reused without a new claude
+  call, as long as its `current_diff_bytes` also matches the current
+  shell-measured diff.
+- cached forecast with stale plan hash, spec hash, or current diff size →
+  discarded/regenerated before decision.
+- regenerated forecast with mismatched hashes, mismatched current diff bytes, or
+  inconsistent `est_bytes != current_diff_bytes + implementation_est_bytes` →
+  `WARN` + proceeds (fail-soft).
+- `mctl add spec2pr --ignore-pr-limit <spec>` and
+  `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded.
+- `mctl add review-pr --ignore-pr-limit <pr>` → accepted and forwarded;
+  `mctl add review-pr --ignore-plan-limit <pr>` → rejected.
+- `/rulez:spec2pr --ignore-pr-limit <spec>` and
+  `/rulez:spec2pr --ignore-plan-limit <spec>` → accepted and forwarded to the
+  background `scripts/spec2pr.sh` command; unknown flags are rejected before
+  launch, and `/rulez:spec2pr status` remains unchanged and accepts no flags.
+- `/rulez:spec2pr` completion handling recognizes
+  `SPEC2PR SPLIT forecast est=<n> limit=<n>` as a split outcome and keeps the
+  existing `SPLIT spec|plan|diff size=<n> limit=<n>` handling unchanged.
 
 ## Versioning
 
@@ -167,12 +352,13 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   **Action:** None.
 
   **Caveat:** spec2pr now spends one extra claude call per run, after
-  plan-review, to forecast the implementation diff size. If the forecast
+  plan-review, to forecast the final PR diff size. If the forecast
   exceeds the diff limit it stops early (SPEC2PR SPLIT forecast) and prints a
   recommended split instead of running implement. New flags --ignore-plan-limit
   and --ignore-pr-limit force a run past the respective size limit;
-  --ignore-pr-limit also applies to review-pr. Set SPEC2PR_FORECAST=0 to disable
-  the forecast step.
+  --ignore-pr-limit also applies to review-pr. The /rulez:spec2pr command and
+  mctl add spec2pr forward the spec2pr override flags. Set SPEC2PR_FORECAST=0
+  to disable the forecast step.
   ```
 
 ## Files
@@ -185,8 +371,19 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   diff gate.
 - **edit** `scripts/lib/spec2pr-runtime.sh` — bytes-per-line constant,
   `SPEC2PR_FORECAST` default, any shared forecast helper.
-- **edit** `commands/rulez/spec2pr.md`, `commands/rulez/review-pr.md` — document
-  the new flags.
+- **edit** `commands/rulez/spec2pr.md` — document the new spec2pr flags. There
+  is no `commands/rulez/review-pr.md` wrapper in this repo; document
+  `review-pr.sh --ignore-pr-limit` in `UPGRADE.md` and the script usage instead.
+  Also update the command wrapper to forward the accepted spec2pr flags and to
+  recognize `SPLIT forecast est=<n> limit=<n>` completion output.
+- **edit** `scripts/mctl.sh` and `tests/mctl/test-add.sh` — accept and forward
+  `--ignore-plan-limit` / `--ignore-pr-limit` for `mctl add spec2pr`; accept
+  and forward `--ignore-pr-limit` for `mctl add review-pr`; reject
+  `--ignore-plan-limit` for `review-pr`.
+- **edit** `commands/rulez/spec2pr-split.md`,
+  `scripts/spec2pr-split-context.sh`, and
+  `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
+  output as split-tooling input and keep the manual split hand-off working.
 - **add** `tests/spec2pr/test-forecast.sh` (or extend `test-stages.sh`) — the
   cases above.
 - **edit** `VERSION`, `UPGRADE.md` — minor bump + note.

@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
@@ -15,6 +15,14 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
       SPEC2PR_CODEX_FAST=1
+      shift
+      ;;
+    --ignore-plan-limit)
+      IGNORE_PLAN_LIMIT=1
+      shift
+      ;;
+    --ignore-pr-limit)
+      IGNORE_PR_LIMIT=1
       shift
       ;;
     --start-from)
@@ -259,6 +267,13 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
         "$META_DIR/implementation-ok"
       ;;
   esac
+  case "$START_FROM" in
+    spec-review|plan|plan-review)
+      rm -f "$META_DIR/forecast.json" \
+        "$META_DIR/forecast.claude.json" \
+        "$META_DIR/forecast.prompt"
+      ;;
+  esac
   status "OK" "restart from $START_FROM at $restart_boundary"
 fi
 
@@ -410,7 +425,11 @@ EOF
       '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
     plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
     if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
-      split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+      if [ "${IGNORE_PLAN_LIMIT:-}" = "1" ]; then
+        status "OK" "size=$plan_size exceeds limit; overridden"
+      else
+        split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+      fi
     fi
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
       git -C "$WORKTREE" add "$WT_PLAN_REL"
@@ -429,6 +448,95 @@ fi
 
 implementation_ok_record() {
   printf 'base=%s\nhead=%s\n' "$1" "$2"
+}
+
+forecast_decide() {
+  local f="$1" est
+  # Gate on the implementation estimate alone: the PR-review diff gate excludes
+  # the committed spec + plan, so the forecast must too (est_bytes, the total
+  # including those docs, is kept in the payload as informational only).
+  est="$(jq -r '.implementation_est_bytes' "$f")"
+  if [ "$est" -le "$SPEC2PR_MAX_DIFF" ]; then
+    status "OK" "fits est=$est limit=$SPEC2PR_MAX_DIFF"
+    return 0
+  fi
+  if [ "${IGNORE_PR_LIMIT:-}" = "1" ]; then
+    status "OK" "est=$est exceeds limit; overridden"
+    return 0
+  fi
+  jq -r '.summary // empty' "$f"
+  split_forecast "$est" "$SPEC2PR_MAX_DIFF"
+}
+
+forecast_before_implement() {
+  STAGE="forecast"
+  local plan_sha spec_sha cur_bytes pf rc
+  plan_sha="$(sha256_of "$WORKTREE/$WT_PLAN_REL")"
+  spec_sha="$(sha256_of "$WORKTREE/$WT_SPEC_REL")"
+  cur_bytes="$(git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c | tr -d ' ')"
+
+  # Resume/cache: reuse a forecast whose plan AND spec hashes still match the
+  # current artifacts AND whose current_diff_bytes still matches the live diff;
+  # otherwise discard and regenerate so a re-reviewed plan or changed PR surface
+  # never decides on stale size data.
+  if [ -f "$META_DIR/forecast.json" ] \
+      && forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
+    forecast_decide "$META_DIR/forecast.json"
+    return 0
+  fi
+  rm -f "$META_DIR/forecast.json" "$META_DIR/forecast.claude.json"
+
+  pf="$META_DIR/forecast.prompt"
+  cat > "$pf" <<EOF
+Read the implementation plan at $WT_PLAN_REL and the spec at $WT_SPEC_REL in
+this worktree. This is a READ-ONLY estimation task: do not edit, create, or
+delete any file; do not run git; do not commit, push, or open a PR.
+
+Estimate the size of the final pull-request diff this plan will produce:
+1. List every implementation file you would create or modify, with a rough
+   added/changed lines-of-code (loc) count for each.
+2. Sum the loc into total_loc.
+3. Multiply total_loc by $SPEC2PR_FORECAST_BYTES_PER_LINE bytes/line to get
+   implementation_est_bytes.
+4. Add the already-present diff bytes ($cur_bytes) to implementation_est_bytes
+   to get est_bytes (the estimated total PR diff, including the committed spec
+   and plan). This total is informational only.
+5. The PR-review diff gate measures the implementation alone; it excludes the
+   committed spec and plan. Set verdict to "exceeds" if
+   implementation_est_bytes > $SPEC2PR_MAX_DIFF, else "fits".
+   When "exceeds", also include a non-empty "parts" array (sequential,
+   independently implementable sub-plans) and a one-line "summary" recommending
+   the split.
+
+Return ONLY this JSON object as your result (no other prose):
+{"plan_sha256":"$plan_sha","spec_sha256":"$spec_sha","current_diff_bytes":$cur_bytes,"files":[{"path":"...","loc":0}],"total_loc":0,"implementation_est_bytes":0,"est_bytes":0,"verdict":"fits"}
+EOF
+
+  set +e
+  forecast_claude_attempt forecast "$pf" "$META_DIR/forecast.claude.json"
+  rc=$?
+  set -e
+  case "$rc" in
+    2) status "WARN" "claude failed; proceeding to implement"; return 0 ;;
+    3) status "WARN" "invalid claude JSON; proceeding to implement"; return 0 ;;
+    4) status "WARN" "claude modified worktree; proceeding to implement"; return 0 ;;
+  esac
+
+  if ! jq -e 'if (.result | type) == "object" then .result
+              else (.result | tostring | fromjson?) end
+              | select(type == "object")' \
+      "$META_DIR/forecast.claude.json" > "$META_DIR/forecast.json" 2>/dev/null; then
+    rm -f "$META_DIR/forecast.json"
+    status "WARN" "malformed forecast JSON; proceeding to implement"
+    return 0
+  fi
+  if ! forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
+    rm -f "$META_DIR/forecast.json"
+    status "WARN" "malformed forecast JSON; proceeding to implement"
+    return 0
+  fi
+
+  forecast_decide "$META_DIR/forecast.json"
 }
 
 STAGE="implement"
@@ -511,6 +619,10 @@ else
     if [ -n "$local_impl_head" ]; then
       status "OK" "implement exists local $local_impl_head"
     else
+      if [ "$SPEC2PR_FORECAST" != "0" ]; then
+        forecast_before_implement
+        STAGE="implement"
+      fi
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       pf="$META_DIR/implement.prompt"
       cat > "$pf" <<EOF
