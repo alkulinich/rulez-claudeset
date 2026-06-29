@@ -66,8 +66,8 @@ succeed on the first optimistic attempt is a `CHAIN HALT`.
 ### Orchestrator `scripts/spec2pr-chain.sh`
 
 Sources `lib/spec2pr-runtime.sh` with `CONTRACT_PREFIX=CHAIN` to reuse
-`acquire_lock`, `sanitize`, and dependency/default handling. The chain must not
-use runtime `status`, `finish`, or `halt` for user-visible chain outcomes:
+`sanitize` and dependency/default handling. The chain must not use runtime
+`status`, `finish`, or `halt` for user-visible chain outcomes:
 runtime `status` and `halt` always insert `$STAGE:`, while chain contract lines
 are intentionally stage-free (for example `CHAIN OK started specs=<n>` and
 `CHAIN HALT <slug>: <reason>`). Implement small local `chain_status` /
@@ -90,15 +90,19 @@ inputs that collide on ID cannot be chained safely.
 
 Takes a repo-scoped lock from that single validated repo so two chains cannot
 race on the same `main`:
-`acquire_lock "$SPEC2PR_HOME/<repo-id>.chain.lock"`, where `repo-id` is
+`chain_acquire_lock "$SPEC2PR_HOME/<repo-id>.chain.lock"`, where `repo-id` is
 `sanitize(basename(GIT_ROOT))-<short hash of GIT_ROOT's canonical path>`.
 The hash prevents unrelated checkouts that happen to share the same directory
 basename from blocking each other. Different repos do not block each other
 because each valid chain has exactly one repo; this is separate from spec2pr's
-per-spec locks. Because `acquire_lock` reports contention through runtime
-`halt`, wrap the call with `set +e`, capture its output, and on non-zero exit
-emit the chain contract line `CHAIN HALT: chain already running for <repo>`
-instead of leaking `CHAIN HALT preflight: ...`.
+per-spec locks. Do **not** call runtime `acquire_lock` for the chain lock:
+runtime lock failures call `halt`, which exits immediately and emits a
+stage-bearing runtime line before the chain can translate it. Instead implement a
+small local `chain_acquire_lock` that mirrors runtime's mkdir/pid/stale-lock
+logic, sets chain-local lock variables on success, and returns non-zero on
+contention or an initializing lock. On non-zero, emit exactly
+`CHAIN HALT: chain already running for <repo>`. `chain_finish` removes the lock
+only when the pid file still contains the current process id.
 
 The loop, for each spec in order:
 
