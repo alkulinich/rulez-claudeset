@@ -71,6 +71,22 @@ EOF
   rm -rf "$SANDBOX"
 }
 
+test_context_extracts_forecast_gate_from_messy_paste() {
+  make_sandbox
+  printf '# Import design\n' > "$PROJECT/docs/superpowers/specs/import-design.md"
+  write_blob <<'EOF'
+spec docs/superpowers/specs/import-design.md
+forecast says this is too big before implement
+SPEC2PR SPLIT forecast est=150000 limit=131072
+EOF
+  run_split_context "$SANDBOX/blob.txt"
+
+  assert_eq "0" "$RC" "forecast gate parse exits 0"
+  assert_contains "$OUT" "gate=forecast" "gate extracted as forecast"
+  assert_eq "" "$ERR" "valid forecast blob keeps stderr empty"
+  rm -rf "$SANDBOX"
+}
+
 test_context_extracts_pr_number_from_pr_url() {
   make_sandbox
   printf '# Import design\n' > "$PROJECT/docs/superpowers/specs/import-design.md"
