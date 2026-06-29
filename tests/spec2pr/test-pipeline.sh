@@ -269,6 +269,28 @@ EOF
   assert_contains "$OUT" "SPEC2PR SPLIT diff" "diff split contract"
 }
 
+test_diff_gate_excludes_spec_and_plan() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  # Planner writes a ~5 KB plan (legal: well under the 64 KB plan gate) so the
+  # committed spec+plan alone exceed the lowered diff cap, while the
+  # implementation stays tiny. Pre-fix this combination tripped SPEC2PR SPLIT
+  # diff; the gate now measures the implementation only.
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+{ printf '# Toy plan\n\n'; perl -e 'print "x" x 5000'; printf '\n'; } > docs/superpowers/plans/toy-spec-plan.md
+printf '{"result":"wrote plan"}'
+EOF
+  queue_clean_plan_review 03-plan-review
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  SPEC2PR_MAX_DIFF=4096 run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "large spec+plan with tiny impl does not split the diff"
+  assert_not_contains "$OUT" "SPEC2PR SPLIT diff" "spec+plan excluded from diff gate"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "run reaches done"
+}
+
 test_review_fix_after_pushed_implementation_halts_before_pr() {
   make_sandbox
   printf 'temporary failure\n' > "$SPEC2PR_TEST_GH/pr-create-fail"

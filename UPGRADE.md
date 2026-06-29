@@ -6,6 +6,15 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.7.2 - from v1.7.1
+
+**Action:** None.
+
+**Caveat:** spec2pr's PR-review diff-size gate (and the diff sent to the
+reviewer) now measures only the implementation, excluding the committed spec and
+plan files. Runs whose spec+plan previously pushed an otherwise-reasonable
+implementation over the 128 KB limit now pass. `review-pr.sh` is unaffected.
+
 ## To v1.7.1 - from v1.7.0
 
 **Action:** None.
