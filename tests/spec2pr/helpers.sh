@@ -176,3 +176,14 @@ printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s
   "$plan_sha" "$spec_sha" "$cur_bytes" "$total_loc" "$total_loc" "$impl_bytes" "$est"
 EOF
 }
+
+# Scaffold one UNTRACKED toy spec in $PROJECT under docs/superpowers/specs/.
+# Mirrors the make_sandbox toy spec (untracked, so spec2pr's import commit
+# fires). Echoes the spec's absolute path. <slug> is used verbatim as the file
+# stem, so the derived spec2pr SLUG equals <slug>.
+add_spec() { # <slug>
+  local slug="$1"
+  printf '# %s spec\n\nDo thing %s.\n' "$slug" "$slug" \
+    > "$PROJECT/docs/superpowers/specs/$slug.md"
+  printf '%s\n' "$PROJECT/docs/superpowers/specs/$slug.md"
+}
