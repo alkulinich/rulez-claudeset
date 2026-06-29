@@ -104,6 +104,22 @@ test_add_spec2pr_with_fast_persists_and_forwards_flag() {
   assert_contains "$log" "$SPEC" "runner forwards spec path"
 }
 
+test_add_spec2pr_forwards_size_override_flags() {
+  make_sandbox
+  run_mctl add spec2pr --ignore-plan-limit --ignore-pr-limit "$SPEC"
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add spec2pr override flags exits 0"
+  assert_eq "--ignore-plan-limit --ignore-pr-limit" "$(meta_value "$run_dir/meta" override_flags)" "override flags persisted"
+  assert_contains "$log" "$REPO_ROOT/scripts/spec2pr.sh" "runner uses spec2pr script"
+  assert_contains "$log" "--ignore-plan-limit" "runner forwards plan override"
+  assert_contains "$log" "--ignore-pr-limit" "runner forwards pr override"
+  assert_contains "$log" "$SPEC" "runner forwards spec path"
+}
+
 test_add_spec2pr_accepts_fast_after_target() {
   make_sandbox
   run_mctl add spec2pr "$SPEC" --fast
@@ -115,6 +131,23 @@ test_add_spec2pr_accepts_fast_after_target() {
   assert_eq "0" "$RC" "add spec2pr accepts --fast after target"
   assert_eq "1" "$(meta_value "$run_dir/meta" fast)" "suffix fast persisted in meta"
   assert_contains "$log" "--fast" "suffix fast forwards fast flag"
+}
+
+test_add_review_pr_forwards_ignore_pr_limit() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr --ignore-pr-limit 7 --reviewer codex
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add review-pr ignore-pr-limit exits 0"
+  assert_eq "--ignore-pr-limit" "$(meta_value "$run_dir/meta" override_flags)" "review-pr override flag persisted"
+  assert_contains "$log" "$REPO_ROOT/scripts/review-pr.sh" "runner uses review-pr script"
+  assert_contains "$log" "--ignore-pr-limit" "runner forwards review-pr override"
+  assert_contains "$log" "--reviewer" "runner still forwards reviewer flag"
+  assert_contains "$log" "'codex'" "runner forwards reviewer value"
+  assert_contains "$log" "'7'" "runner forwards PR number"
 }
 
 test_add_review_pr_with_fast_and_reviewer_persists_and_forwards_flags() {
@@ -174,6 +207,14 @@ test_add_default_runs_do_not_write_or_forward_fast() {
   assert_not_contains "$log" "--fast" "default runner does not forward fast"
 }
 
+test_add_review_pr_rejects_ignore_plan_limit() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr --ignore-plan-limit 7
+
+  assert_eq "1" "$RC" "review-pr rejects ignore-plan-limit"
+  assert_contains "$OUT" "--ignore-plan-limit is only supported for spec2pr" "review-pr plan override rejection message"
+}
+
 test_add_rejects_reviewer_for_spec2pr_and_invalid_review_pr_value() {
   make_sandbox
 
@@ -183,7 +224,7 @@ test_add_rejects_reviewer_for_spec2pr_and_invalid_review_pr_value() {
 
   run_mctl_in_dir "$REPO" add review-pr 7 --reviewer gpt
   assert_eq "1" "$RC" "invalid review-pr reviewer exits 1"
-  assert_contains "$OUT" "usage: mctl add [--fast] spec2pr <spec.md> | mctl add [--fast] review-pr <pr#> [--reviewer <claude|codex>]" "invalid reviewer prints add usage"
+  assert_contains "$OUT" "usage: mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md> | mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]" "invalid reviewer prints add usage"
 }
 
 test_add_refuses_missing_spec_non_numeric_pr_and_outside_repo() {
