@@ -14,20 +14,39 @@ run_chain() {
   # instead of recording a FAIL.
 }
 
-queue_chain_spec() { # <queue-prefix> <slug> [predecessor-slug]
-  local prefix="$1" slug="$2" predecessor="${3:-}"
-  enqueue "$prefix-01-spec-review" <<'EOF'
+queue_chain_spec() { # <queue-prefix> <slug> [prerequisite-file]
+  local prefix="$1" slug="$2" prerequisite="${3:-}"
+  local spec_review plan plan_review forecast implement pr_review_a pr_review_b
+  if [[ "$prefix" =~ ^[0-9]+$ ]]; then
+    spec_review="${prefix}a-$slug-spec-review"
+    plan="${prefix}b-$slug-plan"
+    plan_review="${prefix}c-$slug-plan-review"
+    forecast="${prefix}d-$slug-forecast"
+    implement="${prefix}e-$slug-implement"
+    pr_review_a="${prefix}f-$slug-pr-review-a-review"
+    pr_review_b="${prefix}g-$slug-pr-review-b-classify"
+  else
+    spec_review="$prefix-01-spec-review"
+    plan="$prefix-02-plan"
+    plan_review="$prefix-03-plan-review"
+    forecast="$prefix-04-forecast"
+    implement="$prefix-05-implement"
+    pr_review_a="$prefix-06-pr-review-a-review"
+    pr_review_b="$prefix-07-pr-review-b-classify"
+  fi
+
+  enqueue "$spec_review" <<'EOF'
 printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"clean"}'
 EOF
-  enqueue_claude "$prefix-02-plan" <<EOF
+  enqueue_claude "$plan" <<EOF
 mkdir -p docs/superpowers/plans
 printf '# $slug plan\n\nImplement marker $slug.\n' > docs/superpowers/plans/$slug-plan.md
 printf '{"result":"wrote plan"}'
 EOF
-  enqueue "$prefix-03-plan-review" <<'EOF'
+  enqueue "$plan_review" <<'EOF'
 printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"clean"}'
 EOF
-  enqueue_claude "$prefix-04-forecast" <<EOF
+  enqueue_claude "$forecast" <<EOF
 plan_sha="\$(sha256sum docs/superpowers/plans/$slug-plan.md | awk '{print \$1}')"
 spec_sha="\$(sha256sum docs/superpowers/specs/$slug.md | awk '{print \$1}')"
 base_sha="\$(git merge-base origin/main HEAD)"
@@ -36,9 +55,9 @@ est=\$((cur_bytes + 40))
 printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"marker-$slug.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}}' \
   "\$plan_sha" "\$spec_sha" "\$cur_bytes" "\$est"
 EOF
-  enqueue "$prefix-05-implement" <<EOF
-if [ -n "$predecessor" ] && [ ! -f "$SPEC2PR_HOME/project-$predecessor.merged" ]; then
-  echo "missing predecessor marker $predecessor" >&2
+  enqueue "$implement" <<EOF
+if [ -n "$prerequisite" ] && [ ! -f "$prerequisite" ]; then
+  echo "missing prerequisite $prerequisite" >&2
   exit 9
 fi
 printf '$slug\n' > marker-$slug.txt
@@ -46,12 +65,22 @@ git add marker-$slug.txt
 git commit -qm 'implement marker $slug'
 printf '{"status":"done","summary":"implemented $slug","blocked_reason":""}'
 EOF
-  enqueue_claude "$prefix-06-pr-review-a-review" <<'EOF'
+  enqueue_claude "$pr_review_a" <<'EOF'
 printf '{"result":"No blocker or major findings."}'
 EOF
-  enqueue_claude "$prefix-07-pr-review-b-classify" <<'EOF'
+  enqueue_claude "$pr_review_b" <<'EOF'
 printf '{"result":{"blockers_found":0,"majors_found":0}}'
 EOF
+}
+
+queue_chain_spec_dirty() { # <ordinal> <slug>
+  local ordinal="$1" slug="$2"
+  local prefix
+  for prefix in "${ordinal}a" "${ordinal}b" "${ordinal}c"; do
+    enqueue "$prefix-$slug-spec-review" <<EOF
+printf '{"blockers_found":1,"majors_found":0,"findings":[{"severity":"blocker","artifact":"docs/superpowers/specs/$slug.md","summary":"still blocked","evidence":"unchanged"}],"notes":""}'
+EOF
+  done
 }
 
 test_chain_script_avoids_bash4_associative_arrays() {
@@ -65,8 +94,8 @@ test_chain_happy_path() {
   b="$(add_spec chain-b)"
   c="$(add_spec chain-c)"
   queue_chain_spec 01-chain-a chain-a
-  queue_chain_spec 02-chain-b chain-b chain-a
-  queue_chain_spec 03-chain-c chain-c chain-b
+  queue_chain_spec 02-chain-b chain-b marker-chain-a.txt
+  queue_chain_spec 03-chain-c chain-c marker-chain-b.txt
 
   run_chain "$a" "$b" "$c"
 
@@ -86,6 +115,38 @@ test_chain_happy_path() {
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-a.txt 2>/dev/null || true)" "chain-a" "origin/main contains chain-a marker"
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-b.txt 2>/dev/null || true)" "chain-b" "origin/main contains chain-b marker"
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-c.txt 2>/dev/null || true)" "chain-c" "origin/main contains chain-c marker"
+}
+
+test_chain_mid_chain_stop() {
+  make_sandbox
+  local a b c
+  a="$(add_spec chain-a)"
+  b="$(add_spec chain-b)"
+  c="$(add_spec chain-c)"
+  queue_chain_spec 1 chain-a
+  queue_chain_spec_dirty 2 chain-b
+  queue_chain_spec 3 chain-c marker-chain-b.txt
+
+  local old_max_fix_rounds="${MAX_FIX_ROUNDS-}"
+  local had_max_fix_rounds=0
+  if [ "${MAX_FIX_ROUNDS+x}" = x ]; then
+    had_max_fix_rounds=1
+  fi
+  export MAX_FIX_ROUNDS=3
+  run_chain "$a" "$b" "$c"
+  if [ "$had_max_fix_rounds" -eq 1 ]; then
+    export MAX_FIX_ROUNDS="$old_max_fix_rounds"
+  else
+    unset MAX_FIX_ROUNDS
+  fi
+
+  assert_eq "1" "$RC" "mid-chain dirty exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-b: SPEC2PR DIRTY spec-review" "mid-chain dirty halt line"
+  assert_file_exists "$SPEC2PR_HOME/project-chain-a.merged" "chain-a marker exists before dirty halt"
+  assert_file_absent "$SPEC2PR_HOME/project-chain-b.merged" "chain-b marker absent after dirty halt"
+  assert_file_absent "$SPEC2PR_HOME/project-chain-c.merged" "chain-c marker absent after dirty halt"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" "only chain-a merge logged"
+  assert_file_exists "$SPEC2PR_TEST_FIXTURES/3a-chain-c-spec-review.sh" "chain-c spec-review fixture remains queued"
 }
 
 test_chain_done_line_preserves_worktree_paths_with_spaces() {
