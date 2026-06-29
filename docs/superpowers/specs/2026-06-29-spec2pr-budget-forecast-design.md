@@ -110,12 +110,15 @@ claude envelope:
 {
   "plan_sha256": "6c1f...",
   "spec_sha256": "e3b0...",
-  "current_diff_bytes": 18000,
-  "files": [{"path": "lib/storage/pool.ts", "loc": 180}, ...],
-  "total_loc": 550,
-  "implementation_est_bytes": 22000,
-  "est_bytes": 40000,
-  "verdict": "fits",
+  "current_diff_bytes": 110000,
+  "files": [
+    {"path": "lib/storage/pool.ts", "loc": 180},
+    {"path": "tests/storage/pool.test.ts", "loc": 820}
+  ],
+  "total_loc": 1000,
+  "implementation_est_bytes": 40000,
+  "est_bytes": 150000,
+  "verdict": "exceeds",
   "parts": ["part-1: helpers + types", "part-2: wiring + tests"],
   "summary": "Forecast exceeds diff limit. Recommended split: part-1 helpers + types; part-2 wiring + tests."
 }
