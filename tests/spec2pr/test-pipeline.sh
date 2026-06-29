@@ -294,8 +294,13 @@ mkdir -p docs/superpowers/plans
 printf '{"result":"wrote plan"}'
 EOF
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  # The forecast gates on the implementation estimate alone (40 B here), so it
+  # fits under the lowered cap and the run proceeds to the pr-review diff gate --
+  # the same impl-only measurement this test exercises. The gate excludes the
+  # committed spec + plan (~5 KB), so the tiny implementation does not split.
   SPEC2PR_MAX_DIFF=4096 run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "large spec+plan with tiny impl does not split the diff"

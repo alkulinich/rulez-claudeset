@@ -452,7 +452,10 @@ implementation_ok_record() {
 
 forecast_decide() {
   local f="$1" est
-  est="$(jq -r '.est_bytes' "$f")"
+  # Gate on the implementation estimate alone: the PR-review diff gate excludes
+  # the committed spec + plan, so the forecast must too (est_bytes, the total
+  # including those docs, is kept in the payload as informational only).
+  est="$(jq -r '.implementation_est_bytes' "$f")"
   if [ "$est" -le "$SPEC2PR_MAX_DIFF" ]; then
     status "OK" "fits est=$est limit=$SPEC2PR_MAX_DIFF"
     return 0
@@ -496,8 +499,11 @@ Estimate the size of the final pull-request diff this plan will produce:
 3. Multiply total_loc by $SPEC2PR_FORECAST_BYTES_PER_LINE bytes/line to get
    implementation_est_bytes.
 4. Add the already-present diff bytes ($cur_bytes) to implementation_est_bytes
-   to get est_bytes (the estimated final PR diff size in bytes).
-5. Set verdict to "exceeds" if est_bytes > $SPEC2PR_MAX_DIFF, else "fits".
+   to get est_bytes (the estimated total PR diff, including the committed spec
+   and plan). This total is informational only.
+5. The PR-review diff gate measures the implementation alone; it excludes the
+   committed spec and plan. Set verdict to "exceeds" if
+   implementation_est_bytes > $SPEC2PR_MAX_DIFF, else "fits".
    When "exceeds", also include a non-empty "parts" array (sequential,
    independently implementable sub-plans) and a one-line "summary" recommending
    the split.
