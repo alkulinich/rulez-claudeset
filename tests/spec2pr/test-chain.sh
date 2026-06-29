@@ -117,6 +117,36 @@ test_chain_happy_path() {
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-c.txt 2>/dev/null || true)" "chain-c" "origin/main contains chain-c marker"
 }
 
+test_chain_resume_skips_merged() {
+  make_sandbox
+  local a b c a_sha
+  a="$(add_spec chain-a)"
+  b="$(add_spec chain-b)"
+  c="$(add_spec chain-c)"
+
+  printf 'chain-a\n' > "$PROJECT/marker-chain-a.txt"
+  git -C "$PROJECT" add marker-chain-a.txt
+  git -C "$PROJECT" commit -qm 'simulate merged chain-a'
+  git -C "$PROJECT" push -q origin main
+  a_sha="$(git -C "$PROJECT" rev-parse origin/main)"
+  {
+    printf 'pr=https://example.com/pr/1\n'
+    printf 'merge=%s\n' "$a_sha"
+    printf 'merged_at=2026-06-29T00:00:00Z\n'
+  } > "$SPEC2PR_HOME/project-chain-a.merged"
+
+  queue_chain_spec 2 chain-b marker-chain-a.txt
+  queue_chain_spec 3 chain-c marker-chain-b.txt
+
+  run_chain "$a" "$b" "$c"
+
+  assert_eq "0" "$RC" "resume chain exits 0"
+  assert_contains "$OUT" "CHAIN OK skipped chain-a (already merged)" "resume skips already-merged chain-a"
+  assert_contains "$OUT" "CHAIN DONE merged=3/3" "resume chain done count includes skipped spec"
+  assert_eq "2" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" "only unmerged specs call gh pr merge"
+  assert_file_absent "$SPEC2PR_WORKTREES/project-chain-a" "skipped chain-a worktree absent"
+}
+
 test_chain_mid_chain_stop() {
   make_sandbox
   local a b c
