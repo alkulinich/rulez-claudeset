@@ -79,7 +79,11 @@ confirm it exists, derive `GIT_ROOT` with
 same `GIT_ROOT`. A mixed-repository invocation is a terminal
 `CHAIN HALT preflight: all specs must be in the same git repository`. This
 chain is for dependent specs in one repo; multi-repo orchestration is out of
-scope.
+scope. Preflight also derives every spec's `ID` using the exact same
+repo-slug/spec-slug formula below and rejects duplicates before any spec runs:
+`CHAIN HALT preflight: duplicate spec id <ID>`. The single-spec tool stores
+worktrees, metadata, branches, and markers by that slug family, so two ordered
+inputs that collide on ID cannot be chained safely.
 
 Takes a repo-scoped lock from that single validated repo so two chains cannot
 race on the same `main`:
@@ -96,7 +100,14 @@ The loop, for each spec in order:
 1. ID = <repo-slug>-<spec-slug>     # sanitize(basename(GIT_ROOT)) + "-" + sanitize(stem),
                                      # GIT_ROOT via `git -C <specdir> rev-parse --show-toplevel`,
                                      # mirroring spec2pr.sh:62-70.
-   If "$SPEC2PR_HOME/<ID>.merged" exists → CHAIN OK skipped <slug>; continue.
+   If "$SPEC2PR_HOME/<ID>.merged" exists:
+      - read its merge commit field,
+      - read current origin/main via `git -C <repo> ls-remote origin refs/heads/main`,
+      - verify the marker commit is an ancestor of current origin/main
+        (fetching that commit if needed for the local ancestry check).
+      Valid marker → CHAIN OK skipped <slug>; continue.
+      Missing/unparseable marker commit or commit not reachable from current
+      origin/main → CHAIN HALT <slug>: stale merged marker; stop.
 2. Run, capturing stdout:  bash <dir>/spec2pr.sh [--fast] <spec>
 3. Branch on its exit code:
      0  DONE   → parse `pr=<url> worktree=<wt>` from the captured terminal line → merge.
@@ -128,10 +139,11 @@ gh pr merge <url> --squash --delete-branch
 
 ### Merged markers, resume, cleanup
 
-On a successful merge write `"$SPEC2PR_HOME/<ID>.merged"` containing the PR URL,
-the merge commit, and a timestamp. Step 1 skips any spec whose marker exists, so
-re-running after a `HALT` skips everything already merged and restarts at the
-offender — resume needs no stored cursor.
+On a successful merge write `"$SPEC2PR_HOME/<ID>.merged"` containing parseable
+`pr=`, `merge=`, and `merged_at=` lines. Step 1 skips only specs whose marker's
+`merge=` commit is still reachable from the current remote `main`, so re-running
+after a `HALT` skips everything already merged and restarts at the offender
+without trusting a stale local marker — resume needs no stored cursor.
 
 Then tear down (the chain owns the cleanup the single-spec tool skips):
 
@@ -173,13 +185,18 @@ one-shot alternative: `/rulez:spec2pr-chain <part-1-path> <part-2-path>`.
 - **`spec2pr.sh` is never modified** — the orchestrator only invokes it and
   reads its contract.
 - **Resume is idempotent**: a merged spec is skipped (marker) and cannot be
-  re-pushed (branch + worktree torn down, remote branch deleted).
+  re-pushed (branch + worktree torn down, remote branch deleted), but only while
+  the marker's recorded merge commit is still reachable from current
+  `origin/main`.
 - **Any non-clean merge halts** in this part — no partial/auto recovery. The
   chain leaves merged specs merged and the failing spec's PR open.
 - **Repo lock** prevents two concurrent chains from interleaving merges into one
   `main`; `CHAIN HALT: chain already running for <repo>` if held.
 - **Single-repo input** is required and checked before any spec runs. The chain
   must not silently process specs from different repositories under one lock.
+- **Duplicate derived IDs are rejected** before any spec runs. A duplicate ID
+  would collide on spec2pr branch/worktree/metadata/marker names, so it is a
+  preflight halt rather than a resume shortcut.
 - **stdout capture** is the source for the PR URL + worktree path; the
   orchestrator does not read spec2pr's internal meta files.
 
@@ -204,6 +221,11 @@ real `spec2pr.sh`; only model and `gh` boundaries are stubbed.
 - **Mixed-repo rejection** — two valid spec paths from different git roots halt
   in preflight before any `spec2pr.sh` run or merge attempt, with no merged
   markers written.
+- **Duplicate-ID rejection** — two spec paths in the same repo that derive the
+  same `<repo-slug>-<spec-slug>` halt in preflight before any `spec2pr.sh` run
+  or merge attempt.
+- **Stale marker rejection** — a marker whose recorded `merge=` commit is absent
+  from current `origin/main` halts instead of skipping that spec.
 
 Supporting: `stub-gh.sh` gains a `pr merge` case (success default;
 `pr-merge-fail` fixture → stderr + exit 9). On success it simulates GitHub's
