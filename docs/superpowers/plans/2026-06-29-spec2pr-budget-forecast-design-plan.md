@@ -108,7 +108,21 @@ In the `while [ "$#" -gt 0 ]` arg loop (currently `:14`), add two cases before t
       ;;
 ```
 
-- [ ] **Step 3: Guard the plan-file gate in `scripts/spec2pr.sh`**
+- [ ] **Step 3: Update `scripts/spec2pr.sh` usage for the new flags**
+
+Change `usage()` from:
+
+```bash
+halt "usage: spec2pr.sh [--fast] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+```
+
+to:
+
+```bash
+halt "usage: spec2pr.sh [--fast] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+```
+
+- [ ] **Step 4: Guard the plan-file gate in `scripts/spec2pr.sh`**
 
 Replace the plan-size gate (currently `:411-414`):
 
@@ -134,7 +148,7 @@ with:
 
 (`STAGE` is `plan` here, so `status "OK" "size=..."` renders `SPEC2PR OK plan: size=<n> exceeds limit; overridden`.)
 
-- [ ] **Step 4: Write the failing test — diff-limit override (append to `tests/spec2pr/test-review-pr.sh`)**
+- [ ] **Step 5: Write the failing test — diff-limit override (append to `tests/spec2pr/test-review-pr.sh`)**
 
 Locate an existing clean review-pr test in this file to copy its sandbox/fixture setup (e.g. the test asserting "clean path: review + classify"). Add a test that forces an over-limit diff and passes `--ignore-pr-limit`. Use the same helpers that test file already uses to stand up a PR worktree; the key new assertions are:
 
@@ -157,12 +171,12 @@ test_review_pr_ignore_pr_limit_proceeds_past_diff_gate() {
 
 If `tests/spec2pr/test-review-pr.sh` has no reusable worktree/run helpers with these exact names, model this test on the closest existing oversized-diff or clean test in that file: the only behavior under test is "diff over 128 KB + `--ignore-pr-limit` ⇒ no SPLIT, override status printed, review proceeds". Keep the two `assert_contains` lines above verbatim.
 
-- [ ] **Step 5: Run the diff-override test to verify it fails**
+- [ ] **Step 6: Run the diff-override test to verify it fails**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 ignore_pr_limit`
 Expected: FAIL — `--ignore-pr-limit` is not yet parsed by `review-pr.sh`, so it hits the `usage` halt or the diff gate still splits.
 
-- [ ] **Step 6: Add flag parsing to `scripts/review-pr.sh`**
+- [ ] **Step 7: Add flag parsing to `scripts/review-pr.sh`**
 
 In the `while [ "$#" -gt 0 ]` arg loop (currently `:31`), add before the `--*)` catch-all:
 
@@ -173,7 +187,23 @@ In the `while [ "$#" -gt 0 ]` arg loop (currently `:31`), add before the `--*)` 
       ;;
 ```
 
-- [ ] **Step 7: Guard the diff gate in `scripts/lib/pr-review-engine.sh`**
+- [ ] **Step 8: Update `scripts/review-pr.sh` usage for the new flag**
+
+Change `usage()` from:
+
+```bash
+halt "usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>"
+```
+
+to:
+
+```bash
+halt "usage: review-pr.sh [--fast] [--ignore-pr-limit] [--reviewer <claude|codex>] <pr-number|pr-url>"
+```
+
+Update any existing `tests/spec2pr/test-review-pr.sh` assertions that check the usage string so they expect the new `--ignore-pr-limit` form.
+
+- [ ] **Step 9: Guard the diff gate in `scripts/lib/pr-review-engine.sh`**
 
 Replace the diff-size gate (currently `:85-87`):
 
@@ -197,17 +227,17 @@ with:
 
 (`STAGE` is `pr-review` here; `CONTRACT_PREFIX` is `SPEC2PR` from spec2pr and `PRREVIEW` from review-pr, so the same line serves both contracts.)
 
-- [ ] **Step 8: Run the diff-override test to verify it passes**
+- [ ] **Step 10: Run the diff-override test to verify it passes**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 ignore_pr_limit`
 Expected: PASS for `test_review_pr_ignore_pr_limit_proceeds_past_diff_gate`.
 
-- [ ] **Step 9: Run the full suite — confirm no regressions in existing measured-gate tests**
+- [ ] **Step 11: Run the full suite — confirm no regressions in existing measured-gate tests**
 
 Run: `bash tests/spec2pr/run-tests.sh`
 Expected: `N tests run, 0 failed`.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add scripts/spec2pr.sh scripts/review-pr.sh scripts/lib/pr-review-engine.sh \
@@ -1106,7 +1136,17 @@ Change `add_usage()` to:
 die "usage: mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md> | mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]"
 ```
 
-- [ ] **Step 4: Persist override flags in metadata**
+- [ ] **Step 4: Update existing mctl usage assertions**
+
+Update existing `tests/mctl/test-add.sh` assertions that compare against the old `add_usage()` string (for example the invalid-reviewer assertion) so they expect:
+
+```text
+usage: mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md> | mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]
+```
+
+This is required in addition to the new override tests; otherwise the full mctl suite will fail after the usage string is corrected.
+
+- [ ] **Step 5: Persist override flags in metadata**
 
 Extend `write_meta()` with a twelfth optional parameter:
 
@@ -1122,7 +1162,7 @@ if [ -n "$override_flags" ]; then
 fi
 ```
 
-- [ ] **Step 5: Parse target-specific override flags in `cmd_add()`**
+- [ ] **Step 6: Parse target-specific override flags in `cmd_add()`**
 
 Add local state:
 
@@ -1176,7 +1216,7 @@ In the `review-pr)` case:
 [ -n "$ignore_pr_limit" ] && override_flags="--ignore-pr-limit"
 ```
 
-- [ ] **Step 6: Forward persisted override flags from `build_inner_runner_command()`**
+- [ ] **Step 7: Forward persisted override flags from `build_inner_runner_command()`**
 
 Read the value:
 
@@ -1196,22 +1236,22 @@ fi
 The value is safe to reuse as plain tokens because it is generated internally
 from the fixed allow-list above, never from arbitrary user text.
 
-- [ ] **Step 7: Pass override metadata to `write_meta()`**
+- [ ] **Step 8: Pass override metadata to `write_meta()`**
 
 Update the `write_meta` call in `cmd_add()` to pass `"$override_flags"` after
 `"$fast"`.
 
-- [ ] **Step 8: Run the focused mctl tests to verify they pass**
+- [ ] **Step 9: Run the focused mctl tests to verify they pass**
 
 Run: `bash tests/mctl/run-tests.sh 2>&1 | grep -E 'override|ignore_pr|ignore_plan'`
 Expected: PASS.
 
-- [ ] **Step 9: Run the mctl suite**
+- [ ] **Step 10: Run the mctl suite**
 
 Run: `bash tests/mctl/run-tests.sh`
 Expected: `N tests run, 0 failed`.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add scripts/mctl.sh tests/mctl/test-add.sh
