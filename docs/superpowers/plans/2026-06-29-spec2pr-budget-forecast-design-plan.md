@@ -76,9 +76,8 @@ perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
 printf '{"result":"large"}'
 EOF
   queue_clean_plan_review 03-plan-review
-  queue_clean_forecast 04-forecast
-  queue_spec2pr_subject_implementation_commit 05-implement
-  queue_clean_pr_review 06-pr-review
+  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
   run_spec2pr --ignore-plan-limit "$SPEC"
 
   assert_eq "0" "$RC" "ignore-plan-limit run reaches done"
@@ -88,7 +87,9 @@ EOF
 }
 ```
 
-Note: `queue_clean_forecast` is defined in Task 3. This test will be runnable end-to-end only after Task 3 wires the forecast in; until then it fails at the forecast call (acceptable for the override-line assertion below, which is verified by the diff-override test in this task and re-confirmed when the suite is green at the end of Task 3). For Task 1's own green bar, verify the override line via the review-pr diff test (Step 4) which has no forecast dependency.
+Note: Task 3 adds a forecast call before implement. When Task 3 is wired in,
+update this test by inserting `queue_clean_forecast 04-forecast` between
+plan-review and implement, then renumber the implement/pr-review fixtures.
 
 - [ ] **Step 2: Add flag parsing to `scripts/spec2pr.sh`**
 
@@ -202,7 +203,7 @@ Expected: PASS for `test_review_pr_ignore_pr_limit_proceeds_past_diff_gate`.
 - [ ] **Step 9: Run the full suite — confirm no regressions in existing measured-gate tests**
 
 Run: `bash tests/spec2pr/run-tests.sh`
-Expected: the pre-existing tests still pass. The new `test_ignore_plan_limit_proceeds_past_plan_gate` will fail until Task 3 (it needs the forecast wired in); that is expected and is fixed at the end of Task 3.
+Expected: `N tests run, 0 failed`.
 
 - [ ] **Step 10: Commit**
 
@@ -660,12 +661,18 @@ In the `elif [ "$ls_remote_rc" -eq 2 ]` branch, inside the `else` that runs a fr
     else
       if [ "$SPEC2PR_FORECAST" != "0" ]; then
         forecast_before_implement
+        STAGE="implement"
       fi
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       pf="$META_DIR/implement.prompt"
 ```
 
 (This is after the open-PR check, the remote-branch check, and the `local_impl_head` reuse check — exactly the spec's "no valid local implementation, remote branch, or open PR to reuse" boundary. A resumed run with valid markers never reaches this `else`, so it spends no forecast call.)
+
+The explicit `STAGE="implement"` restoration is required because
+`forecast_before_implement` sets the global stage to `forecast` for its contract
+lines. Without restoring it, the subsequent implement status/halt lines would be
+mislabelled as forecast output.
 
 - [ ] **Step 6: Run the new integration tests to verify they pass**
 
@@ -687,7 +694,7 @@ For each failing test that runs a fresh implement (NOT the resume/skip tests, wh
    - `tests/spec2pr/test-pipeline.sh:230` — `"4"` → `"5"`
    - `tests/spec2pr/test-resume-recovery.sh:327` — `"3"` → `"4"`
 3. Leave `codex_calls` assertions unchanged (forecast is a claude call). Resume tests whose `codex_calls` count proves implement was skipped (e.g. test-stages `:181,:342,:368,:404,:492`) need **no** forecast fixture and **no** count change — confirm they still pass.
-4. Also enqueue `queue_clean_forecast` in `test_ignore_plan_limit_proceeds_past_plan_gate` (Task 1, Step 1) — already written to expect `04-forecast`; confirm it now passes.
+4. Also enqueue `queue_clean_forecast` in `test_ignore_plan_limit_proceeds_past_plan_gate` (Task 1, Step 1) between plan-review and implement, then renumber the implement/pr-review fixtures; confirm it still passes.
 
 Repeat until `bash tests/spec2pr/run-tests.sh` reports `0 failed`.
 
