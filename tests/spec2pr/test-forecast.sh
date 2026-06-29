@@ -192,6 +192,34 @@ EOF
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "malformed fail-soft reaches done"
 }
 
+test_forecast_recovers_fenced_json() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  # A valid payload (same arithmetic as queue_clean_forecast) but wrapped in a
+  # prose preamble + a ```json fence, the way the model did on a real run. The
+  # extractor must recover it instead of warning "malformed forecast JSON".
+  enqueue_claude 04-forecast <<'EOF'
+plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
+spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+est=$((cur_bytes + 40))
+payload=$(printf '{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}' "$plan_sha" "$spec_sha" "$cur_bytes" "$est")
+prose=$(printf 'Here are my per-file estimates.\n\n```json\n%s\n```' "$payload")
+jq -n --arg r "$prose" '{result: $r}'
+EOF
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "fenced forecast JSON is recovered and run reaches done"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "recovered forecast reports fits"
+  assert_not_contains "$OUT" "malformed forecast JSON" "fenced JSON not treated as malformed"
+  assert_file_exists "$SPEC2PR_HOME/$ID/forecast.json" "forecast payload extracted from fence"
+}
+
 test_forecast_worktree_modification_is_cleaned_and_warns() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
