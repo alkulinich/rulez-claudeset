@@ -203,9 +203,12 @@ as first-class split events rather than falling through to a default gate:
 
 - `scripts/spec2pr-split-context.sh` must recognize `SPLIT forecast` in addition
   to `SPLIT spec|plan|diff` and emit `gate=forecast` in its structured context.
-- `commands/rulez/spec2pr-split.md` should describe forecast splits as
-  plan/spec-based manual split requests whose recommended parts come from the
-  forecast summary, not from a measured `size=<n>` payload.
+- `commands/rulez/spec2pr-split.md` must accept `gate=forecast` wherever it
+  currently validates `spec|plan|diff`, extract `est=N limit=M` from
+  `SPLIT forecast est=N limit=M` as the size evidence for the brainstorming
+  hand-off, and describe forecast splits as plan/spec-based manual split
+  requests whose recommended parts come from the forecast summary, not from a
+  measured `size=<n>` payload.
 - The split-context tests must include a `SPEC2PR SPLIT forecast est=<n>
   limit=<n>` fixture so the helper does not regress to the old default behavior.
 
@@ -318,8 +321,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   diff gate.
 - **edit** `scripts/lib/spec2pr-runtime.sh` — bytes-per-line constant,
   `SPEC2PR_FORECAST` default, any shared forecast helper.
-- **edit** `commands/rulez/spec2pr.md`, `commands/rulez/review-pr.md` — document
-  the new flags.
+- **edit** `commands/rulez/spec2pr.md` — document the new spec2pr flags. There
+  is no `commands/rulez/review-pr.md` wrapper in this repo; document
+  `review-pr.sh --ignore-pr-limit` in `UPGRADE.md` and the script usage instead.
 - **edit** `commands/rulez/spec2pr-split.md`,
   `scripts/spec2pr-split-context.sh`, and
   `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
