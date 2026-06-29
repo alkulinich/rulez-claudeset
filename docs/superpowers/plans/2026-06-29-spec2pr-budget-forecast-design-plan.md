@@ -792,8 +792,9 @@ test_forecast_stale_hash_regenerates() {
 
   assert_eq "0" "$RC" "stale-cache resume regenerates and reaches done"
   assert_contains "$OUT" "SPEC2PR OK forecast: fits est=1040 limit=131072" "regenerated forecast decides fits"
-  assert_eq "deadbeef" "$(jq -r 'select(.==null) // empty' /dev/null; jq -r '.plan_sha256' "$fj" | grep -c deadbeef || true)" \
-    "regenerated payload no longer carries the corrupted hash" 2>/dev/null || true
+  local cur_plan_sha
+  cur_plan_sha="$(sha256sum "$SPEC2PR_WORKTREES/$ID/docs/superpowers/plans/toy-spec-plan.md" | awk '{print $1}')"
+  assert_eq "$cur_plan_sha" "$(jq -r '.plan_sha256' "$fj")" "regenerated payload carries the live plan hash"
 }
 
 test_forecast_regenerated_mismatch_warns_and_proceeds() {
@@ -830,16 +831,6 @@ test_forecast_start_from_plan_review_clears_forecast_artifacts() {
   assert_file_absent "$SPEC2PR_HOME/$ID/forecast.claude.json" "start-from plan-review removed raw envelope"
 }
 ```
-
-The third assertion in `test_forecast_stale_hash_regenerates` is awkward to express; simplify it to a direct check that the regenerated `forecast.json` validates against the *current* worktree hashes:
-
-```bash
-  local cur_plan_sha
-  cur_plan_sha="$(sha256sum "$SPEC2PR_WORKTREES/$ID/docs/superpowers/plans/toy-spec-plan.md" | awk '{print $1}')"
-  assert_eq "$cur_plan_sha" "$(jq -r '.plan_sha256' "$fj")" "regenerated payload carries the live plan hash"
-```
-
-Replace the awkward assertion line with the block above.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
