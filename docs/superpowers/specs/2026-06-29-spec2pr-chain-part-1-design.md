@@ -72,9 +72,12 @@ runtime `status` and `halt` always insert `$STAGE:`, while chain contract lines
 are intentionally stage-free (for example `CHAIN OK started specs=<n>` and
 `CHAIN HALT <slug>: <reason>`). Implement small local `chain_status` /
 `chain_finish` helpers that write the exact `CHAIN` lines below to stdout and
-the chain log, then clean up the acquired lock before exiting. Arg parse:
-`--fast` (forwarded to each `spec2pr.sh`), a `status` subcommand, and the
-ordered spec list.
+the chain log, then clean up the acquired lock before exiting. Because sourcing
+`spec2pr-runtime.sh` also installs its `on_exit` trap, `chain_finish` must set
+the runtime `FINISHED=1` before it exits; otherwise the runtime trap will append
+a bogus `CHAIN HALT preflight: unexpected exit` after every intentional chain
+outcome. Arg parse: `--fast` (forwarded to each `spec2pr.sh`), a `status`
+subcommand, and the ordered spec list.
 
 Before taking the lock, preflight every spec path: resolve its absolute path,
 confirm it exists, derive `GIT_ROOT` with
