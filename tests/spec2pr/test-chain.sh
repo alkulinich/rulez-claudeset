@@ -147,6 +147,22 @@ test_chain_resume_skips_merged() {
   assert_file_absent "$SPEC2PR_WORKTREES/project-chain-a" "skipped chain-a worktree absent"
 }
 
+test_chain_stale_marker_halts() {
+  make_sandbox
+  local a; a="$(add_spec chain-a)"
+  {
+    printf 'pr=https://example.com/pr/1\n'
+    printf 'merge=0000000000000000000000000000000000000000\n'
+    printf 'merged_at=2026-06-29T00:00:00Z\n'
+  } > "$SPEC2PR_HOME/project-chain-a.merged"
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "stale marker exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-a: stale merged marker" "stale marker halt line"
+  assert_eq "0" "$(codex_calls)" "no codex calls run on stale-marker halt"
+}
+
 test_chain_mid_chain_stop() {
   make_sandbox
   local a b c
