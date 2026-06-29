@@ -77,16 +77,24 @@ an estimated diff size in bytes; return the verdict. Output →
 
 ```json
 {
+  "plan_sha256": "6c1f...",
+  "spec_sha256": "e3b0...",
   "files": [{"path": "lib/storage/pool.ts", "loc": 180}, ...],
   "total_loc": 550,
   "est_bytes": 22000,
   "verdict": "fits",
-  "parts": ["part-1: helpers + types", "part-2: wiring + tests"]
+  "parts": ["part-1: helpers + types", "part-2: wiring + tests"],
+  "summary": "Forecast exceeds diff limit. Recommended split: part-1 helpers + types; part-2 wiring + tests."
 }
 ```
 
-`parts` is present only when `verdict` is `exceeds`. The bytes-per-line factor
-(`~40`) is a named constant, tunable in one place.
+`parts` and `summary` are present only when `verdict` is `exceeds`. The
+`summary` field is the operator-facing text consumed by the existing
+`show_summary` helper, so recommended split parts are visible without changing
+that helper's contract. `plan_sha256` and `spec_sha256` are computed by the
+shell before the call and included in the forecast metadata for cache
+validation. The bytes-per-line factor (`~40`) is a named constant, tunable in
+one place.
 
 ### 3. Decision + early stop
 
@@ -117,9 +125,15 @@ e.g. `SPEC2PR OK forecast: est=140000 exceeds limit; overridden`.
 
 ### 5. Resume / caching
 
-On a re-run, if `forecast.json` already exists, reuse it and skip the call —
-mirroring the existing `plan exists` skip (`spec2pr.sh:419`) and the
-implementation markers. Resumes do not re-pay the claude call.
+On a re-run, reuse `forecast.json` and skip the call only when its
+`plan_sha256` matches the current `$WT_PLAN_REL` content and its `spec_sha256`
+matches the current `$WT_SPEC_REL` content. If either hash is missing or
+mismatched, discard/regenerate the forecast before deciding whether to
+implement. This mirrors the existing `plan exists` skip (`spec2pr.sh:419`) and
+the implementation markers without letting a restarted or re-reviewed plan use
+stale size data. `--start-from spec-review|plan|plan-review` cleanup should
+remove `forecast.json`; `--start-from implementation` may keep it, subject to
+the hash validation above. Valid resumes do not re-pay the claude call.
 
 ### 6. Error handling — fail-soft
 
