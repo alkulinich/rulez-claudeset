@@ -70,9 +70,19 @@ Sources `lib/spec2pr-runtime.sh` to reuse `status` / `finish` / `halt`,
 `CONTRACT_PREFIX=CHAIN`. Arg parse: `--fast` (forwarded to each `spec2pr.sh`),
 a `status` subcommand, and the ordered spec list.
 
-Takes a repo-scoped lock so two chains cannot race on the same `main`:
+Before taking the lock, preflight every spec path: resolve its absolute path,
+confirm it exists, derive `GIT_ROOT` with
+`git -C <specdir> rev-parse --show-toplevel`, and require all specs to share the
+same `GIT_ROOT`. A mixed-repository invocation is a terminal
+`CHAIN HALT preflight: all specs must be in the same git repository`. This
+chain is for dependent specs in one repo; multi-repo orchestration is out of
+scope.
+
+Takes a repo-scoped lock from that single validated repo so two chains cannot
+race on the same `main`:
 `acquire_lock "$SPEC2PR_HOME/<repo-slug>.chain.lock"`. Different repos do not
-block each other; this is separate from spec2pr's per-spec locks.
+block each other because each valid chain has exactly one repo; this is separate
+from spec2pr's per-spec locks.
 
 The loop, for each spec in order:
 
@@ -158,6 +168,8 @@ one-shot alternative: `/rulez:spec2pr-chain <part-1-path> <part-2-path>`.
   chain leaves merged specs merged and the failing spec's PR open.
 - **Repo lock** prevents two concurrent chains from interleaving merges into one
   `main`; `CHAIN HALT: chain already running for <repo>` if held.
+- **Single-repo input** is required and checked before any spec runs. The chain
+  must not silently process specs from different repositories under one lock.
 - **stdout capture** is the source for the PR URL + worktree path; the
   orchestrator does not read spec2pr's internal meta files.
 
@@ -169,15 +181,25 @@ one-shot alternative: `/rulez:spec2pr-chain <part-1-path> <part-2-path>`.
 real `spec2pr.sh`; only model and `gh` boundaries are stubbed.
 
 - **Happy chain** — 3 toy specs all reach DONE → 3 `gh pr merge` calls logged, 3
-  `<ID>.merged` markers, 3 worktrees removed, `CHAIN DONE merged=3/3`.
+  `<ID>.merged` markers, 3 worktrees removed, `CHAIN DONE merged=3/3`. The
+  stubbed merge must also advance the bare origin's `main` from the PR
+  worktree, and the test must assert each later spec2pr worktree's base includes
+  a file or commit introduced by the previous spec. This proves the next spec
+  really branches from a freshly merged `main`, not just that merge commands
+  were logged.
 - **Mid-chain stop** — spec 2 forced to `DIRTY` → `CHAIN HALT`, spec 1 merged,
   spec 3 never runs (its fixtures unconsumed).
 - **Resume** — re-run the mid-chain case after spec 2 is made fixable → spec 1
   skipped (marker present, no second merge), runs from spec 2 to `CHAIN DONE`.
+- **Mixed-repo rejection** — two valid spec paths from different git roots halt
+  in preflight before any `spec2pr.sh` run or merge attempt, with no merged
+  markers written.
 
 Supporting: `stub-gh.sh` gains a `pr merge` case (success default;
-`pr-merge-fail` fixture → stderr + exit 9). `helpers.sh` gains `add_spec <name>`
-to scaffold several toy specs in one sandbox.
+`pr-merge-fail` fixture → stderr + exit 9). On success it simulates GitHub's
+merge by updating the bare origin's `main` from the current PR worktree so the
+next real `spec2pr.sh` fetch observes the predecessor. `helpers.sh` gains
+`add_spec <name>` to scaffold several toy specs in one sandbox.
 
 ## Versioning
 
