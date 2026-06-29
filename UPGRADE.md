@@ -6,6 +6,13 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.8.2 - from v1.8.1
+
+**Action:** None.
+
+**Caveat:** the co-author trailer on commits made by /rulez:create-pr and
+/rulez:push-fixes now reads "Claude Opus 4.8 (1M context)" (was a stale "4.6").
+
 ## To v1.8.1 - from v1.8.0
 
 **Action:** None.
