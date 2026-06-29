@@ -106,3 +106,125 @@ test_forecast_payload_valid_rejects_est_inconsistency() {
   assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "implementation bytes must use bytes-per-line constant"
   rm -rf "$SANDBOX"
 }
+
+test_forecast_fits_proceeds_to_implement() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "forecast fits run reaches done"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "fits status printed"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "fits run reaches done"
+  assert_file_exists "$SPEC2PR_HOME/$ID/forecast.json" "forecast payload extracted"
+  assert_file_exists "$SPEC2PR_HOME/$ID/forecast.claude.json" "raw claude envelope stored"
+}
+
+test_forecast_exceeds_splits_without_implement() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_exceeds_forecast 04-forecast
+  # Implement fixture intentionally present but must NOT be consumed.
+  queue_spec2pr_subject_implementation_commit 05-implement
+  run_spec2pr "$SPEC"
+
+  assert_eq "2" "$RC" "forecast exceeds exits 2 (split)"
+  assert_contains "$OUT" "SPEC2PR SPLIT forecast est=" "forecast split token printed"
+  assert_contains "$OUT" "limit=131072" "forecast split limit printed"
+  assert_contains "$OUT" "Recommended split: part-1 helpers" "recommended split summary printed before split"
+  assert_eq "2" "$(codex_calls)" "no implement codex call spent (only spec-review + plan-review)"
+}
+
+test_forecast_exceeds_overridden_by_ignore_pr_limit() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_exceeds_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr --ignore-pr-limit "$SPEC"
+
+  assert_eq "0" "$RC" "ignore-pr-limit overrides forecast split"
+  assert_contains "$OUT" "SPEC2PR OK forecast: est=" "override status printed"
+  assert_contains "$OUT" "exceeds limit; overridden" "override suffix printed"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "override run reaches done"
+}
+
+test_forecast_claude_failure_warns_and_proceeds() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue_claude 04-forecast <<'EOF'
+echo "boom" >&2
+exit 7
+EOF
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "forecast claude failure does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: claude failed; proceeding to implement" "process-failure warn"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "fail-soft run reaches done"
+}
+
+test_forecast_malformed_payload_warns_and_proceeds() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue_claude 04-forecast <<'EOF'
+printf '{"result":{"verdict":"maybe"}}'
+EOF
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "malformed forecast payload does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: malformed forecast JSON; proceeding to implement" "malformed warn"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "malformed fail-soft reaches done"
+}
+
+test_forecast_worktree_modification_is_cleaned_and_warns() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue_claude 04-forecast <<'EOF'
+printf 'sneaky\n' > sneaky.txt
+git add sneaky.txt
+git commit -qm "forecast should not commit"
+printf '{"result":{"verdict":"fits"}}'
+EOF
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "worktree-modifying forecast does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: claude modified worktree; proceeding to implement" "worktree-modified warn"
+  assert_not_contains "$(git -C "$wt" log --format=%s)" "forecast should not commit" "forecast commit was discarded"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "cleaned fail-soft reaches done"
+}
+
+test_forecast_kill_switch_skips_step() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  # No forecast fixture queued: the step must not call claude at all.
+  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  SPEC2PR_FORECAST=0 run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "kill-switch run reaches done"
+  assert_not_contains "$OUT" "forecast" "no forecast status lines emitted"
+  assert_file_absent "$SPEC2PR_HOME/$ID/forecast.json" "no forecast payload written"
+}

@@ -443,6 +443,78 @@ implementation_ok_record() {
   printf 'base=%s\nhead=%s\n' "$1" "$2"
 }
 
+forecast_decide() {
+  local f="$1" est
+  est="$(jq -r '.est_bytes' "$f")"
+  if [ "$est" -le "$SPEC2PR_MAX_DIFF" ]; then
+    status "OK" "fits est=$est limit=$SPEC2PR_MAX_DIFF"
+    return 0
+  fi
+  if [ "${IGNORE_PR_LIMIT:-}" = "1" ]; then
+    status "OK" "est=$est exceeds limit; overridden"
+    return 0
+  fi
+  jq -r '.summary // empty' "$f"
+  split_forecast "$est" "$SPEC2PR_MAX_DIFF"
+}
+
+forecast_before_implement() {
+  STAGE="forecast"
+  local plan_sha spec_sha cur_bytes pf rc
+  plan_sha="$(sha256_of "$WORKTREE/$WT_PLAN_REL")"
+  spec_sha="$(sha256_of "$WORKTREE/$WT_SPEC_REL")"
+  cur_bytes="$(git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c | tr -d ' ')"
+
+  pf="$META_DIR/forecast.prompt"
+  cat > "$pf" <<EOF
+Read the implementation plan at $WT_PLAN_REL and the spec at $WT_SPEC_REL in
+this worktree. This is a READ-ONLY estimation task: do not edit, create, or
+delete any file; do not run git; do not commit, push, or open a PR.
+
+Estimate the size of the final pull-request diff this plan will produce:
+1. List every implementation file you would create or modify, with a rough
+   added/changed lines-of-code (loc) count for each.
+2. Sum the loc into total_loc.
+3. Multiply total_loc by $SPEC2PR_FORECAST_BYTES_PER_LINE bytes/line to get
+   implementation_est_bytes.
+4. Add the already-present diff bytes ($cur_bytes) to implementation_est_bytes
+   to get est_bytes (the estimated final PR diff size in bytes).
+5. Set verdict to "exceeds" if est_bytes > $SPEC2PR_MAX_DIFF, else "fits".
+   When "exceeds", also include a non-empty "parts" array (sequential,
+   independently implementable sub-plans) and a one-line "summary" recommending
+   the split.
+
+Return ONLY this JSON object as your result (no other prose):
+{"plan_sha256":"$plan_sha","spec_sha256":"$spec_sha","current_diff_bytes":$cur_bytes,"files":[{"path":"...","loc":0}],"total_loc":0,"implementation_est_bytes":0,"est_bytes":0,"verdict":"fits"}
+EOF
+
+  set +e
+  forecast_claude_attempt forecast "$pf" "$META_DIR/forecast.claude.json"
+  rc=$?
+  set -e
+  case "$rc" in
+    2) status "WARN" "claude failed; proceeding to implement"; return 0 ;;
+    3) status "WARN" "invalid claude JSON; proceeding to implement"; return 0 ;;
+    4) status "WARN" "claude modified worktree; proceeding to implement"; return 0 ;;
+  esac
+
+  if ! jq -e 'if (.result | type) == "object" then .result
+              else (.result | tostring | fromjson?) end
+              | select(type == "object")' \
+      "$META_DIR/forecast.claude.json" > "$META_DIR/forecast.json" 2>/dev/null; then
+    rm -f "$META_DIR/forecast.json"
+    status "WARN" "malformed forecast JSON; proceeding to implement"
+    return 0
+  fi
+  if ! forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
+    rm -f "$META_DIR/forecast.json"
+    status "WARN" "malformed forecast JSON; proceeding to implement"
+    return 0
+  fi
+
+  forecast_decide "$META_DIR/forecast.json"
+}
+
 STAGE="implement"
 if ! PR_URL="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')"; then
   halt "gh pr list failed"
@@ -523,6 +595,10 @@ else
     if [ -n "$local_impl_head" ]; then
       status "OK" "implement exists local $local_impl_head"
     else
+      if [ "$SPEC2PR_FORECAST" != "0" ]; then
+        forecast_before_implement
+        STAGE="implement"
+      fi
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
       pf="$META_DIR/implement.prompt"
       cat > "$pf" <<EOF

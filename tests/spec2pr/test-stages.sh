@@ -66,8 +66,9 @@ test_plan_written_and_committed() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
@@ -136,8 +137,9 @@ perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
 printf '{"result":"large"}'
 EOF
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr --ignore-plan-limit "$SPEC"
 
   assert_eq "0" "$RC" "ignore-plan-limit run reaches done"
@@ -199,15 +201,16 @@ test_resume_skips_plan_when_file_exists() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "initial plan run exits 0"
 
   printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
-  queue_clean_spec_review 06-spec-review
-  queue_clean_plan_review 07-plan-review
-  queue_clean_pr_review 08-pr-review
+  queue_clean_spec_review 07-spec-review
+  queue_clean_plan_review 08-plan-review
+  queue_clean_pr_review 09-pr-review
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "resume with existing plan exits 0"
@@ -220,8 +223,9 @@ test_implement_pushes_and_creates_pr() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
@@ -245,8 +249,9 @@ test_implement_pr_body_links_spec_and_plan_to_github_head() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
@@ -265,8 +270,9 @@ test_fast_mode_only_marks_implementation_codex_call() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
 
   run_spec2pr --fast "$SPEC"
 
@@ -276,7 +282,7 @@ test_fast_mode_only_marks_implementation_codex_call() {
   assert_eq "0" "$RC" "fast spec2pr exits 0"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "fast spec2pr reaches done"
   assert_contains "$invocations" "schema=implement.json" "implementation call was made"
-  assert_contains "$invocations" "schema=implement.json fixture=04-implement.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "implementation call uses fast mode"
+  assert_contains "$invocations" "schema=implement.json fixture=05-implement.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "implementation call uses fast mode"
   assert_not_contains "$invocations" "schema=review.json fixture=01-spec-review.sh args=exec --enable fast_mode" "spec review call is not fast"
   assert_not_contains "$invocations" "schema=review.json fixture=03-plan-review.sh args=exec --enable fast_mode" "plan review call is not fast"
 }
@@ -286,8 +292,9 @@ test_fast_mode_flag_is_accepted_after_spec_path() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
 
   run_spec2pr "$SPEC" --fast
 
@@ -296,7 +303,7 @@ test_fast_mode_flag_is_accepted_after_spec_path() {
 
   assert_eq "0" "$RC" "spec2pr accepts --fast after spec path"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "suffix fast run reaches done"
-  assert_contains "$invocations" "schema=implement.json fixture=04-implement.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "suffix fast implementation uses fast mode"
+  assert_contains "$invocations" "schema=implement.json fixture=05-implement.sh args=exec --enable fast_mode -c service_tier=\"fast\"" "suffix fast implementation uses fast mode"
 }
 
 test_default_spec2pr_does_not_use_fast_mode() {
@@ -304,8 +311,9 @@ test_default_spec2pr_does_not_use_fast_mode() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
 
   run_spec2pr "$SPEC"
 
@@ -321,7 +329,8 @@ test_implement_blocked_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_blocked_implementation 04-implement
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "blocked implementation exits 1"
@@ -333,7 +342,8 @@ test_implement_uncommitted_changes_halt() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_uncommitted_implementation 04-implement
+  queue_clean_forecast 04-forecast
+  queue_uncommitted_implementation 05-implement
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "dirty implementation exits 1"
@@ -345,7 +355,8 @@ test_implement_done_without_new_commit_halts() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_noop_implementation 04-implement
+  queue_clean_forecast 04-forecast
+  queue_noop_implementation 05-implement
   run_spec2pr "$SPEC"
 
   assert_eq "1" "$RC" "noop implementation exits 1"
@@ -357,15 +368,16 @@ test_resume_skips_implement_when_pr_open() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "initial PR create exits 0"
 
   printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
-  queue_clean_spec_review 06-spec-review
-  queue_clean_plan_review 07-plan-review
-  queue_clean_pr_review 08-pr-review
+  queue_clean_spec_review 07-spec-review
+  queue_clean_plan_review 08-plan-review
+  queue_clean_pr_review 09-pr-review
   run_spec2pr "$SPEC"
 
   local wt_cwd
@@ -382,15 +394,16 @@ test_pr_create_failure_rerun_skips_implement_and_retries_create() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "failed PR create exits 1"
   assert_contains "$OUT" "SPEC2PR HALT pr-create: gh pr create failed" "pr create failure halt"
 
   rm "$SPEC2PR_TEST_GH/pr-create-fail"
-  queue_clean_spec_review 05-spec-review
-  queue_clean_plan_review 06-plan-review
-  queue_clean_pr_review 07-pr-review
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_pr_review 08-pr-review
   run_spec2pr "$SPEC"
 
   local wt_cwd
@@ -421,14 +434,15 @@ EOF
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
   PATH="$SANDBOX/git-wrapper:$PATH" SPEC2PR_TEST_FAIL_PUSH=1 run_spec2pr "$SPEC"
   PATH="$old_path"
   assert_eq "1" "$RC" "push failure exits 1"
   assert_contains "$OUT" "SPEC2PR HALT pr-create: git push failed" "push failure halt"
-  queue_clean_spec_review 05-spec-review
-  queue_clean_plan_review 06-plan-review
-  queue_clean_pr_review 07-pr-review
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_pr_review 08-pr-review
   PATH="$SANDBOX/git-wrapper:$PATH" run_spec2pr "$SPEC"
   PATH="$old_path"
 
@@ -443,17 +457,19 @@ test_stale_head_marker_does_not_skip_implementation() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_blocked_implementation 04-implement
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "blocked implementation exits before marker forge"
 
   local wt="$SPEC2PR_WORKTREES/$ID"
   git -C "$wt" rev-parse HEAD > "$SPEC2PR_HOME/$ID/implementation-head"
 
-  queue_clean_spec_review 05-spec-review
-  queue_clean_plan_review 06-plan-review
-  queue_implementation_commit 07-implement
-  queue_clean_pr_review 08-pr-review
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "forged head-only marker does not skip implementation"
@@ -468,7 +484,8 @@ test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_blocked_implementation 04-implement
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "blocked implementation exits before range forge"
 
@@ -476,10 +493,11 @@ test_forged_spec2pr_only_marker_range_does_not_skip_implementation() {
   git -C "$wt" rev-parse HEAD~1 > "$SPEC2PR_HOME/$ID/implementation-base"
   git -C "$wt" rev-parse HEAD > "$SPEC2PR_HOME/$ID/implementation-head"
 
-  queue_clean_spec_review 05-spec-review
-  queue_clean_plan_review 06-plan-review
-  queue_implementation_commit 07-implement
-  queue_clean_pr_review 08-pr-review
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "forged spec2pr-only marker does not skip implementation"
@@ -495,7 +513,8 @@ test_pr_create_failure_rerun_halts_on_ls_remote_error() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
   run_spec2pr "$SPEC"
   assert_eq "1" "$RC" "failed PR create exits 1 before ls-remote regression"
 
@@ -514,9 +533,9 @@ exec "$real_git" "\$@"
 EOF
   chmod +x "$SANDBOX/git-wrapper/git"
 
-  queue_clean_spec_review 05-spec-review
-  queue_clean_plan_review 06-plan-review
-  queue_implementation_commit 07-implement
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_implementation_commit 08-implement
   PATH="$SANDBOX/git-wrapper:$PATH"
   run_spec2pr "$SPEC"
   PATH="$old_path"

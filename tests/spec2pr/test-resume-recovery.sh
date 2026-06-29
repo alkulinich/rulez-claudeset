@@ -19,7 +19,8 @@ test_autoclean_recovers_deadlock() {
 
   # Run 1: reach implement, then codex leaves an UNCOMMITTED edit and fails.
   queue_through_plan_review 01 02 03
-  enqueue 04-implement <<'EOF'
+  queue_clean_forecast 04-forecast
+  enqueue 05-implement <<'EOF'
 printf 'partial\n' > partial-impl.txt
 echo "usage limit" >&2
 exit 7
@@ -34,8 +35,9 @@ EOF
   # Run 2: plain re-run must NOT wedge on a dirty worktree; it resumes.
   queue_clean_spec_review 05-spec-review
   queue_clean_plan_review 06-plan-review
-  queue_implementation_commit 07-implement
-  queue_clean_pr_review 08-pr-review
+  queue_clean_forecast 07-forecast
+  queue_implementation_commit 08-implement
+  queue_clean_pr_review 09-pr-review
   run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "run 2 resumes to DONE"
   assert_not_contains "$OUT" "dirty worktree before spec-review review round" \
@@ -49,8 +51,9 @@ test_autoclean_discards_failed_commit_and_tags_backup() {
   local slug="${ID#project-}"
 
   queue_through_plan_review 01 02 03
+  queue_clean_forecast 04-forecast
   # Implement COMMITS, then fails: the commit is part of the failed output.
-  enqueue 04-implement <<'EOF'
+  enqueue 05-implement <<'EOF'
 printf '1.0.0\n' > version.txt
 git add version.txt
 git commit -qm 'feat: partial implementation'
@@ -96,8 +99,9 @@ EOF
   queue_clean_spec_review 03-spec-review
   queue_valid_planner 04-plan
   queue_clean_plan_review 05-plan-review
-  queue_implementation_commit 06-implement
-  queue_clean_pr_review 07-pr-review
+  queue_clean_forecast 06-forecast
+  queue_implementation_commit 07-implement
+  queue_clean_pr_review 08-pr-review
   run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "run 2 resumes to DONE after claude auto-clean"
   assert_not_contains "$OUT" "dirty worktree before" "run 2 never hits a dirty-worktree guard"
@@ -153,8 +157,9 @@ test_autoclean_pr_review_missing_result_leaves_clean() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  enqueue_claude 05-pr-review <<'EOF'
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  enqueue_claude 06-pr-review <<'EOF'
 printf 'review dirt\n' > reviewer-dirt.txt
 printf '{"summary":"missing result"}'
 EOF
@@ -173,7 +178,8 @@ build_pre_impl_worktree() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  enqueue 04-implement <<'EOF'
+  queue_clean_forecast 04-forecast
+  enqueue 05-implement <<'EOF'
 echo "implement boom" >&2
 exit 7
 EOF
@@ -202,8 +208,9 @@ test_start_from_open_remote_branch_refuses() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"          # full happy run pushes the branch + creates PR
   assert_eq "0" "$RC" "setup happy run exits 0"
   local head_before; head_before="$(git -C "$wt" rev-parse HEAD)"
@@ -278,8 +285,9 @@ test_start_from_implementation_rewinds_and_tags_backup() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"          # full run: impl committed + markers + pushed + PR
   assert_eq "0" "$RC" "setup happy run exits 0"
   local impl_head; impl_head="$(git -C "$wt" rev-parse HEAD)"
@@ -303,7 +311,8 @@ test_start_from_implementation_skips_review_loops() {
   make_sandbox
   build_pre_impl_worktree
   local before; before="$(codex_calls)"   # spec-review + plan-review + implement = 3
-  enqueue 05-implement <<'EOF'
+  queue_clean_forecast 06-forecast
+  enqueue 07-implement <<'EOF'
 echo "second implement boom" >&2
 exit 7
 EOF
@@ -318,11 +327,12 @@ test_no_flag_run_unchanged() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  queue_implementation_commit 04-implement
-  queue_clean_pr_review 05-pr-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "no-flag full run still exits 0"
   assert_contains "$OUT" "SPEC2PR DONE" "no-flag run reaches done"
   assert_eq "3" "$(codex_calls)" "no-flag run makes the same three codex calls"
-  assert_eq "3" "$(claude_calls)" "no-flag run makes the same three claude calls"
+  assert_eq "4" "$(claude_calls)" "no-flag run makes the same four claude calls"
 }
