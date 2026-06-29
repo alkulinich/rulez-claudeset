@@ -203,8 +203,10 @@ malformed forecast payload (§6) and continue to implement. This mirrors the
 existing `plan exists` skip (`spec2pr.sh:419`) and the implementation markers
 without letting a restarted or re-reviewed plan use stale size data.
 `--start-from spec-review|plan|plan-review` cleanup should remove
-`forecast.json`; `--start-from implementation` may keep it, subject to the hash
-validation above. Valid resumes do not re-pay the claude call.
+all forecast artifacts, including `forecast.json`, `forecast.claude.json`, and
+any forecast extraction/temp files; `--start-from implementation` may keep them,
+subject to the hash validation above. Valid resumes do not re-pay the claude
+call.
 
 ### 6. Error handling — fail-soft
 
