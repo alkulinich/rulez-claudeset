@@ -267,6 +267,13 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
         "$META_DIR/implementation-ok"
       ;;
   esac
+  case "$START_FROM" in
+    spec-review|plan|plan-review)
+      rm -f "$META_DIR/forecast.json" \
+        "$META_DIR/forecast.claude.json" \
+        "$META_DIR/forecast.prompt"
+      ;;
+  esac
   status "OK" "restart from $START_FROM at $restart_boundary"
 fi
 
@@ -464,6 +471,17 @@ forecast_before_implement() {
   plan_sha="$(sha256_of "$WORKTREE/$WT_PLAN_REL")"
   spec_sha="$(sha256_of "$WORKTREE/$WT_SPEC_REL")"
   cur_bytes="$(git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c | tr -d ' ')"
+
+  # Resume/cache: reuse a forecast whose plan AND spec hashes still match the
+  # current artifacts AND whose current_diff_bytes still matches the live diff;
+  # otherwise discard and regenerate so a re-reviewed plan or changed PR surface
+  # never decides on stale size data.
+  if [ -f "$META_DIR/forecast.json" ] \
+      && forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
+    forecast_decide "$META_DIR/forecast.json"
+    return 0
+  fi
+  rm -f "$META_DIR/forecast.json" "$META_DIR/forecast.claude.json"
 
   pf="$META_DIR/forecast.prompt"
   cat > "$pf" <<EOF

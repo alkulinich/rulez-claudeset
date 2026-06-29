@@ -228,3 +228,163 @@ test_forecast_kill_switch_skips_step() {
   assert_not_contains "$OUT" "forecast" "no forecast status lines emitted"
   assert_file_absent "$SPEC2PR_HOME/$ID/forecast.json" "no forecast payload written"
 }
+
+test_forecast_cache_reused_when_hashes_match() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "seed run stops at blocked implementation"
+  assert_file_exists "$SPEC2PR_HOME/$ID/forecast.json" "seed run writes forecast payload"
+  local before_claude
+  before_claude="$(claude_calls)"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_spec2pr_subject_implementation_commit 08-implement
+  queue_clean_pr_review 09-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "resume with cached forecast reaches done"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "cached forecast still reports fits"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "cached forecast resume reaches done"
+  assert_eq "$((before_claude + 2))" "$(claude_calls)" "second run adds only the pr-review claude calls"
+}
+
+test_forecast_stale_hash_regenerates() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  local forecast_path="$SPEC2PR_HOME/$ID/forecast.json"
+  local forecast_tmp="$SANDBOX/forecast.tmp"
+  jq '.plan_sha256 = "WRONG"' "$forecast_path" > "$forecast_tmp"
+  mv "$forecast_tmp" "$forecast_path"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_spec2pr_subject_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  local live_plan_sha
+  live_plan_sha="$(sha256sum "$wt/docs/superpowers/plans/toy-spec-plan.md" | awk '{print $1}')"
+  assert_eq "0" "$RC" "stale plan hash triggers regeneration and reaches done"
+  assert_eq "$live_plan_sha" "$(jq -r '.plan_sha256' "$forecast_path")" "regenerated payload uses live plan hash"
+}
+
+test_forecast_stale_spec_hash_regenerates() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  local forecast_path="$SPEC2PR_HOME/$ID/forecast.json"
+  local forecast_tmp="$SANDBOX/forecast.tmp"
+  jq '.spec_sha256 = "WRONG"' "$forecast_path" > "$forecast_tmp"
+  mv "$forecast_tmp" "$forecast_path"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_spec2pr_subject_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  local live_spec_sha
+  live_spec_sha="$(sha256sum "$wt/docs/superpowers/specs/toy-spec.md" | awk '{print $1}')"
+  assert_eq "0" "$RC" "stale spec hash triggers regeneration and reaches done"
+  assert_eq "$live_spec_sha" "$(jq -r '.spec_sha256' "$forecast_path")" "regenerated payload uses live spec hash"
+}
+
+test_forecast_stale_current_diff_regenerates() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  local forecast_path="$SPEC2PR_HOME/$ID/forecast.json"
+  local forecast_tmp="$SANDBOX/forecast.tmp"
+  jq '.current_diff_bytes = 999999' "$forecast_path" > "$forecast_tmp"
+  mv "$forecast_tmp" "$forecast_path"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_spec2pr_subject_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "stale current diff triggers regeneration and reaches done"
+  assert_not_contains "$(cat "$forecast_path")" "999999" "regenerated payload replaces stale current_diff_bytes"
+}
+
+test_forecast_regenerated_mismatch_warns_and_proceeds() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  local forecast_path="$SPEC2PR_HOME/$ID/forecast.json"
+  local forecast_tmp="$SANDBOX/forecast.tmp"
+  jq '.plan_sha256 = "WRONG"' "$forecast_path" > "$forecast_tmp"
+  mv "$forecast_tmp" "$forecast_path"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  enqueue_claude 08-forecast <<'EOF'
+printf '{"result":{"plan_sha256":"WRONG","spec_sha256":"WRONG","current_diff_bytes":999999,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":1000039,"verdict":"fits"}}'
+EOF
+  queue_spec2pr_subject_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "mismatched regenerated forecast does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: malformed forecast JSON; proceeding to implement" "hash/current-diff mismatch warns"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "mismatch warning still reaches done"
+  assert_file_absent "$forecast_path" "invalid regenerated payload removed"
+}
+
+test_forecast_start_from_plan_review_clears_forecast_artifacts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+
+  local forecast_dir="$SPEC2PR_HOME/$ID"
+  assert_file_exists "$forecast_dir/forecast.json" "seed run keeps forecast payload"
+  assert_file_exists "$forecast_dir/forecast.claude.json" "seed run keeps raw forecast envelope"
+  assert_file_exists "$forecast_dir/forecast.prompt" "seed run keeps forecast prompt"
+
+  queue_clean_plan_review 06-plan-review
+  queue_blocked_implementation 07-implement
+  SPEC2PR_FORECAST=0 run_spec2pr --start-from plan-review "$SPEC"
+
+  assert_eq "1" "$RC" "plan-review rewind can continue without forecast and stop at blocked implementation"
+  assert_file_absent "$forecast_dir/forecast.json" "plan-review rewind clears forecast payload"
+  assert_file_absent "$forecast_dir/forecast.claude.json" "plan-review rewind clears raw forecast envelope"
+  assert_file_absent "$forecast_dir/forecast.prompt" "plan-review rewind clears forecast prompt"
+}
