@@ -196,4 +196,89 @@ chain_status "OK started specs=$total"
 
 merged_count=0
 
+for i in "${!SPEC_ABS_LIST[@]}"; do
+  spec_abs="${SPEC_ABS_LIST[$i]}"
+  id="${ID_LIST[$i]}"
+  slug="${SLUG_LIST[$i]}"
+  marker="$SPEC2PR_HOME/$id.merged"
+
+  if [ -f "$marker" ]; then
+    merge_commit="$(awk -F= '$1 == "merge" {print $2; exit}' "$marker")"
+    if ! git -C "$GIT_ROOT" fetch -q origin main; then
+      chain_finish 1 "HALT $slug: git fetch origin main failed"
+    fi
+    remote_main="$(git -C "$GIT_ROOT" rev-parse origin/main 2>/dev/null || true)"
+    if [ -n "$merge_commit" ] && ! git -C "$GIT_ROOT" cat-file -e "$merge_commit^{commit}" 2>/dev/null; then
+      git -C "$GIT_ROOT" fetch -q origin "$merge_commit" 2>/dev/null || true
+    fi
+    if [ -n "$merge_commit" ] &&
+        [ -n "$remote_main" ] &&
+        git -C "$GIT_ROOT" cat-file -e "$merge_commit^{commit}" 2>/dev/null &&
+        git -C "$GIT_ROOT" merge-base --is-ancestor "$merge_commit" "$remote_main"; then
+      chain_status "OK skipped $slug (already merged)"
+      merged_count=$((merged_count + 1))
+      continue
+    fi
+    chain_finish 1 "HALT $slug: stale merged marker"
+  fi
+
+  set +e
+  if [ "$FAST" -eq 1 ]; then
+    spec_out="$(bash "$SCRIPT_DIR/spec2pr.sh" --fast "$spec_abs" 2>&1)"
+  else
+    spec_out="$(bash "$SCRIPT_DIR/spec2pr.sh" "$spec_abs" 2>&1)"
+  fi
+  spec_rc=$?
+  set -e
+
+  if [ "$spec_rc" -ne 0 ]; then
+    terminal="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR / { line = $0 } END { print line }')"
+    [ -n "$terminal" ] || terminal="SPEC2PR failed"
+    chain_finish 1 "HALT $slug: $terminal"
+  fi
+
+  done_line="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR DONE / { line = $0 } END { print line }')"
+  if [ -z "$done_line" ]; then
+    chain_finish 1 "HALT $slug: missing SPEC2PR DONE"
+  fi
+
+  pr_url=""
+  wt=""
+  case "$done_line" in
+    "SPEC2PR DONE pr="*" worktree="*)
+      pr_url="${done_line#SPEC2PR DONE pr=}"
+      pr_url="${pr_url%% worktree=*}"
+      wt="${done_line#* worktree=}"
+      ;;
+  esac
+  if [ -z "$pr_url" ] || [ -z "$wt" ]; then
+    chain_finish 1 "HALT $slug: missing pr or worktree in SPEC2PR DONE"
+  fi
+
+  set +e
+  merge_err="$(cd "$wt" && gh pr merge "$pr_url" --squash --delete-branch 2>&1 1>/dev/null)"
+  merge_rc=$?
+  set -e
+  if [ "$merge_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge failed ($merge_err)"
+  fi
+
+  if ! merge_commit="$(git -C "$GIT_ROOT" ls-remote origin refs/heads/main 2>/dev/null | awk 'NR == 1 { print $1 }')"; then
+    chain_finish 1 "HALT $slug: merge commit lookup failed"
+  fi
+  if [ -z "$merge_commit" ]; then
+    chain_finish 1 "HALT $slug: merge commit lookup failed"
+  fi
+  {
+    printf 'pr=%s\n' "$pr_url"
+    printf 'merge=%s\n' "$merge_commit"
+    printf 'merged_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$marker"
+
+  chain_status "OK merged $slug pr=$pr_url"
+  merged_count=$((merged_count + 1))
+  git -C "$GIT_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  git -C "$GIT_ROOT" branch -D "spec2pr/$slug" >/dev/null 2>&1 || true
+done
+
 chain_finish 0 "DONE merged=$merged_count/$total"
