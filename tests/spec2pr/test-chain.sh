@@ -233,9 +233,13 @@ test_chain_halts_when_merge_commit_lookup_fails() {
   local real_git
   real_git="$(command -v git)"
   mkdir -p "$SANDBOX/git-wrapper"
+  # Match the canonical (symlink-resolved) project root: the chain calls
+  # `git -C "$GIT_ROOT"` where GIT_ROOT comes from `git rev-parse --show-toplevel`
+  # (physical path). On macOS mktemp yields a /var -> /private/var symlink, so a
+  # raw "$PROJECT" compare never fires and the simulated failure is skipped.
   cat > "$SANDBOX/git-wrapper/git" <<EOF
 #!/usr/bin/env bash
-if [ "\${1:-}" = "-C" ] && [ "\${2:-}" = "$PROJECT" ] && [ "\${3:-}" = "ls-remote" ]; then
+if [ "\${1:-}" = "-C" ] && [ "\${2:-}" = "$(cd "$PROJECT" && pwd -P)" ] && [ "\${3:-}" = "ls-remote" ]; then
   echo "simulated ls-remote transport failure" >&2
   exit 128
 fi
