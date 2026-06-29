@@ -203,7 +203,7 @@ New lines on the `spec2pr` contract:
   `--ignore-pr-limit`)
 - `SPEC2PR WARN forecast: <reason>; proceeding to implement` (forecast error)
 - `SPEC2PR SPLIT forecast est=<n> limit=131072` (terminal; recommended parts
-  follow)
+  are printed before this line because `finish` exits)
 
 ## Testing
 
