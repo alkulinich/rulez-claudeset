@@ -6,6 +6,14 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.8.1 - from v1.8.0
+
+**Action:** None.
+
+**Caveat:** spec2pr's budget forecast now recovers its JSON when the model wraps
+it in prose or a ```json fence (previously it warned "malformed forecast JSON"
+and skipped the budget check for that run). review-pr.sh is unaffected.
+
 ## To v1.8.0 - from v1.7.2
 
 **Action:** None.
