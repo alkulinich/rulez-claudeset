@@ -142,11 +142,15 @@ integer `current_diff_bytes`, non-negative integer `est_bytes`, and `verdict`
 equal to `fits` or `exceeds`. Also require `total_loc` to equal the sum of
 `files[].loc`, `implementation_est_bytes` to equal
 `total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE`, and
-`est_bytes == current_diff_bytes + implementation_est_bytes`. When `verdict` is
-`exceeds`, require non-empty string `summary` and a non-empty array of string
-`parts`; when it is `fits`, `summary` and `parts` may be absent. A valid claude
-envelope whose `result` cannot be parsed and validated into this payload is a
-malformed forecast payload (§7).
+`est_bytes == current_diff_bytes + implementation_est_bytes`. Also require
+`current_diff_bytes` to equal the shell-measured
+`git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c` value from the current run;
+otherwise a stale or hallucinated current-diff component could make the
+forecast decision against the wrong final PR size. When `verdict` is `exceeds`,
+require non-empty string `summary` and a non-empty array of string `parts`; when
+it is `fits`, `summary` and `parts` may be absent. A valid claude envelope whose
+`result` cannot be parsed and validated into this payload is a malformed
+forecast payload (§7).
 
 Also validate the forecast hashes before any decision, not only during cache
 reuse: `plan_sha256` must equal the shell-computed sha256 of the current
@@ -234,10 +238,12 @@ as first-class split events rather than falling through to a default gate:
 
 On a re-run, reuse `forecast.json` and skip the call only when its
 `plan_sha256` matches the current `$WT_PLAN_REL` content and its `spec_sha256`
-matches the current `$WT_SPEC_REL` content. If either hash is missing or
-mismatched, discard/regenerate the forecast before deciding whether to
-implement. If a regenerated forecast still has mismatched hashes, treat it as a
-malformed forecast payload (§7) and continue to implement. This mirrors the
+matches the current `$WT_SPEC_REL` content, and its `current_diff_bytes` matches
+the current shell-measured `$BASE_SHA...HEAD` diff size. If either hash is
+missing or mismatched, or the stored current diff size is missing or mismatched,
+discard/regenerate the forecast before deciding whether to implement. If a
+regenerated forecast still has mismatched hashes or current diff bytes, treat it
+as a malformed forecast payload (§7) and continue to implement. This mirrors the
 existing `plan exists` skip (`spec2pr.sh:419`) and the implementation markers
 without letting a restarted or re-reviewed plan use stale size data.
 `--start-from spec-review|plan|plan-review` cleanup should remove
@@ -313,12 +319,13 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   `total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE` → `WARN` + proceeds
   (fail-soft).
 - cached forecast with matching plan/spec hashes → reused without a new claude
-  call.
-- cached forecast with stale plan or spec hash → discarded/regenerated before
-  decision.
-- regenerated forecast with mismatched hashes or inconsistent
-  `est_bytes != current_diff_bytes + implementation_est_bytes` → `WARN` +
-  proceeds (fail-soft).
+  call, as long as its `current_diff_bytes` also matches the current
+  shell-measured diff.
+- cached forecast with stale plan hash, spec hash, or current diff size →
+  discarded/regenerated before decision.
+- regenerated forecast with mismatched hashes, mismatched current diff bytes, or
+  inconsistent `est_bytes != current_diff_bytes + implementation_est_bytes` →
+  `WARN` + proceeds (fail-soft).
 - `mctl add spec2pr --ignore-pr-limit <spec>` and
   `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded.
 - `mctl add review-pr --ignore-pr-limit <pr>` → accepted and forwarded;
