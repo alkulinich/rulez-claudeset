@@ -52,12 +52,16 @@ a split; the operator runs `spec2pr-split` by hand.
 
 ### 1. A new `forecast` step
 
-Runs **after `plan-review`, before the implement marker block** (between
-`spec2pr.sh:428` and `:430`). It is **not** a `--start-from` target — it runs
-automatically on the way to implement, so the `--start-from` surface
-(`spec-review|plan|plan-review|implementation`) is unchanged. The planner prompt
-at `spec2pr.sh:387` is **untouched** (approach B: a separate forecast call, not
-a budget baked into the planner).
+Runs automatically on the way to a **new** implement call, after `plan-review`
+has completed and after the existing implementation/PR resume checks prove that
+there is no valid local implementation, remote branch, or open PR to reuse. Put
+the decision point immediately before the code path that creates
+`$META_DIR/implement.prompt` and invokes `codex_call implement`, so a resumed run
+with valid implementation markers does not spend a forecast call or stop on a
+forecast split. It is **not** a `--start-from` target, so the `--start-from`
+surface (`spec-review|plan|plan-review|implementation`) is unchanged. The
+planner prompt at `spec2pr.sh:387` is **untouched** (approach B: a separate
+forecast call, not a budget baked into the planner).
 
 A `SPEC2PR_FORECAST=0` env kill-switch skips the step entirely.
 
@@ -88,8 +92,11 @@ not pile onto the quota that already failed. Claude also authored the plan.
 Prompt (read-only): read the plan at `$WT_PLAN_REL` and the spec at
 `$WT_SPEC_REL`; edit nothing; list every file you would create or modify with
 rough added/changed LOC each; sum; multiply by the bytes-per-line constant for
-an estimated diff size in bytes; return the verdict. Output →
-`META_DIR/forecast.json`:
+an estimated diff size in bytes; return the verdict as the JSON object below in
+the claude envelope's `result` field. Store the raw claude envelope separately,
+for example at `META_DIR/forecast.claude.json`; extract and validate the
+forecast payload into `META_DIR/forecast.json`, which must contain the forecast
+object itself, not the claude envelope:
 
 ```json
 {
@@ -105,12 +112,21 @@ an estimated diff size in bytes; return the verdict. Output →
 ```
 
 `parts` and `summary` are present only when `verdict` is `exceeds`. The
-`summary` field is the operator-facing text consumed by the existing
-`show_summary` helper, so recommended split parts are visible without changing
-that helper's contract. `plan_sha256` and `spec_sha256` are computed by the
+`summary` field is the operator-facing text printed before a forecast split, so
+recommended split parts are visible in normal output even when
+`SPEC2PR_VERBOSE` is unset. `plan_sha256` and `spec_sha256` are computed by the
 shell before the call and included in the forecast metadata for cache
 validation. The bytes-per-line factor (`~40`) is a named constant, tunable in
 one place.
+
+Validate `META_DIR/forecast.json` before making a decision: it must be an
+object with string `plan_sha256`, string `spec_sha256`, array `files` whose
+items have string `path` and non-negative integer `loc`, non-negative integer
+`total_loc`, non-negative integer `est_bytes`, and `verdict` equal to `fits` or
+`exceeds`. When `verdict` is `exceeds`, require non-empty string `summary` and a
+non-empty array of string `parts`; when it is `fits`, `summary` and `parts` may
+be absent. A valid claude envelope whose `result` cannot be parsed and validated
+into this payload is a malformed forecast payload (§6).
 
 ### 3. Decision + early stop
 
@@ -123,11 +139,12 @@ one place.
   existing `split()` helper for this path: its contract is measured `size=<n>`,
   which is correct for spec/plan/diff gates but wrong for an estimate. The
   `forecast` label distinguishes an estimate from a measured diff.
-  Print `forecast.json`'s recommended `parts` to the operator by calling
-  `show_summary "$META_DIR/forecast.json"` **before** invoking
-  `split_forecast`; `finish` exits, so printing after the split helper would be
-  unreachable. **No implement call is spent.** The parts are advisory input for
-  a manual `spec2pr-split` run.
+  Print `forecast.json`'s recommended split summary to stdout
+  **unconditionally** before invoking `split_forecast`; do not rely on the
+  existing `show_summary` helper for this path because it is intentionally gated
+  by `SPEC2PR_VERBOSE`. `finish` exits, so printing after the split helper would
+  be unreachable. **No implement call is spent.** The parts are advisory input
+  for a manual `spec2pr-split` run.
 
 ### 4. Override flags
 
