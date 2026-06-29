@@ -65,23 +65,26 @@ succeed on the first optimistic attempt is a `CHAIN HALT`.
 
 ### Orchestrator `scripts/spec2pr-chain.sh`
 
-Sources `lib/spec2pr-runtime.sh` to reuse `finish` / `halt`, `acquire_lock`,
-`sanitize`, and dependency/default handling, with `CONTRACT_PREFIX=CHAIN`. The
-chain uses a small local `chain_status` helper instead of runtime `status`,
-because chain contract lines are intentionally stage-free (for example
-`CHAIN OK started specs=<n>`), while runtime `status` always inserts
-`$STAGE:`. Arg parse: `--fast` (forwarded to each `spec2pr.sh`), a `status`
-subcommand, and the ordered spec list.
+Sources `lib/spec2pr-runtime.sh` with `CONTRACT_PREFIX=CHAIN` to reuse
+`acquire_lock`, `sanitize`, and dependency/default handling. The chain must not
+use runtime `status`, `finish`, or `halt` for user-visible chain outcomes:
+runtime `status` and `halt` always insert `$STAGE:`, while chain contract lines
+are intentionally stage-free (for example `CHAIN OK started specs=<n>` and
+`CHAIN HALT <slug>: <reason>`). Implement small local `chain_status` /
+`chain_finish` helpers that write the exact `CHAIN` lines below to stdout and
+the chain log, then clean up the acquired lock before exiting. Arg parse:
+`--fast` (forwarded to each `spec2pr.sh`), a `status` subcommand, and the
+ordered spec list.
 
 Before taking the lock, preflight every spec path: resolve its absolute path,
 confirm it exists, derive `GIT_ROOT` with
 `git -C <specdir> rev-parse --show-toplevel`, and require all specs to share the
 same `GIT_ROOT`. A mixed-repository invocation is a terminal
-`CHAIN HALT preflight: all specs must be in the same git repository`. This
+`CHAIN HALT: preflight all specs must be in the same git repository`. This
 chain is for dependent specs in one repo; multi-repo orchestration is out of
 scope. Preflight also derives every spec's `ID` using the exact same
 repo-slug/spec-slug formula below and rejects duplicates before any spec runs:
-`CHAIN HALT preflight: duplicate spec id <ID>`. The single-spec tool stores
+`CHAIN HALT: preflight duplicate spec id <ID>`. The single-spec tool stores
 worktrees, metadata, branches, and markers by that slug family, so two ordered
 inputs that collide on ID cannot be chained safely.
 
@@ -92,7 +95,10 @@ race on the same `main`:
 The hash prevents unrelated checkouts that happen to share the same directory
 basename from blocking each other. Different repos do not block each other
 because each valid chain has exactly one repo; this is separate from spec2pr's
-per-spec locks.
+per-spec locks. Because `acquire_lock` reports contention through runtime
+`halt`, wrap the call with `set +e`, capture its output, and on non-zero exit
+emit the chain contract line `CHAIN HALT: chain already running for <repo>`
+instead of leaking `CHAIN HALT preflight: ...`.
 
 The loop, for each spec in order:
 
@@ -109,7 +115,10 @@ The loop, for each spec in order:
       Valid marker → CHAIN OK skipped <slug>; continue.
       Missing/unparseable marker commit or commit not reachable from current
       origin/main → CHAIN HALT <slug>: stale merged marker; stop.
-2. Run, capturing stdout:  bash <dir>/spec2pr.sh [--fast] <spec>
+2. Run, capturing stdout:  bash "$SCRIPT_DIR/spec2pr.sh" [--fast] <spec>
+   where `SCRIPT_DIR` is the directory containing `spec2pr-chain.sh`. Never
+   resolve the runner relative to the spec path; specs normally live under
+   `docs/superpowers/specs/`, not beside `spec2pr.sh`.
 3. Branch on its exit code:
      0  DONE   → parse `pr=<url> worktree=<wt>` from the captured terminal line → merge.
      1/2/3     → CHAIN HALT <slug>: <spec2pr's terminal line>; stop.
