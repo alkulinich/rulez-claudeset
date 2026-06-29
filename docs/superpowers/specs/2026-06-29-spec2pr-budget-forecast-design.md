@@ -128,6 +128,13 @@ non-empty array of string `parts`; when it is `fits`, `summary` and `parts` may
 be absent. A valid claude envelope whose `result` cannot be parsed and validated
 into this payload is a malformed forecast payload (§6).
 
+Also validate the forecast hashes before any decision, not only during cache
+reuse: `plan_sha256` must equal the shell-computed sha256 of the current
+`$WT_PLAN_REL`, and `spec_sha256` must equal the shell-computed sha256 of the
+current `$WT_SPEC_REL`. A freshly generated forecast with mismatched hashes is a
+malformed forecast payload (§6) and must not be used to stop or continue the
+run.
+
 ### 3. Decision + early stop
 
 - `est_bytes <= SPEC2PR_MAX_DIFF` → status `SPEC2PR OK forecast: fits
@@ -145,13 +152,18 @@ into this payload is a malformed forecast payload (§6).
   by `SPEC2PR_VERBOSE`. `finish` exits, so printing after the split helper would
   be unreachable. **No implement call is spent.** The parts are advisory input
   for a manual `spec2pr-split` run.
+- `est_bytes > SPEC2PR_MAX_DIFF` **and** `--ignore-pr-limit` → status
+  `SPEC2PR OK forecast: est=<n> exceeds limit; overridden`; continue to
+  implement.
 
 ### 4. Override flags
 
 - **`--ignore-plan-limit`** (spec2pr only) → sets `IGNORE_PLAN_LIMIT=1`. The
   plan-file gate at `spec2pr.sh:412` gains `&& [ -z "${IGNORE_PLAN_LIMIT:-}" ]`.
   Plan-file size has no forecast component (it is measured post-write), so this
-  flag touches only the hard gate.
+  flag touches only the hard gate. If the measured plan size exceeds
+  `SPEC2PR_MAX_PLAN` and this flag is set, emit
+  `SPEC2PR OK plan: size=<n> exceeds limit; overridden` before continuing.
 - **`--ignore-pr-limit`** (spec2pr **and** review-pr) → sets `IGNORE_PR_LIMIT=1`,
   which suppresses **both** the forecast early-stop (§3) **and** the hard diff
   gate at `pr-review-engine.sh:85` (`&& [ "${IGNORE_PR_LIMIT:-}" != 1 ]`). In
@@ -159,8 +171,11 @@ into this payload is a malformed forecast payload (§6).
   is the `pr-103` case (a `review-pr` SPLIT at `diff size=140462`).
 
 The flags slot into the existing `while/case` arg loops at `spec2pr.sh:13` and
-`review-pr.sh:30`. When a flag forces past a limit, the status line records it,
-e.g. `SPEC2PR OK forecast: est=140000 exceeds limit; overridden`.
+`review-pr.sh:30`. When a flag forces past a measured diff limit, the shared
+engine emits the caller's contract prefix:
+`SPEC2PR OK pr-review: diff size=<n> exceeds limit; overridden` from spec2pr,
+or `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` from
+review-pr.
 
 ### 5. Resume / caching
 
@@ -168,11 +183,13 @@ On a re-run, reuse `forecast.json` and skip the call only when its
 `plan_sha256` matches the current `$WT_PLAN_REL` content and its `spec_sha256`
 matches the current `$WT_SPEC_REL` content. If either hash is missing or
 mismatched, discard/regenerate the forecast before deciding whether to
-implement. This mirrors the existing `plan exists` skip (`spec2pr.sh:419`) and
-the implementation markers without letting a restarted or re-reviewed plan use
-stale size data. `--start-from spec-review|plan|plan-review` cleanup should
-remove `forecast.json`; `--start-from implementation` may keep it, subject to
-the hash validation above. Valid resumes do not re-pay the claude call.
+implement. If a regenerated forecast still has mismatched hashes, treat it as a
+malformed forecast payload (§6) and continue to implement. This mirrors the
+existing `plan exists` skip (`spec2pr.sh:419`) and the implementation markers
+without letting a restarted or re-reviewed plan use stale size data.
+`--start-from spec-review|plan|plan-review` cleanup should remove
+`forecast.json`; `--start-from implementation` may keep it, subject to the hash
+validation above. Valid resumes do not re-pay the claude call.
 
 ### 6. Error handling — fail-soft
 
@@ -201,9 +218,18 @@ New lines on the `spec2pr` contract:
 - `SPEC2PR OK forecast: fits est=<n> limit=131072`
 - `SPEC2PR OK forecast: est=<n> exceeds limit; overridden` (with
   `--ignore-pr-limit`)
+- `SPEC2PR OK plan: size=<n> exceeds limit; overridden` (with
+  `--ignore-plan-limit`)
+- `SPEC2PR OK pr-review: diff size=<n> exceeds limit; overridden` (with
+  `--ignore-pr-limit`)
 - `SPEC2PR WARN forecast: <reason>; proceeding to implement` (forecast error)
 - `SPEC2PR SPLIT forecast est=<n> limit=131072` (terminal; recommended parts
   are printed before this line because `finish` exits)
+
+New line on the `review-pr` contract:
+
+- `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` (with
+  `--ignore-pr-limit`)
 
 ## Testing
 
