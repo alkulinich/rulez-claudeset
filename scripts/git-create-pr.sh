@@ -82,7 +82,7 @@ else
     echo -e "${GREEN}[3/5]${NC} Committing changes"
     rtk git commit -m "$TITLE
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 fi
 
 # Step 4: Push (if there are unpushed commits)

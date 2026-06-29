@@ -50,7 +50,7 @@ rtk git add "${FILES[@]}"
 echo -e "${GREEN}[2/3]${NC} Committing changes"
 rtk git commit -m "$MESSAGE
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 # Step 3: Push
 echo -e "${GREEN}[3/3]${NC} Pushing to origin"
