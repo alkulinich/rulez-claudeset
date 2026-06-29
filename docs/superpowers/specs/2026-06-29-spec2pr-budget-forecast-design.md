@@ -71,7 +71,7 @@ The forecast runs on **claude** through a new fail-soft wrapper around
 `claude_json_attempt`, not through `run_claude_json`. `run_claude_json` is the
 right path for required claude calls because it `halt`s on process failure or
 invalid JSON; forecast is optional optimization and must be able to warn and
-continue (§6). The wrapper should reuse the existing claude invocation,
+continue (§7). The wrapper should reuse the existing claude invocation,
 worktree-cleanup, and JSON-validation behavior from `claude_json_attempt`, but
 return a status code to the caller instead of halting.
 
@@ -144,13 +144,13 @@ equal to `fits` or `exceeds`. Also require
 `exceeds`, require non-empty string `summary` and a non-empty array of string
 `parts`; when it is `fits`, `summary` and `parts` may be absent. A valid claude
 envelope whose `result` cannot be parsed and validated into this payload is a
-malformed forecast payload (§6).
+malformed forecast payload (§7).
 
 Also validate the forecast hashes before any decision, not only during cache
 reuse: `plan_sha256` must equal the shell-computed sha256 of the current
 `$WT_PLAN_REL`, and `spec_sha256` must equal the shell-computed sha256 of the
 current `$WT_SPEC_REL`. A freshly generated forecast with mismatched hashes is a
-malformed forecast payload (§6) and must not be used to stop or continue the
+malformed forecast payload (§7) and must not be used to stop or continue the
 run.
 
 ### 3. Decision + early stop
@@ -195,14 +195,28 @@ engine emits the caller's contract prefix:
 or `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` from
 review-pr.
 
-### 5. Resume / caching
+### 5. Split-tooling compatibility
+
+`SPEC2PR SPLIT forecast est=<n> limit=<n>` is a new split gate token. Update the
+manual split tooling that consumes spec2pr output so forecast splits are treated
+as first-class split events rather than falling through to a default gate:
+
+- `scripts/spec2pr-split-context.sh` must recognize `SPLIT forecast` in addition
+  to `SPLIT spec|plan|diff` and emit `gate=forecast` in its structured context.
+- `commands/rulez/spec2pr-split.md` should describe forecast splits as
+  plan/spec-based manual split requests whose recommended parts come from the
+  forecast summary, not from a measured `size=<n>` payload.
+- The split-context tests must include a `SPEC2PR SPLIT forecast est=<n>
+  limit=<n>` fixture so the helper does not regress to the old default behavior.
+
+### 6. Resume / caching
 
 On a re-run, reuse `forecast.json` and skip the call only when its
 `plan_sha256` matches the current `$WT_PLAN_REL` content and its `spec_sha256`
 matches the current `$WT_SPEC_REL` content. If either hash is missing or
 mismatched, discard/regenerate the forecast before deciding whether to
 implement. If a regenerated forecast still has mismatched hashes, treat it as a
-malformed forecast payload (§6) and continue to implement. This mirrors the
+malformed forecast payload (§7) and continue to implement. This mirrors the
 existing `plan exists` skip (`spec2pr.sh:419`) and the implementation markers
 without letting a restarted or re-reviewed plan use stale size data.
 `--start-from spec-review|plan|plan-review` cleanup should remove
@@ -211,7 +225,7 @@ any forecast extraction/temp files; `--start-from implementation` may keep them,
 subject to the hash validation above. Valid resumes do not re-pay the claude
 call.
 
-### 6. Error handling — fail-soft
+### 7. Error handling — fail-soft
 
 The forecast is an optimization; the hard `SPEC2PR_MAX_DIFF` gate remains as a
 backstop. If the forecast call errors or returns malformed JSON, emit a `WARN`
@@ -231,7 +245,7 @@ A transient claude hiccup must not block an otherwise-good run, and the backstop
 still protects correctness. This is the one deliberate deviation from the
 pipeline's usual fail-loud stance.
 
-### 7. Status / contract surface
+### 8. Status / contract surface
 
 New lines on the `spec2pr` contract:
 
@@ -306,6 +320,10 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   `SPEC2PR_FORECAST` default, any shared forecast helper.
 - **edit** `commands/rulez/spec2pr.md`, `commands/rulez/review-pr.md` — document
   the new flags.
+- **edit** `commands/rulez/spec2pr-split.md`,
+  `scripts/spec2pr-split-context.sh`, and
+  `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
+  output as split-tooling input and keep the manual split hand-off working.
 - **add** `tests/spec2pr/test-forecast.sh` (or extend `test-stages.sh`) — the
   cases above.
 - **edit** `VERSION`, `UPGRADE.md` — minor bump + note.
