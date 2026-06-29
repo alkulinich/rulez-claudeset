@@ -36,15 +36,15 @@ If no blob argument is given, ask the user to paste the halt output and stop.
    - Optional scalar keys may be empty, but duplicate optional scalar keys are
      also fatal:
      `plan_path`, `pr_number`.
-  - After parsing `gate`, validate that it is exactly one of `spec`, `plan`,
-    `diff`, or `forecast`.
-  - Any other `gate` value is fatal; stop before invoking
-    `superpowers:brainstorming`.
-  - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
-    line and extract `size` and `limit` when present.
-  - When `gate=forecast`, inspect the pasted blob evidence for
-    `SPLIT forecast est=N limit=M`; extract `est` as the size evidence and
-    treat it as `size=N` for downstream prompts.
+   - After parsing `gate`, validate that it is exactly one of `spec`, `plan`,
+     `diff`, or `forecast`.
+   - Any other `gate` value is fatal; stop before invoking
+     `superpowers:brainstorming`.
+   - Also inspect the pasted blob evidence for a `SPLIT ... size=N limit=M`
+     line and extract `size` and `limit` when present.
+   - When `gate=forecast`, inspect the pasted blob evidence for
+     `SPLIT forecast est=N limit=M`; extract `est` as the size evidence and
+     treat it as `size=N` for downstream prompts.
    - Show helper warnings or errors from stderr, but do not parse stderr lines
      as keys.
 
