@@ -127,6 +127,40 @@ EOF
   assert_contains "$OUT" "SPEC2PR SPLIT plan size=70000 limit=65536" "plan split line"
 }
 
+test_ignore_plan_limit_proceeds_past_plan_gate() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
+printf '{"result":"large"}'
+EOF
+  queue_clean_plan_review 03-plan-review
+  queue_spec2pr_subject_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr --ignore-plan-limit "$SPEC"
+
+  assert_eq "0" "$RC" "ignore-plan-limit run reaches done"
+  assert_contains "$OUT" "SPEC2PR OK plan: size=70000 exceeds limit; overridden" \
+    "plan override status line printed"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "override run reaches done"
+}
+
+test_ignore_plan_limit_requires_explicit_one() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  enqueue_claude 02-plan <<'EOF'
+mkdir -p docs/superpowers/plans
+perl -e 'print "x" x 70000' > docs/superpowers/plans/toy-spec-plan.md
+printf '{"result":"large"}'
+EOF
+  IGNORE_PLAN_LIMIT=0 run_spec2pr "$SPEC"
+
+  assert_eq "2" "$RC" "IGNORE_PLAN_LIMIT=0 does not bypass plan split"
+  assert_contains "$OUT" "SPEC2PR SPLIT plan size=70000 limit=65536" \
+    "IGNORE_PLAN_LIMIT=0 still splits oversized plan"
+}
+
 test_plan_unrelated_file_change_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review

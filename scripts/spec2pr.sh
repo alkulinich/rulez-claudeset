@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
@@ -15,6 +15,14 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
       SPEC2PR_CODEX_FAST=1
+      shift
+      ;;
+    --ignore-plan-limit)
+      IGNORE_PLAN_LIMIT=1
+      shift
+      ;;
+    --ignore-pr-limit)
+      IGNORE_PR_LIMIT=1
       shift
       ;;
     --start-from)
@@ -410,7 +418,11 @@ EOF
       '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
     plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
     if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
-      split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+      if [ "${IGNORE_PLAN_LIMIT:-}" = "1" ]; then
+        status "OK" "size=$plan_size exceeds limit; overridden"
+      else
+        split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+      fi
     fi
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
       git -C "$WORKTREE" add "$WT_PLAN_REL"

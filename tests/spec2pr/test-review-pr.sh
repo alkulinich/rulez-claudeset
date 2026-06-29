@@ -317,6 +317,27 @@ EOF
   assert_contains "$round3_prompt" "CAP_R3_FINDING" "round 3 fix prompt keeps current findings"
 }
 
+test_review_pr_ignore_pr_limit_proceeds_past_diff_gate() {
+  make_pr_sandbox
+  git -C "$PROJECT" checkout -q -b "$PR_HEAD_REF" "origin/$PR_HEAD_REF"
+  perl -e 'print "x" x 200000' > "$PROJECT/large-diff.txt"
+  git -C "$PROJECT" add large-diff.txt
+  git -C "$PROJECT" commit -qm "oversized diff for review-pr"
+  git -C "$PROJECT" push -q origin "$PR_HEAD_REF"
+  PR_HEAD_OID="$(git -C "$PROJECT" rev-parse HEAD)"
+  git -C "$PROJECT" checkout -q main
+  git -C "$PROJECT" branch -D "$PR_HEAD_REF" >/dev/null 2>&1
+  write_pr_view_json "false"
+
+  queue_clean_pr_review 01-pr
+  run_review_pr --ignore-pr-limit "$PR_NUMBER"
+
+  assert_eq "0" "$RC" "ignore-pr-limit review proceeds past diff gate"
+  assert_contains "$OUT" "PRREVIEW OK pr-review: diff size=" "diff override status printed"
+  assert_contains "$OUT" "exceeds limit; overridden" "diff override suffix printed"
+  assert_contains "$OUT" "PRREVIEW DONE pr=$PR_URL_VAL" "ignore-pr-limit reaches done"
+}
+
 test_review_pr_fork_halts() {
   make_pr_sandbox
   write_pr_view_json "true"
@@ -567,15 +588,15 @@ test_review_pr_reviewer_flag_validation() {
   make_pr_sandbox
   run_review_pr --reviewer gpt "$PR_NUMBER"
   assert_eq "1" "$RC" "invalid reviewer exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "invalid reviewer shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--ignore-pr-limit] [--reviewer <claude|codex>] <pr-number|pr-url>" "invalid reviewer shows usage"
 
   run_review_pr --reviewer
   assert_eq "1" "$RC" "missing reviewer value exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "missing reviewer value shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--ignore-pr-limit] [--reviewer <claude|codex>] <pr-number|pr-url>" "missing reviewer value shows usage"
 
   run_review_pr "$PR_NUMBER" extra
   assert_eq "1" "$RC" "extra positional exits 1"
-  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
+  assert_contains "$OUT" "PRREVIEW HALT preflight: usage: review-pr.sh [--fast] [--ignore-pr-limit] [--reviewer <claude|codex>] <pr-number|pr-url>" "extra positional shows usage"
 }
 
 test_review_pr_claude_fixer_missing_result_autocleans() {
