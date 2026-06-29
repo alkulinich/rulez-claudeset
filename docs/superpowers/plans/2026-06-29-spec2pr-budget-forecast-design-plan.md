@@ -245,7 +245,16 @@ run_split_forecast() {
 payload_valid_rc() {  # <json-string> <plan-sha> <spec-sha>
   local f="$SANDBOX/payload.json"
   printf '%s' "$1" > "$f"
-  ( source "$REPO_ROOT/scripts/lib/spec2pr-runtime.sh"; forecast_payload_valid "$f" "$2" "$3" )
+  (
+    source "$REPO_ROOT/scripts/lib/spec2pr-runtime.sh"
+    forecast_payload_valid "$f" "$2" "$3"
+    local rc="$?"
+    # spec2pr-runtime.sh installs an EXIT trap that treats a normal return from
+    # a sourced script as an unexpected pipeline exit. Mark the subshell as
+    # finished so this unit helper can preserve forecast_payload_valid's rc.
+    FINISHED=1
+    exit "$rc"
+  )
   printf '%s' "$?"
 }
 
