@@ -27,7 +27,8 @@ Otherwise:
 3. Launch the orchestrator as one **background** Bash task (single call,
    `run_in_background: true`), the same pattern `/rulez:spec2pr` uses:
    `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-chain.sh [--fast] <spec…>`
-   If `--fast` was not supplied, omit it.
+   If `--fast` was not supplied, omit it. The orchestrator supports Bash 3.2+
+   so macOS system Bash is valid.
 4. Tell the user the chain has started, that a completion notification will
    arrive in this session, and that `/rulez:spec2pr-chain status` shows
    progress meanwhile. Do not poll.

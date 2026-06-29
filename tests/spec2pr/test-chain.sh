@@ -87,6 +87,21 @@ test_chain_script_avoids_bash4_associative_arrays() {
   assert_not_contains "$(cat "$CHAIN")" "declare -A" "chain script stays Bash 3.2-compatible"
 }
 
+test_chain_duplicate_preflight_guards_empty_id_list_for_bash32() {
+  # Bash 3.2 treats an empty "${array[@]}" expansion as unbound under set -u,
+  # so the first preflight iteration must not expand ID_LIST until it has data.
+  local duplicate_check
+  duplicate_check="$(awk '
+    /id="\$repo_slug-\$spec_slug"/ { capture = 1 }
+    capture { print }
+    /SPEC_ABS_LIST\+=/ { exit }
+  ' "$CHAIN")"
+  assert_contains "$duplicate_check" 'if [ "${#ID_LIST[@]}" -gt 0 ]; then' \
+    "duplicate check guards empty ID_LIST before array expansion"
+  assert_contains "$duplicate_check" 'for seen_id in "${ID_LIST[@]}"; do' \
+    "duplicate check still compares populated IDs"
+}
+
 test_chain_happy_path() {
   make_sandbox
   local a b c

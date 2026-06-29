@@ -122,7 +122,6 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
       FAST=1
-      SPEC2PR_CODEX_FAST=1
       shift
       ;;
     status)
@@ -172,11 +171,13 @@ for spec in "${SPECS[@]}"; do
   [ -n "$repo_slug" ] || chain_finish 1 "HALT: empty repository slug"
   [ -n "$spec_slug" ] || chain_finish 1 "HALT: empty spec slug"
   id="$repo_slug-$spec_slug"
-  for seen_id in "${ID_LIST[@]}"; do
-    if [ "$seen_id" = "$id" ]; then
-      chain_finish 1 "HALT: preflight duplicate spec id $id"
-    fi
-  done
+  if [ "${#ID_LIST[@]}" -gt 0 ]; then
+    for seen_id in "${ID_LIST[@]}"; do
+      if [ "$seen_id" = "$id" ]; then
+        chain_finish 1 "HALT: preflight duplicate spec id $id"
+      fi
+    done
+  fi
   SPEC_ABS_LIST+=("$spec_abs")
   ID_LIST+=("$id")
   SLUG_LIST+=("$spec_slug")
@@ -189,7 +190,6 @@ CHAIN_STATUS_PATH="$SPEC2PR_HOME/chains/$chain_id.status"
 mkdir -p "$SPEC2PR_HOME/chains"
 
 repo_id="$(sanitize "$(basename "$GIT_ROOT")")-$(short_hash "$GIT_ROOT" 8)"
-CHAIN_LOCK_PATH="$SPEC2PR_HOME/$repo_id.chain.lock/pid"
 if ! chain_acquire_lock "$SPEC2PR_HOME/$repo_id.chain.lock"; then chain_finish 1 "HALT: chain already running for $repo_id"; fi
 
 chain_status "OK started specs=$total"
