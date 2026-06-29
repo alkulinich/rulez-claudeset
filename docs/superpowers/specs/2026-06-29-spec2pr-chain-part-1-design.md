@@ -103,8 +103,9 @@ The loop, for each spec in order:
    If "$SPEC2PR_HOME/<ID>.merged" exists:
       - read its merge commit field,
       - read current origin/main via `git -C <repo> ls-remote origin refs/heads/main`,
-      - verify the marker commit is an ancestor of current origin/main
-        (fetching that commit if needed for the local ancestry check).
+      - fetch `refs/heads/main` and, if missing locally, the marker commit,
+      - verify the marker commit is an ancestor of the fetched current
+        origin/main with `git merge-base --is-ancestor`.
       Valid marker → CHAIN OK skipped <slug>; continue.
       Missing/unparseable marker commit or commit not reachable from current
       origin/main → CHAIN HALT <slug>: stale merged marker; stop.
