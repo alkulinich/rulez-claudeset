@@ -12,7 +12,7 @@
 
 These apply to every task. Copy values verbatim.
 
-- **Version bump:** `VERSION` `1.7.1` → `1.8.0`. Do this only in Task 6.
+- **Version bump:** `VERSION` `1.7.1` → `1.8.0`. Do this only in Task 7.
 - **Bytes-per-line constant:** `~40`, named and tunable in one place (`SPEC2PR_FORECAST_BYTES_PER_LINE`, default `40`).
 - **Diff limit:** `SPEC2PR_MAX_DIFF` default `131072`. Plan limit: `SPEC2PR_MAX_PLAN` default `65536`.
 - **Kill-switch:** `SPEC2PR_FORECAST=0` skips the forecast step entirely (default `1`).
@@ -40,12 +40,14 @@ These apply to every task. Copy values verbatim.
 | `scripts/lib/pr-review-engine.sh` | `IGNORE_PR_LIMIT` guard on the diff gate | 1 |
 | `scripts/spec2pr-split-context.sh` | recognize `SPLIT forecast`, emit `gate=forecast` | 5 |
 | `commands/rulez/spec2pr-split.md` | document forecast splits | 5 |
-| `commands/rulez/spec2pr.md` | document and forward new flags + forecast behavior | 6 |
+| `scripts/mctl.sh` | accept/reject/forward override flags for `mctl add` | 6 |
+| `tests/mctl/test-add.sh` | mctl flag forwarding/rejection coverage | 6 |
+| `commands/rulez/spec2pr.md` | document and forward new flags + forecast behavior | 7 |
 | `tests/spec2pr/helpers.sh` | `queue_clean_forecast` shared fixture helper | 3 |
 | `tests/spec2pr/test-forecast.sh` (new) | forecast unit + integration cases | 2, 3, 4 |
 | `tests/spec2pr/test-spec2pr-split-context.sh` | `SPLIT forecast` fixture | 5 |
 | existing `tests/spec2pr/test-*.sh` | enqueue forecast fixture on full runs, bump claude counts | 3 |
-| `VERSION`, `UPGRADE.md` | minor bump + note | 6 |
+| `VERSION`, `UPGRADE.md` | minor bump + note | 7 |
 
 Run the whole suite with `bash tests/spec2pr/run-tests.sh` after every task; it must end `N tests run, 0 failed`.
 
@@ -228,7 +230,7 @@ Pure additions to the shared runtime: env defaults plus three functions. Unit-te
   - env vars `SPEC2PR_FORECAST` (default `1`), `SPEC2PR_FORECAST_BYTES_PER_LINE` (default `40`)
   - `split_forecast <est-bytes> <limit>` → `finish 2 "SPLIT forecast est=<est> limit=<limit>"` (exits 2)
   - `forecast_claude_attempt <tag> <prompt-file> <out>` → runs claude read-only via `claude_json_attempt`, then enforces the read-only contract. Return codes: `0` ok; `2` claude process failure; `3` invalid envelope JSON; `4` worktree modified (HEAD changed or dirty). On `2`/`3` the worktree is already cleaned by `claude_json_attempt`; on `4` this function cleans back to the pre-call HEAD.
-  - `forecast_payload_valid <forecast.json> <plan-sha> <spec-sha>` → exit 0 iff the file is a structurally valid forecast payload whose `plan_sha256`/`spec_sha256` equal the passed shas and whose `est_bytes == current_diff_bytes + implementation_est_bytes`.
+  - `forecast_payload_valid <forecast.json> <plan-sha> <spec-sha> <current-diff-bytes>` → exit 0 iff the file is a structurally valid forecast payload whose `plan_sha256`/`spec_sha256` equal the passed shas, whose `current_diff_bytes` equals the shell-measured current diff from this run, whose `total_loc` equals the sum of `files[].loc`, whose `implementation_est_bytes == total_loc * SPEC2PR_FORECAST_BYTES_PER_LINE`, and whose `est_bytes == current_diff_bytes + implementation_est_bytes`.
 
 - [ ] **Step 1: Write the failing unit tests (create `tests/spec2pr/test-forecast.sh`)**
 
@@ -242,12 +244,12 @@ run_split_forecast() {
   ( source "$REPO_ROOT/scripts/lib/spec2pr-runtime.sh"; STAGE=forecast; split_forecast "$1" "$2" ) 2>&1
 }
 
-payload_valid_rc() {  # <json-string> <plan-sha> <spec-sha>
+payload_valid_rc() {  # <json-string> <plan-sha> <spec-sha> <current-diff-bytes>
   local f="$SANDBOX/payload.json"
   printf '%s' "$1" > "$f"
   (
     source "$REPO_ROOT/scripts/lib/spec2pr-runtime.sh"
-    forecast_payload_valid "$f" "$2" "$3"
+    forecast_payload_valid "$f" "$2" "$3" "$4"
     local rc="$?"
     # spec2pr-runtime.sh installs an EXIT trap that treats a normal return from
     # a sourced script as an unexpected pipeline exit. Mark the subshell as
@@ -272,7 +274,7 @@ test_forecast_payload_valid_accepts_good_fits() {
   make_sandbox
   local json
   json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":10}],"total_loc":10,"implementation_est_bytes":400,"est_bytes":1400,"verdict":"fits"}'
-  assert_eq "0" "$(payload_valid_rc "$json" aa bb)" "valid fits payload accepted"
+  assert_eq "0" "$(payload_valid_rc "$json" aa bb 1000)" "valid fits payload accepted"
   rm -rf "$SANDBOX"
 }
 
@@ -280,25 +282,31 @@ test_forecast_payload_valid_requires_parts_on_exceeds() {
   make_sandbox
   local json
   json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":110000,"files":[{"path":"x.ts","loc":1000}],"total_loc":1000,"implementation_est_bytes":40000,"est_bytes":150000,"verdict":"exceeds"}'
-  assert_eq "1" "$(payload_valid_rc "$json" aa bb)" "exceeds payload without parts/summary rejected"
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 110000)" "exceeds payload without parts/summary rejected"
   json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":110000,"files":[{"path":"x.ts","loc":1000}],"total_loc":1000,"implementation_est_bytes":40000,"est_bytes":150000,"verdict":"exceeds","summary":"split it","parts":["part-1","part-2"]}'
-  assert_eq "0" "$(payload_valid_rc "$json" aa bb)" "exceeds payload with parts/summary accepted"
+  assert_eq "0" "$(payload_valid_rc "$json" aa bb 110000)" "exceeds payload with parts/summary accepted"
   rm -rf "$SANDBOX"
 }
 
 test_forecast_payload_valid_rejects_hash_mismatch() {
   make_sandbox
   local json
-  json='{"plan_sha256":"WRONG","spec_sha256":"bb","current_diff_bytes":1000,"files":[],"total_loc":0,"implementation_est_bytes":400,"est_bytes":1400,"verdict":"fits"}'
-  assert_eq "1" "$(payload_valid_rc "$json" aa bb)" "plan hash mismatch rejected"
+  json='{"plan_sha256":"WRONG","spec_sha256":"bb","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":10}],"total_loc":10,"implementation_est_bytes":400,"est_bytes":1400,"verdict":"fits"}'
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "plan hash mismatch rejected"
   rm -rf "$SANDBOX"
 }
 
 test_forecast_payload_valid_rejects_est_inconsistency() {
   make_sandbox
   local json
-  json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":1000,"files":[],"total_loc":0,"implementation_est_bytes":400,"est_bytes":9999,"verdict":"fits"}'
-  assert_eq "1" "$(payload_valid_rc "$json" aa bb)" "est_bytes != current + impl rejected"
+  json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":10}],"total_loc":10,"implementation_est_bytes":400,"est_bytes":9999,"verdict":"fits"}'
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "est_bytes != current + impl rejected"
+  json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":999,"files":[{"path":"x.ts","loc":10}],"total_loc":10,"implementation_est_bytes":400,"est_bytes":1399,"verdict":"fits"}'
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "current_diff_bytes mismatch rejected"
+  json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":10}],"total_loc":11,"implementation_est_bytes":440,"est_bytes":1440,"verdict":"fits"}'
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "total_loc must equal file loc sum"
+  json='{"plan_sha256":"aa","spec_sha256":"bb","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":10}],"total_loc":10,"implementation_est_bytes":401,"est_bytes":1401,"verdict":"fits"}'
+  assert_eq "1" "$(payload_valid_rc "$json" aa bb 1000)" "implementation bytes must use bytes-per-line constant"
   rm -rf "$SANDBOX"
 }
 ```
@@ -363,14 +371,17 @@ forecast_claude_attempt() {
   return 0
 }
 
-# forecast_payload_valid <forecast.json> <plan-sha> <spec-sha>
+# forecast_payload_valid <forecast.json> <plan-sha> <spec-sha> <current-diff-bytes>
 # Exit 0 iff <forecast.json> is a structurally valid forecast payload whose
-# plan_sha256/spec_sha256 equal the shell-computed shas and whose
-# est_bytes == current_diff_bytes + implementation_est_bytes. Used for both a
-# freshly extracted payload and a cached one.
+# plan_sha256/spec_sha256 equal the shell-computed shas, whose current_diff_bytes
+# equals the shell-measured diff from this run, and whose LOC/byte arithmetic is
+# internally consistent. Used for both a freshly extracted payload and a cached
+# one.
 forecast_payload_valid() {
-  local f="$1" plan_sha="$2" spec_sha="$3"
-  jq -e --arg ps "$plan_sha" --arg ss "$spec_sha" '
+  local f="$1" plan_sha="$2" spec_sha="$3" current_diff="$4"
+  jq -e --arg ps "$plan_sha" --arg ss "$spec_sha" \
+      --argjson current_diff "$current_diff" \
+      --argjson bytes_per_line "$SPEC2PR_FORECAST_BYTES_PER_LINE" '
     type == "object"
     and (.plan_sha256 | type == "string") and (.plan_sha256 == $ps)
     and (.spec_sha256 | type == "string") and (.spec_sha256 == $ss)
@@ -383,7 +394,10 @@ forecast_payload_valid() {
     and (.total_loc | type == "number" and . == floor and . >= 0)
     and (.implementation_est_bytes | type == "number" and . == floor and . >= 0)
     and (.current_diff_bytes | type == "number" and . == floor and . >= 0)
+    and (.current_diff_bytes == $current_diff)
     and (.est_bytes | type == "number" and . == floor and . >= 0)
+    and (.total_loc == ([.files[].loc] | add // 0))
+    and (.implementation_est_bytes == (.total_loc * $bytes_per_line))
     and (.est_bytes == (.current_diff_bytes + .implementation_est_bytes))
     and (.verdict == "fits" or .verdict == "exceeds")
     and (if .verdict == "exceeds"
@@ -435,8 +449,11 @@ queue_clean_forecast() {
   enqueue_claude "$1" <<'EOF'
 plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
 spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
-printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":1000,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":1040,"verdict":"fits"}}' \
-  "$plan_sha" "$spec_sha"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+est=$((cur_bytes + 40))
+printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}}' \
+  "$plan_sha" "$spec_sha" "$cur_bytes" "$est"
 EOF
 }
 
@@ -445,8 +462,13 @@ queue_exceeds_forecast() {
   enqueue_claude "$1" <<'EOF'
 plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
 spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
-printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":110000,"files":[{"path":"big.ts","loc":1000}],"total_loc":1000,"implementation_est_bytes":40000,"est_bytes":150000,"verdict":"exceeds","summary":"Forecast exceeds diff limit. Recommended split: part-1 helpers; part-2 wiring + tests.","parts":["part-1: helpers + types","part-2: wiring + tests"]}}' \
-  "$plan_sha" "$spec_sha"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+total_loc=4000
+impl_bytes=$((total_loc * 40))
+est=$((cur_bytes + impl_bytes))
+printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"big.ts","loc":%s}],"total_loc":%s,"implementation_est_bytes":%s,"est_bytes":%s,"verdict":"exceeds","summary":"Forecast exceeds diff limit. Recommended split: part-1 helpers; part-2 wiring + tests.","parts":["part-1: helpers + types","part-2: wiring + tests"]}}' \
+  "$plan_sha" "$spec_sha" "$cur_bytes" "$total_loc" "$total_loc" "$impl_bytes" "$est"
 EOF
 }
 ```
@@ -465,7 +487,7 @@ test_forecast_fits_proceeds_to_implement() {
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "forecast fits run reaches done"
-  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=1040 limit=131072" "fits status printed"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "fits status printed"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "fits run reaches done"
   assert_file_exists "$SPEC2PR_HOME/$ID/forecast.json" "forecast payload extracted"
   assert_file_exists "$SPEC2PR_HOME/$ID/forecast.claude.json" "raw claude envelope stored"
@@ -482,7 +504,8 @@ test_forecast_exceeds_splits_without_implement() {
   run_spec2pr "$SPEC"
 
   assert_eq "2" "$RC" "forecast exceeds exits 2 (split)"
-  assert_contains "$OUT" "SPEC2PR SPLIT forecast est=150000 limit=131072" "forecast split token printed"
+  assert_contains "$OUT" "SPEC2PR SPLIT forecast est=" "forecast split token printed"
+  assert_contains "$OUT" "limit=131072" "forecast split limit printed"
   assert_contains "$OUT" "Recommended split: part-1 helpers" "recommended split summary printed before split"
   assert_eq "2" "$(codex_calls)" "no implement codex call spent (only spec-review + plan-review)"
 }
@@ -498,7 +521,8 @@ test_forecast_exceeds_overridden_by_ignore_pr_limit() {
   run_spec2pr --ignore-pr-limit "$SPEC"
 
   assert_eq "0" "$RC" "ignore-pr-limit overrides forecast split"
-  assert_contains "$OUT" "SPEC2PR OK forecast: est=150000 exceeds limit; overridden" "override status printed"
+  assert_contains "$OUT" "SPEC2PR OK forecast: est=" "override status printed"
+  assert_contains "$OUT" "exceeds limit; overridden" "override suffix printed"
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "override run reaches done"
 }
 
@@ -609,8 +633,8 @@ forecast_before_implement() {
   local plan_sha spec_sha cur_bytes pf rc
   plan_sha="$(sha256_of "$WORKTREE/$WT_PLAN_REL")"
   spec_sha="$(sha256_of "$WORKTREE/$WT_SPEC_REL")"
-
   cur_bytes="$(git -C "$WORKTREE" diff "$BASE_SHA...HEAD" | wc -c | tr -d ' ')"
+
   pf="$META_DIR/forecast.prompt"
   cat > "$pf" <<EOF
 Read the implementation plan at $WT_PLAN_REL and the spec at $WT_SPEC_REL in
@@ -652,7 +676,7 @@ EOF
     status "WARN" "malformed forecast JSON; proceeding to implement"
     return 0
   fi
-  if ! forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha"; then
+  if ! forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
     rm -f "$META_DIR/forecast.json"
     status "WARN" "malformed forecast JSON; proceeding to implement"
     return 0
@@ -731,8 +755,8 @@ Reuse a valid `forecast.json` on a re-run that reaches a fresh implement (skip t
 - Test: `tests/spec2pr/test-forecast.sh`
 
 **Interfaces:**
-- Consumes: `forecast_payload_valid`, `sha256_of`, `$META_DIR/forecast.json` (Task 3).
-- Produces: cache-reuse behavior (no new claude call when the cached payload's hashes still match); start-from cleanup of `forecast.json`, `forecast.claude.json`, `forecast.prompt`.
+- Consumes: `forecast_payload_valid`, `sha256_of`, `$META_DIR/forecast.json`, and the current shell-measured `$BASE_SHA...HEAD` diff size (Task 3).
+- Produces: cache-reuse behavior (no new claude call when the cached payload's hashes and `current_diff_bytes` still match); stale-cache regeneration when the plan hash, spec hash, or current diff size changes; start-from cleanup of `forecast.json`, `forecast.claude.json`, `forecast.prompt`.
 
 - [ ] **Step 1: Write the failing tests (append to `tests/spec2pr/test-forecast.sh`)**
 
@@ -761,7 +785,7 @@ test_forecast_cache_reused_when_hashes_match() {
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "cached-forecast resume reaches done"
-  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=1040 limit=131072" "cached forecast still decides fits"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "cached forecast still decides fits"
   # Second run claude calls = pr-review review + classify only (plan exists, no
   # new forecast call). If the forecast had re-called claude it would consume
   # the pr-review fixtures and break.
@@ -791,10 +815,35 @@ test_forecast_stale_hash_regenerates() {
   run_spec2pr "$SPEC"
 
   assert_eq "0" "$RC" "stale-cache resume regenerates and reaches done"
-  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=1040 limit=131072" "regenerated forecast decides fits"
+  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "regenerated forecast decides fits"
   local cur_plan_sha
   cur_plan_sha="$(sha256sum "$SPEC2PR_WORKTREES/$ID/docs/superpowers/plans/toy-spec-plan.md" | awk '{print $1}')"
   assert_eq "$cur_plan_sha" "$(jq -r '.plan_sha256' "$fj")" "regenerated payload carries the live plan hash"
+}
+
+test_forecast_stale_current_diff_regenerates() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "blocked implement halts first run"
+
+  # Corrupt only the cached current diff; matching hashes are not sufficient.
+  local fj="$SPEC2PR_HOME/$ID/forecast.json"
+  jq '.current_diff_bytes = 999999' "$fj" > "$fj.tmp" && mv "$fj.tmp" "$fj"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_spec2pr_subject_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "stale current diff regenerates and reaches done"
+  assert_not_contains "$(jq -r '.current_diff_bytes' "$fj")" "999999" "regenerated payload replaced stale current diff"
 }
 
 test_forecast_regenerated_mismatch_warns_and_proceeds() {
@@ -802,9 +851,9 @@ test_forecast_regenerated_mismatch_warns_and_proceeds() {
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  # Forecast returns hashes that will never match the worktree files.
+  # Forecast returns hashes/current diff that will never match the worktree files.
   enqueue_claude 04-forecast <<'EOF'
-printf '{"result":{"plan_sha256":"nope","spec_sha256":"nope","current_diff_bytes":1000,"files":[],"total_loc":0,"implementation_est_bytes":40,"est_bytes":1040,"verdict":"fits"}}'
+printf '{"result":{"plan_sha256":"nope","spec_sha256":"nope","current_diff_bytes":1000,"files":[{"path":"x.ts","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":1040,"verdict":"fits"}}'
 EOF
   queue_spec2pr_subject_implementation_commit 05-implement
   queue_clean_pr_review 06-pr-review
@@ -839,21 +888,22 @@ Expected: FAIL — no caching yet (the cache-reuse test makes an extra claude ca
 
 - [ ] **Step 3: Add the cache check to `forecast_before_implement` in `scripts/spec2pr.sh`**
 
-Insert, right after the `plan_sha`/`spec_sha` are computed and before `cur_bytes=...`:
+Insert, right after the `plan_sha`/`spec_sha` and `cur_bytes` are computed:
 
 ```bash
   # Resume/cache: reuse a forecast whose plan AND spec hashes still match the
-  # current artifacts; otherwise discard and regenerate so a re-reviewed plan
+  # current artifacts AND whose current_diff_bytes still matches the live diff;
+  # otherwise discard and regenerate so a re-reviewed plan or changed PR surface
   # never decides on stale size data.
   if [ -f "$META_DIR/forecast.json" ] \
-      && forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha"; then
+      && forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
     forecast_decide "$META_DIR/forecast.json"
     return 0
   fi
   rm -f "$META_DIR/forecast.json" "$META_DIR/forecast.claude.json"
 ```
 
-So the function body order becomes: compute hashes → cache check (above) → measure `cur_bytes` → write prompt → call → fail-soft branches → extract → validate → `forecast_decide`. (A regenerated payload with mismatched hashes fails `forecast_payload_valid` in the validate step and is handled as malformed → WARN + proceed, per Task 3.)
+So the function body order becomes: compute hashes → measure `cur_bytes` → cache check (above) → write prompt → call → fail-soft branches → extract → validate → `forecast_decide`. (A regenerated payload with mismatched hashes, mismatched `current_diff_bytes`, or inconsistent arithmetic fails `forecast_payload_valid` in the validate step and is handled as malformed → WARN + proceed, per Task 3.)
 
 - [ ] **Step 4: Add forecast-artifact cleanup to the `--start-from` rewind in `scripts/spec2pr.sh`**
 
@@ -978,7 +1028,199 @@ git commit -m "feat(spec2pr): treat SPLIT forecast as a first-class split gate i
 
 ---
 
-## Task 6: Versioning + command docs
+## Task 6: `mctl add` override flag forwarding
+
+Wire the same operator override flags through the `mctl add` launcher so the
+dashboard/background-run path has the same behavior as direct script execution.
+
+**Files:**
+- Modify: `scripts/mctl.sh`
+- Test: `tests/mctl/test-add.sh`
+
+**Interfaces:**
+- `mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md>`
+  accepts and forwards both override flags.
+- `mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]`
+  accepts and forwards only `--ignore-pr-limit`.
+- `mctl add review-pr --ignore-plan-limit <pr#>` is rejected.
+- Metadata persists an `override_flags` line containing the accepted flags in
+  shell-token order so `build_inner_runner_command` can forward them.
+
+- [ ] **Step 1: Write failing mctl tests in `tests/mctl/test-add.sh`**
+
+Append three focused tests near the existing `add --fast` coverage:
+
+```bash
+test_add_spec2pr_forwards_size_override_flags() {
+  make_sandbox
+  run_mctl add spec2pr --ignore-plan-limit --ignore-pr-limit "$SPEC"
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-foo-bar"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add spec2pr override flags exits 0"
+  assert_eq "--ignore-plan-limit --ignore-pr-limit" "$(meta_value "$run_dir/meta" override_flags)" "override flags persisted"
+  assert_contains "$log" "$REPO_ROOT/scripts/spec2pr.sh" "runner uses spec2pr script"
+  assert_contains "$log" "--ignore-plan-limit" "runner forwards plan override"
+  assert_contains "$log" "--ignore-pr-limit" "runner forwards pr override"
+  assert_contains "$log" "$SPEC" "runner forwards spec path"
+}
+
+test_add_review_pr_forwards_ignore_pr_limit() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr --ignore-pr-limit 7 --reviewer codex
+
+  local run_dir="$RULEZ_CLAUDESET_HOME/mctl/repo-pr-7"
+  local log
+  log="$(cat "$SANDBOX/tmux.log")"
+
+  assert_eq "0" "$RC" "add review-pr ignore-pr-limit exits 0"
+  assert_eq "--ignore-pr-limit" "$(meta_value "$run_dir/meta" override_flags)" "review-pr override flag persisted"
+  assert_contains "$log" "$REPO_ROOT/scripts/review-pr.sh" "runner uses review-pr script"
+  assert_contains "$log" "--ignore-pr-limit" "runner forwards review-pr override"
+  assert_contains "$log" "--reviewer" "runner still forwards reviewer flag"
+  assert_contains "$log" "'codex'" "runner forwards reviewer value"
+  assert_contains "$log" "'7'" "runner forwards PR number"
+}
+
+test_add_review_pr_rejects_ignore_plan_limit() {
+  make_sandbox
+  run_mctl_in_dir "$REPO" add review-pr --ignore-plan-limit 7
+
+  assert_eq "1" "$RC" "review-pr rejects ignore-plan-limit"
+  assert_contains "$OUT" "--ignore-plan-limit is only supported for spec2pr" "review-pr plan override rejection message"
+}
+```
+
+- [ ] **Step 2: Run the focused mctl tests to verify they fail**
+
+Run: `bash tests/mctl/run-tests.sh 2>&1 | grep -E 'override|ignore_pr|ignore_plan'`
+Expected: FAIL — `mctl add` does not parse or forward the new flags yet.
+
+- [ ] **Step 3: Update usage in `scripts/mctl.sh`**
+
+Change `add_usage()` to:
+
+```bash
+die "usage: mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md> | mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]"
+```
+
+- [ ] **Step 4: Persist override flags in metadata**
+
+Extend `write_meta()` with a twelfth optional parameter:
+
+```bash
+local run_dir="$1" kind="$2" token="$3" session="$4" repo="$5" started="$6" spec_home="$7" wt_home="$8" target="$9" reviewer="${10:-}" fast="${11:-}" override_flags="${12:-}"
+```
+
+After the existing `fast` metadata write, add:
+
+```bash
+if [ -n "$override_flags" ]; then
+  printf 'override_flags=%s\n' "$override_flags" >> "$run_dir/meta"
+fi
+```
+
+- [ ] **Step 5: Parse target-specific override flags in `cmd_add()`**
+
+Add local state:
+
+```bash
+local ignore_plan_limit="" ignore_pr_limit="" override_flags=""
+```
+
+Because the documented forms place override flags after the target kind and
+before the target value, parse the target-specific flags before assigning
+`arg="$1"`:
+
+```bash
+kind="$1"
+shift
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --ignore-plan-limit)
+      ignore_plan_limit=1
+      shift
+      ;;
+    --ignore-pr-limit)
+      ignore_pr_limit=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+[ "$#" -ge 1 ] || add_usage
+arg="$1"
+shift
+```
+
+Leave the existing suffix loop for `--fast` / `--reviewer` in place, but also
+accept `--ignore-pr-limit` there for `review-pr` and both override flags there
+for `spec2pr` so `mctl add spec2pr <spec> --ignore-pr-limit` remains ergonomic.
+Reject unknown flags through `add_usage` as today.
+
+In the `spec2pr)` case, allow both flags and build:
+
+```bash
+[ -n "$ignore_plan_limit" ] && override_flags="${override_flags:+$override_flags }--ignore-plan-limit"
+[ -n "$ignore_pr_limit" ] && override_flags="${override_flags:+$override_flags }--ignore-pr-limit"
+```
+
+In the `review-pr)` case:
+
+```bash
+[ -z "$ignore_plan_limit" ] || die "--ignore-plan-limit is only supported for spec2pr"
+[ -n "$ignore_pr_limit" ] && override_flags="--ignore-pr-limit"
+```
+
+- [ ] **Step 6: Forward persisted override flags from `build_inner_runner_command()`**
+
+Read the value:
+
+```bash
+override_flags="$(meta_get "$meta" override_flags)"
+```
+
+After the existing `--fast` prepend and before the reviewer handling, prepend
+the persisted override flags if present:
+
+```bash
+if [ -n "$override_flags" ]; then
+  runner_args="$override_flags $runner_args"
+fi
+```
+
+The value is safe to reuse as plain tokens because it is generated internally
+from the fixed allow-list above, never from arbitrary user text.
+
+- [ ] **Step 7: Pass override metadata to `write_meta()`**
+
+Update the `write_meta` call in `cmd_add()` to pass `"$override_flags"` after
+`"$fast"`.
+
+- [ ] **Step 8: Run the focused mctl tests to verify they pass**
+
+Run: `bash tests/mctl/run-tests.sh 2>&1 | grep -E 'override|ignore_pr|ignore_plan'`
+Expected: PASS.
+
+- [ ] **Step 9: Run the mctl suite**
+
+Run: `bash tests/mctl/run-tests.sh`
+Expected: `N tests run, 0 failed`.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add scripts/mctl.sh tests/mctl/test-add.sh
+git commit -m "feat(mctl): forward spec2pr and review-pr size override flags"
+```
+
+---
+
+## Task 7: Versioning + command docs
 
 Bump the version, add the upgrade note, and document the new flags + forecast behavior in the spec2pr command doc.
 
@@ -1011,8 +1253,9 @@ plan-review, to forecast the final PR diff size. If the forecast
 exceeds the diff limit it stops early (SPEC2PR SPLIT forecast) and prints a
 recommended split instead of running implement. New flags --ignore-plan-limit
 and --ignore-pr-limit force a run past the respective size limit;
---ignore-pr-limit also applies to review-pr. Set SPEC2PR_FORECAST=0 to disable
-the forecast step.
+--ignore-pr-limit also applies to review-pr. The /rulez:spec2pr command and
+mctl add spec2pr forward the spec2pr override flags; mctl add review-pr forwards
+--ignore-pr-limit. Set SPEC2PR_FORECAST=0 to disable the forecast step.
 ```
 
 - [ ] **Step 3: Document and forward the flags + forecast in `commands/rulez/spec2pr.md`**
@@ -1069,8 +1312,14 @@ Expected: `VERSION` shows `1.8.0`; `UPGRADE.md` top section is `## To v1.8.0 - f
 
 - [ ] **Step 5: Run the full suite one final time**
 
-Run: `bash tests/spec2pr/run-tests.sh`
-Expected: `N tests run, 0 failed`.
+Run:
+
+```bash
+bash tests/spec2pr/run-tests.sh
+bash tests/mctl/run-tests.sh
+```
+
+Expected: each suite ends with `N tests run, 0 failed`.
 
 - [ ] **Step 6: Commit**
 
@@ -1090,7 +1339,7 @@ git commit -m "docs(spec2pr): bump to v1.8.0; document forecast + override flags
 Spec coverage check against the design sections:
 
 - §1 new `forecast` step at the fresh-implement boundary, not a `--start-from` target, planner untouched, `SPEC2PR_FORECAST=0` kill-switch → Task 3 (Steps 4-5), Task 2 (default).
-- §2 forecast call via fail-soft wrapper around `claude_json_attempt`, read-only contract (HEAD + clean worktree), current-diff-bytes measurement, prompt, raw envelope vs extracted payload, hashes, bytes-per-line constant, payload validation incl. `est_bytes == current + impl` and hash equality → Task 2 (`forecast_claude_attempt`, `forecast_payload_valid`), Task 3 (prompt, extraction).
+- §2 forecast call via fail-soft wrapper around `claude_json_attempt`, read-only contract (HEAD + clean worktree), current-diff-bytes measurement, prompt, raw envelope vs extracted payload, hashes, bytes-per-line constant, payload validation incl. live current-diff equality, `total_loc` sum, `implementation_est_bytes == total_loc * bytes_per_line`, `est_bytes == current + impl`, and hash equality → Task 2 (`forecast_claude_attempt`, `forecast_payload_valid`), Task 3 (prompt, extraction).
 - §3 decision + early stop (`fits` / `exceeds` split via `split_forecast` with unconditional summary print / `exceeds` overridden) → Task 2 (`split_forecast`), Task 3 (`forecast_decide`).
 - §4 override flags (`--ignore-plan-limit`, `--ignore-pr-limit`) + gate guards + override status lines → Task 1 (plan + diff gates), Task 3 (forecast override).
 - §5 split-tooling compatibility (`spec2pr-split-context.sh`, `spec2pr-split.md`, test fixture) → Task 5.
@@ -1098,6 +1347,7 @@ Spec coverage check against the design sections:
 - §7 fail-soft error handling (rc 2/3/4 + malformed payload) → Task 2 (return codes), Task 3 (WARN branches).
 - §8 status/contract surface → covered across Tasks 1, 3 (exact lines in Global Constraints).
 - Testing list → Task 2 (unit), Tasks 3-4 (integration), Task 5 (split-context fixture).
-- Versioning → Task 6.
+- `mctl add` forwarding/rejection semantics → Task 6.
+- Versioning → Task 7.
 
 Type/name consistency: `IGNORE_PLAN_LIMIT`/`IGNORE_PR_LIMIT`, `SPEC2PR_FORECAST`, `SPEC2PR_FORECAST_BYTES_PER_LINE`, `split_forecast`, `forecast_claude_attempt`, `forecast_payload_valid`, `forecast_before_implement`, `forecast_decide`, `queue_clean_forecast`, `queue_exceeds_forecast` are used identically across all tasks. The forecast payload fields match the spec's JSON example exactly.
