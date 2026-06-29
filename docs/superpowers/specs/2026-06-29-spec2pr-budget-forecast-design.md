@@ -300,8 +300,11 @@ New line on the `review-pr` contract:
 
 ## Testing
 
-Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
-`stub-codex.sh` model stubs. New cases:
+Forecast and script-level tests live in `tests/spec2pr/`, using the existing
+`stub-claude.sh` / `stub-codex.sh` model stubs. `mctl` coverage lives in
+`tests/mctl/`; command-wrapper behavior that is not currently exercised by a
+unit harness must be covered by read-through or manual dry-run verification.
+New cases:
 
 - forecast **fits** → run proceeds to implement.
 - forecast **exceeds** → `SPEC2PR SPLIT forecast`, no implement call spent,
@@ -330,6 +333,13 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded.
 - `mctl add review-pr --ignore-pr-limit <pr>` → accepted and forwarded;
   `mctl add review-pr --ignore-plan-limit <pr>` → rejected.
+- `/rulez:spec2pr --ignore-pr-limit <spec>` and
+  `/rulez:spec2pr --ignore-plan-limit <spec>` → accepted and forwarded to the
+  background `scripts/spec2pr.sh` command; unknown flags are rejected before
+  launch, and `/rulez:spec2pr status` remains unchanged and accepts no flags.
+- `/rulez:spec2pr` completion handling recognizes
+  `SPEC2PR SPLIT forecast est=<n> limit=<n>` as a split outcome and keeps the
+  existing `SPLIT spec|plan|diff size=<n> limit=<n>` handling unchanged.
 
 ## Versioning
 
