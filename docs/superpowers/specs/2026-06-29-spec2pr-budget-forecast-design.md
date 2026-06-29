@@ -195,6 +195,13 @@ engine emits the caller's contract prefix:
 or `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` from
 review-pr.
 
+The `/rulez:spec2pr` command wrapper must expose the same spec2pr override
+flags, not merely document them. Its usage becomes
+`/rulez:spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec-path>`; it
+parses those optional flags before the spec path, rejects unknown flags, and
+forwards the accepted flags to `scripts/spec2pr.sh` in the background command.
+`/rulez:spec2pr status` remains unchanged and takes no flags.
+
 ### 5. Split-tooling compatibility
 
 `SPEC2PR SPLIT forecast est=<n> limit=<n>` is a new split gate token. Update the
@@ -263,6 +270,12 @@ New lines on the `spec2pr` contract:
 - `SPEC2PR SPLIT forecast est=<n> limit=131072` (terminal; recommended parts
   are printed before this line because `finish` exits)
 
+Update the `/rulez:spec2pr` completion handling so the new terminal
+`SPLIT forecast est=<n> limit=<n>` line is recognized as a split outcome and
+the user is directed to split the spec. Keep the existing measured-size
+handling for `SPLIT spec|plan|diff size=<n> limit=<n>` unchanged; forecast uses
+`est=<n>` because it is an estimate, not a measured size.
+
 New line on the `review-pr` contract:
 
 - `PRREVIEW OK pr-review: diff size=<n> exceeds limit; overridden` (with
@@ -324,6 +337,8 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
 - **edit** `commands/rulez/spec2pr.md` — document the new spec2pr flags. There
   is no `commands/rulez/review-pr.md` wrapper in this repo; document
   `review-pr.sh --ignore-pr-limit` in `UPGRADE.md` and the script usage instead.
+  Also update the command wrapper to forward the accepted spec2pr flags and to
+  recognize `SPLIT forecast est=<n> limit=<n>` completion output.
 - **edit** `commands/rulez/spec2pr-split.md`,
   `scripts/spec2pr-split-context.sh`, and
   `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
