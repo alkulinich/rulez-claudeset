@@ -204,11 +204,14 @@ parses those optional flags before the spec path, rejects unknown flags, and
 forwards the accepted flags to `scripts/spec2pr.sh` in the background command.
 `/rulez:spec2pr status` remains unchanged and takes no flags.
 
-The `mctl add spec2pr` runner is also an operator entry point and must forward
-the same spec2pr-only override flags. Its usage becomes
-`mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md>`;
-it accepts the two flags only for the `spec2pr` target, forwards them to
-`scripts/spec2pr.sh`, and rejects them for `review-pr`.
+The `mctl add` runner is also an operator entry point and must forward the same
+override flags as the underlying script it launches. Its usage becomes
+`mctl add [--fast] spec2pr [--ignore-plan-limit] [--ignore-pr-limit] <spec.md>`
+and
+`mctl add [--fast] review-pr [--ignore-pr-limit] <pr#> [--reviewer <claude|codex>]`.
+It accepts and forwards both override flags for the `spec2pr` target, accepts
+and forwards only `--ignore-pr-limit` for the `review-pr` target, and rejects
+`--ignore-plan-limit` for `review-pr`.
 
 ### 5. Split-tooling compatibility
 
@@ -317,8 +320,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   `est_bytes != current_diff_bytes + implementation_est_bytes` → `WARN` +
   proceeds (fail-soft).
 - `mctl add spec2pr --ignore-pr-limit <spec>` and
-  `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded;
-  `mctl add review-pr --ignore-pr-limit <pr>` → rejected.
+  `mctl add spec2pr --ignore-plan-limit <spec>` → accepted and forwarded.
+- `mctl add review-pr --ignore-pr-limit <pr>` → accepted and forwarded;
+  `mctl add review-pr --ignore-plan-limit <pr>` → rejected.
 
 ## Versioning
 
@@ -356,8 +360,9 @@ Tests live in `tests/spec2pr/`, using the existing `stub-claude.sh` /
   Also update the command wrapper to forward the accepted spec2pr flags and to
   recognize `SPLIT forecast est=<n> limit=<n>` completion output.
 - **edit** `scripts/mctl.sh` and `tests/mctl/test-add.sh` — accept and forward
-  `--ignore-plan-limit` / `--ignore-pr-limit` for `mctl add spec2pr`, while
-  rejecting those flags for `review-pr`.
+  `--ignore-plan-limit` / `--ignore-pr-limit` for `mctl add spec2pr`; accept
+  and forward `--ignore-pr-limit` for `mctl add review-pr`; reject
+  `--ignore-plan-limit` for `review-pr`.
 - **edit** `commands/rulez/spec2pr-split.md`,
   `scripts/spec2pr-split-context.sh`, and
   `tests/spec2pr/test-spec2pr-split-context.sh` — accept `SPLIT forecast`
