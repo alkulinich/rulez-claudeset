@@ -117,11 +117,15 @@ Extend `tests/spec2pr/test-implementer.sh` (existing codex/claude stubs):
 
 ## Version
 
-`VERSION` `1.11.0` → `1.11.1` (additive tier on an existing flag — patch).
+`VERSION` `1.11.2` → `1.11.3` (additive tier on an existing flag — patch). The
+original draft targeted `1.11.0` → `1.11.1`, but `1.11.1` (implement-branch
+reattach) and `1.11.2` (spec2pr-chain merge-cleanup fix) shipped as hotfixes
+first; bump from whatever `VERSION` reads on `main` at implement time if it has
+moved past `1.11.2`.
 `UPGRADE.md` top section:
 
 ```
-## To v1.11.1 - from v1.11.0
+## To v1.11.3 - from v1.11.2
 
 **Action:** None.
 
