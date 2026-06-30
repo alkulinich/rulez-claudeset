@@ -43,11 +43,11 @@ and react:
 - `CHAIN HALT <slug>: <reason>` — the chain stopped at `<slug>`. Earlier specs
   stayed merged; show the reason. If `<reason>` is a forwarded `SPEC2PR DIRTY`
   or `SPEC2PR HALT` line, treat it like the matching `/rulez:spec2pr` outcome
-  for that one spec, then re-run `/rulez:spec2pr-chain [--fast] <spec…>` with
+  for that one spec, then re-run `/rulez:spec2pr-chain [--admin] [--fast] <spec…>` with
   the original flags to resume past the specs already merged. If `<reason>` is
   a forwarded `SPEC2PR SPLIT` line, split or replace the offending spec in the
   ordered list, or otherwise resolve the split condition, then re-run
-  `/rulez:spec2pr-chain [--fast] <updated-spec…>` with the original flags;
+  `/rulez:spec2pr-chain [--admin] [--fast] <updated-spec…>` with the original flags;
   already-merged predecessors will be skipped.
 - `CHAIN HALT: <reason>` (no slug — preflight or lock) — fix the invocation
   (same repo, no duplicate IDs, no other chain running) and re-run.

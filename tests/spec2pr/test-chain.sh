@@ -155,6 +155,17 @@ test_chain_admin_and_fast_flags_combine() {
   assert_contains "$OUT" "CHAIN DONE merged=1/1" "--admin --fast reaches done"
 }
 
+test_chain_fast_and_admin_flags_combine() {
+  make_sandbox
+  local a; a="$(add_spec chain-okfastadmin)"
+  queue_chain_spec 01-chain-okfastadmin chain-okfastadmin
+
+  run_chain --fast --admin "$a"
+
+  assert_eq "0" "$RC" "--fast --admin chain exits 0"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "--fast --admin reaches done"
+}
+
 test_chain_admin_does_not_apply_to_status() {
   make_sandbox
 
@@ -162,6 +173,7 @@ test_chain_admin_does_not_apply_to_status() {
 
   assert_eq "1" "$RC" "--admin status exits usage"
   assert_contains "$OUT" "CHAIN HALT: usage:" "--admin is not accepted for status"
+  assert_contains "$OUT" "spec2pr-chain.sh status | [--fast] [--admin] <spec-path> [<spec-path>...] (--admin specs only)" "usage advertises specs-only admin flag"
 }
 
 test_chain_resume_skips_merged() {

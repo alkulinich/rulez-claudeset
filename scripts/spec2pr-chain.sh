@@ -92,7 +92,7 @@ short_hash() { # <value> <length>
 }
 
 usage() {
-  chain_finish 1 "HALT: usage: spec2pr-chain.sh [--fast] status|<spec-path> [<spec-path>...]"
+  chain_finish 1 "HALT: usage: spec2pr-chain.sh status | [--fast] [--admin] <spec-path> [<spec-path>...] (--admin specs only)"
 }
 
 chain_require_dependency() {
