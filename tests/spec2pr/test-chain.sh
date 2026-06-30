@@ -301,6 +301,79 @@ EOF
   assert_file_absent "$SPEC2PR_HOME/project-chain-a.merged" "no marker written when merge lookup fails"
 }
 
+test_chain_behind_merge_updates_and_retries() {
+  make_sandbox
+  local a; a="$(add_spec chain-behind)"
+  queue_chain_spec 01-chain-behind chain-behind
+  printf 'behind-extra.txt\nlanded on main while the chain ran\n' \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+
+  run_chain "$a"
+
+  assert_eq "0" "$RC" "behind chain exits 0"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "behind chain reaches done"
+  assert_eq "3" "$(codex_calls)" "behind path runs no extra codex call"
+  assert_eq "2" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "behind path retries the merge once"
+  git -C "$PROJECT" fetch -q origin main
+  assert_contains "$(git -C "$PROJECT" show origin/main:behind-extra.txt 2>/dev/null || true)" \
+    "landed on main" "external behind commit is on main"
+  assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-behind.txt 2>/dev/null || true)" \
+    "chain-behind" "merged branch marker reached main"
+}
+
+test_chain_inspection_rejects_malformed_shape() {
+  local payload
+  for payload in \
+    '[{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}]' \
+    '{"mergeable":"MERGEABLE"}' \
+    '{"mergeable":1,"mergeStateStatus":"BEHIND"}' \
+    '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
+  do
+    make_sandbox
+    local a; a="$(add_spec chain-bad)"
+    queue_chain_spec 01-chain-bad chain-bad
+    printf 'optimistic merge failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+    printf '%s' "$payload" > "$SPEC2PR_TEST_GH/pr-view-json"
+
+    run_chain "$a"
+
+    assert_eq "1" "$RC" "malformed payload halts: $payload"
+    assert_contains "$OUT" "CHAIN HALT chain-bad: merge state inspection failed" \
+      "malformed payload halt line: $payload"
+    assert_eq "3" "$(codex_calls)" "malformed payload runs no conflict codex call: $payload"
+    assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+      "malformed payload does not retry the merge: $payload"
+  done
+}
+
+test_chain_unsupported_merge_state_halts() {
+  local payload
+  for payload in \
+    '{"mergeable":"UNKNOWN","mergeStateStatus":"CLEAN"}' \
+    '{"mergeable":"MERGEABLE","mergeStateStatus":"UNKNOWN"}'
+  do
+    make_sandbox
+    local a; a="$(add_spec chain-unsup)"
+    queue_chain_spec 01-chain-unsup chain-unsup
+    printf 'optimistic merge rejected\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+    printf '%s' "$payload" > "$SPEC2PR_TEST_GH/pr-view-json"
+
+    run_chain "$a"
+
+    assert_eq "1" "$RC" "unsupported state halts: $payload"
+    assert_contains "$OUT" "CHAIN HALT chain-unsup: merge state unsupported" \
+      "unsupported halt line: $payload"
+    assert_contains "$OUT" "optimistic merge rejected" \
+      "unsupported halt includes the gh stderr: $payload"
+    assert_eq "3" "$(codex_calls)" "unsupported state runs no conflict codex call: $payload"
+    assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+      "unsupported state does not retry the merge: $payload"
+  done
+}
+
 test_chain_lock_contention_halts_without_stealing_active_lock() {
   make_sandbox
   local a; a="$(add_spec chain-a)"

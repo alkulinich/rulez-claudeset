@@ -102,6 +102,84 @@ chain_require_dependency() {
   fi
 }
 
+chain_inspect_merge_state() { # <worktree> <pr-url> <slug>
+  local wt="$1" pr_url="$2" slug="$3"
+  local view_json view_rc parsed parse_rc line_count
+
+  set +e
+  view_json="$(cd "$wt" && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null)"
+  view_rc=$?
+  set -e
+  if [ "$view_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  set +e
+  parsed="$(printf '%s' "$view_json" | jq -er 'select(type == "object" and (.mergeable | type == "string") and (.mergeStateStatus | type == "string")) | [.mergeable, .mergeStateStatus] | @tsv' 2>/dev/null)"
+  parse_rc=$?
+  set -e
+  if [ "$parse_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  line_count="$(printf '%s\n' "$parsed" | wc -l | tr -d ' ')"
+  if [ "$line_count" != "1" ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  MERGEABLE="${parsed%%	*}"
+  MSS="${parsed#*	}"
+  if [ -z "$MERGEABLE" ] || [ -z "$MSS" ] || [ "$MERGEABLE" = "$parsed" ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+}
+
+chain_retry_merge() { # <worktree> <pr-url> <slug> [extra-gh-flags...]
+  local wt="$1" pr_url="$2" slug="$3"
+  shift 3
+  local retry_err retry_rc
+
+  set +e
+  retry_err="$(cd "$wt" && gh pr merge "$pr_url" --squash --delete-branch "$@" 2>&1 1>/dev/null)"
+  retry_rc=$?
+  set -e
+  if [ "$retry_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge retry failed ($retry_err)"
+  fi
+}
+
+chain_update_behind() { # <worktree> <pr-url> <slug>
+  local wt="$1" pr_url="$2" slug="$3"
+
+  if ! git -C "$wt" fetch -q origin main; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+  if ! git -C "$wt" merge --no-edit origin/main >/dev/null 2>&1; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+  if ! git -C "$wt" push -q origin HEAD:refs/heads/spec2pr/"$slug"; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+
+  chain_retry_merge "$wt" "$pr_url" "$slug"
+}
+
+chain_handle_failed_merge() { # <worktree> <pr-url> <slug> <id> <merge-stderr>
+  local wt="$1" pr_url="$2" slug="$3" id="$4" merge_err="$5"
+  MERGEABLE=""
+  MSS=""
+
+  chain_inspect_merge_state "$wt" "$pr_url" "$slug"
+  case "$MSS" in
+    BEHIND)
+      chain_update_behind "$wt" "$pr_url" "$slug"
+      ;;
+    *)
+      chain_finish 1 "HALT $slug: merge state unsupported ($merge_err)"
+      ;;
+  esac
+}
+
 show_status() {
   FINISHED=1
   if [ -d "$SPEC2PR_HOME/chains" ]; then
@@ -149,6 +227,7 @@ done
 
 chain_require_dependency git
 chain_require_dependency gh
+chain_require_dependency jq
 
 GIT_ROOT=""
 SPEC_ABS_LIST=()
@@ -266,7 +345,7 @@ for i in "${!SPEC_ABS_LIST[@]}"; do
   merge_rc=$?
   set -e
   if [ "$merge_rc" -ne 0 ]; then
-    chain_finish 1 "HALT $slug: merge failed ($merge_err)"
+    chain_handle_failed_merge "$wt" "$pr_url" "$slug" "$id" "$merge_err"
   fi
 
   if ! merge_commit="$(git -C "$GIT_ROOT" ls-remote origin refs/heads/main 2>/dev/null | awk 'NR == 1 { print $1 }')"; then
