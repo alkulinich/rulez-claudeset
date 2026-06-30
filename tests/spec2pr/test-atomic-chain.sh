@@ -31,3 +31,51 @@ test_chain_atomic_lands_split_task_on_main() {
   assert_file_absent "$SPEC2PR_WORKTREES/project-atom-a" "part-1 worktree removed"
   assert_file_absent "$SPEC2PR_WORKTREES/project-atom-b" "part-2 worktree removed"
 }
+
+# Compute the chain_id the chain derives from the canonical absolute spec paths:
+# newline-joined "$(cd dir && pwd -P)/basename", hashed (sha256, first 12 chars).
+# The trailing-newline strip matches the chain's command-substitution stripping.
+atomic_chain_id() { # <abs-spec>...
+  local input="" p dir
+  for p in "$@"; do
+    dir="$(cd "$(dirname "$p")" && pwd -P)"
+    input="${input}${dir}/$(basename "$p")"$'\n'
+  done
+  input="${input%$'\n'}"
+  printf 'chain-%s\n' "$(printf '%s' "$input" | sha256sum | awk '{print substr($1,1,12)}')"
+}
+
+test_chain_atomic_resume_skips_staged_part() {
+  make_sandbox
+  local a b cid integ sq
+  a="$(add_spec atom-a)"
+  b="$(add_spec atom-b)"
+  cid="$(atomic_chain_id "$a" "$b")"
+  integ="spec2pr-chain/$cid"
+
+  # Pre-stage part-1 onto integ on origin (as a completed first run would have).
+  git -C "$PROJECT" checkout -q -b "$integ" main
+  printf 'atom-a\n' > "$PROJECT/marker-atom-a.txt"
+  git -C "$PROJECT" add marker-atom-a.txt
+  git -C "$PROJECT" commit -qm "spec2pr-chain: atom-a"
+  sq="$(git -C "$PROJECT" rev-parse "$integ")"
+  git -C "$PROJECT" push -q origin "$integ"
+  git -C "$PROJECT" checkout -q main
+  git -C "$PROJECT" branch -D "$integ"
+  mkdir -p "$SPEC2PR_HOME/chains/$cid"
+  { printf 'integ=%s\n' "$integ"; printf 'merge=%s\n' "$sq"; } \
+    > "$SPEC2PR_HOME/chains/$cid/project-atom-a.merged"
+
+  queue_chain_spec 02-atom-b atom-b marker-atom-a.txt   # only part-2 is queued
+
+  run_chain --atomic "$a" "$b"
+
+  assert_eq "0" "$RC" "resumed atomic run exits 0"
+  assert_contains "$OUT" "CHAIN OK skipped atom-a (already on integ)" "resume skips staged part-1"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "resume reaches done"
+  git -C "$PROJECT" fetch -q origin main
+  assert_contains "$(git -C "$PROJECT" show origin/main:marker-atom-a.txt 2>/dev/null || true)" "atom-a" \
+    "part-1 lands on main after resume"
+  assert_contains "$(git -C "$PROJECT" show origin/main:marker-atom-b.txt 2>/dev/null || true)" "atom-b" \
+    "part-2 lands on main after resume"
+}

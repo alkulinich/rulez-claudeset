@@ -320,13 +320,26 @@ chain_run_atomic() {
       || chain_finish 1 "HALT: could not create integration branch $integ"
   fi
 
-  local i spec_abs id slug marker branch wt spec_log spec_rc spec_out done_line tree parent sq terminal
+  local i spec_abs id slug marker branch wt spec_log spec_rc spec_out done_line tree parent sq terminal merge_sq integ_rec
   for i in "${!SPEC_ABS_LIST[@]}"; do
     spec_abs="${SPEC_ABS_LIST[$i]}"
     id="${ID_LIST[$i]}"
     slug="${SLUG_LIST[$i]}"
     marker="$marker_dir/$id.merged"
     branch="spec2pr/$slug"
+
+    if [ -f "$marker" ]; then
+      merge_sq="$(awk -F= '$1=="merge"{print $2; exit}' "$marker")"
+      integ_rec="$(awk -F= '$1=="integ"{print $2; exit}' "$marker")"
+      git -C "$GIT_ROOT" fetch -q origin "$integ" 2>/dev/null || true
+      if [ -n "$merge_sq" ] && [ "$integ_rec" = "$integ" ] \
+          && git -C "$GIT_ROOT" cat-file -e "$merge_sq^{commit}" 2>/dev/null \
+          && git -C "$GIT_ROOT" merge-base --is-ancestor "$merge_sq" "origin/$integ"; then
+        chain_status "OK skipped $slug (already on integ)"
+        continue
+      fi
+      chain_finish 1 "HALT $slug: stale merged marker"
+    fi
 
     spec_log="$(mktemp "${TMPDIR:-/tmp}/spec2pr-chain-run.XXXXXX")"
     set +e
