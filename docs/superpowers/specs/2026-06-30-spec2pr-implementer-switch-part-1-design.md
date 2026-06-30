@@ -48,7 +48,10 @@ byte-for-byte.
   - pr-review call (`696`): pass the opposite reviewer when implementer=claude.
 - `scripts/lib/spec2pr-runtime.sh`
   - factor the `implement` jq filter out of `validate_codex_output` into a
-    shared `implement_json_valid` check.
+    shared `implement_json_valid` check that preserves the exact current schema:
+    the payload must be an object with exactly `status`, `summary`, and
+    `blocked_reason`; `status` must be `done` or `blocked`; both text fields
+    must be strings; no additional keys are accepted.
   - add the claude implement adapter (calls `run_claude_json` **without** a
     model argument — model plumbing is part 2).
 - `VERSION`, `UPGRADE.md`.
@@ -104,7 +107,9 @@ unexpected handling (`644`–`670`) then runs unchanged.
      and extract the first balanced JSON object with the existing
      `extract_json_object` helper (the same fallback shape used by forecast and
      pr-review classification).
-  5. Validate with `implement_json_valid`. On failure:
+  5. Validate with `implement_json_valid`, using the same strict contract as the
+     existing codex implement output (`status`, `summary`, and `blocked_reason`
+     only; exact key set; string text fields; `done|blocked` status). On failure:
      `clean_worktree_to "$CALL_START_HEAD"` then
      `halt "claude implement returned invalid result"`.
 
@@ -142,6 +147,9 @@ The engine already pairs reviewer with the opposite fixer
 - **Malformed claude output:** prose- or fence-wrapped JSON is recovered with
   the existing first-balanced-object fallback; still invalid ⟹ clean worktree +
   contract halt (nonzero), recoverable by a resume run. No partial/corrupt state.
+- **Strict schema parity:** both codex and claude implement results use the same
+  exact `implement_json_valid` schema, including rejection of extra or missing
+  keys.
 - **Blocked path parity:** claude `status:blocked` halts with `blocked_reason`,
   exactly like the codex blocked path; no implementation markers written.
 - **Clean-tree invariant:** after `status:done` the worktree must be
@@ -168,6 +176,9 @@ stubs and sandbox helpers:
   accepted parser forms dispatch to the claude implement branch.
 - **`--implementer claude` blocked:** `.result` status `blocked` ⟹ HALT with the
   reason; no markers written.
+- **`--implementer claude` schema violation:** extra keys, missing keys, or an
+  invalid `status` in the normalized `.result` ⟹ HALT
+  `claude implement returned invalid result`, clean worktree, no markers written.
 - **reviewer opposite:** `--implementer claude` ⟹ pr-review invokes the codex
   reviewer and the claude fixer (assert via stub call records).
 - **invalid inputs:** `claude:sonnet`, `codex:fast`, bare `claude:` ⟹ arg-parse
