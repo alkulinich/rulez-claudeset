@@ -80,12 +80,23 @@ test_chain_admin_and_fast_flags_combine() {
   assert_eq "0" "$RC" "--admin --fast chain exits 0"
   assert_contains "$OUT" "CHAIN DONE merged=1/1" "--admin --fast reaches done"
 }
+
+test_chain_admin_does_not_apply_to_status() {
+  make_sandbox
+
+  run_chain --admin status
+
+  assert_eq "1" "$RC" "--admin status exits usage"
+  assert_contains "$OUT" "CHAIN HALT: usage:" "--admin is not accepted for status"
+}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A4 'test_chain_admin'`
-Expected: FAIL — `--admin` currently hits the `--*) usage` arm, so output contains `CHAIN HALT: usage:` and exits 1.
+Expected: FAIL — the happy-path `--admin` tests currently hit the `--*) usage`
+arm, so output contains `CHAIN HALT: usage:` and exits 1; the status test
+documents the required invariant that `--admin` does not apply to `status`.
 
 - [ ] **Step 3: Add the `ADMIN` global and the `--admin` parse arm**
 
@@ -109,6 +120,11 @@ Then add an `--admin` case to the arg-parse `while` loop, **before** the `--*) u
       shift
       ;;
     status)
+      [ "$ADMIN" -eq 0 ] || usage
+      shift
+      [ "$#" -eq 0 ] || usage
+      show_status
+      ;;
 ```
 
 - [ ] **Step 4: Update the command doc**
