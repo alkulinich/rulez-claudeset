@@ -674,7 +674,8 @@ Use \$superpowers:subagent-driven-development to implement the plan at
 $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
 Make the necessary code, test, and documentation changes in this worktree.
-Commit the implementation changes. Do not push, do not create a PR.
+Commit the implementation changes on the current branch. Do not create,
+switch, or rename git branches. Do not push, do not create a PR.
 Return ONLY one JSON object in the JSON envelope's result field. Use one of these
 valid result shapes:
 {"status":"done","summary":"...","blocked_reason":""}
@@ -700,7 +701,8 @@ Use \$superpowers:subagent-driven-development to implement the plan at
 $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
 Make the necessary code, test, and documentation changes in this worktree.
-Commit the implementation changes. Do not push, do not create a PR.
+Commit the implementation changes on the current branch. Do not create,
+switch, or rename git branches. Do not push, do not create a PR.
 Your final message must be exactly the JSON required by the output schema.
 EOF
         codex_call implement implement "$pf"
@@ -721,6 +723,21 @@ EOF
           if [ "$after_impl_head" = "$before_impl_head" ]; then
             clean_worktree_to "$CALL_START_HEAD"
             halt "no implementation commit after done"
+          fi
+          # The implement agent (codex or claude) runs git inside the worktree
+          # and may create or switch branches (codex's `git checkout -b
+          # fix/<slug>` habit). That leaves HEAD carrying the implementation
+          # while $BRANCH still points at the spec+plan commit. pr-create pushes
+          # the *named* $BRANCH and pr-review diffs *HEAD*, so a divergence would
+          # silently ship a code-free PR that still reviews clean. Reattach
+          # $BRANCH to the real implementation HEAD so the pushed PR and the
+          # reviewed diff are one commit. before/after_impl_head are SHAs, so
+          # they stay correct.
+          impl_branch="$(git -C "$WORKTREE" symbolic-ref --quiet --short HEAD || echo "")"
+          if [ "$impl_branch" != "$BRANCH" ]; then
+            status "WARN" "reattached $BRANCH; implementer left worktree on ${impl_branch:-detached HEAD}"
+            git -C "$WORKTREE" checkout -q -B "$BRANCH" HEAD \
+              || halt "could not reattach $BRANCH to implementation HEAD"
           fi
           printf '%s\n' "$before_impl_head" > "$META_DIR/implementation-base"
           printf '%s\n' "$after_impl_head" > "$META_DIR/implementation-head"

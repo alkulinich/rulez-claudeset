@@ -6,6 +6,17 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.11.1 - from v1.11.0
+
+**Action:** None.
+
+**Caveat:** if the implement agent creates or switches git branches inside the
+worktree (e.g. codex's `git checkout -b fix/…`), spec2pr now reattaches the
+spec2pr branch to the actual implementation commit before pushing, so the PR
+always contains the code. Previously such a run could push a spec+plan-only PR
+that still passed review and merged. Surfaced as `SPEC2PR WARN implement:
+reattached …`.
+
 ## To v1.11.0 - from v1.10.1
 
 **Action:** None.
