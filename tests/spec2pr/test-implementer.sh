@@ -3,20 +3,38 @@
 
 # ---- invalid inputs + usage (Task 1) ----------------------------------------
 
-test_implementer_invalid_colon_value_halts_before_worktree() {
+test_implementer_claude_haiku_halts_before_worktree() {
   make_sandbox
-  run_spec2pr --implementer claude:sonnet "$SPEC"
-  assert_eq "1" "$RC" "claude:sonnet exits 1"
-  assert_contains "$OUT" "invalid --implementer: claude:sonnet (want codex|claude)" \
-    "claude:sonnet rejected at parse"
+  run_spec2pr --implementer claude:haiku "$SPEC"
+  assert_eq "1" "$RC" "claude:haiku exits 1"
+  assert_contains "$OUT" "invalid --implementer: claude:haiku (want codex|claude|claude:sonnet)" \
+    "claude:haiku rejected at parse"
   assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created for invalid implementer"
+}
+
+test_implementer_claude_opus_halts_before_worktree() {
+  make_sandbox
+  run_spec2pr --implementer claude:opus "$SPEC"
+  assert_eq "1" "$RC" "claude:opus exits 1"
+  assert_contains "$OUT" "invalid --implementer: claude:opus (want codex|claude|claude:sonnet)" \
+    "claude:opus rejected at parse"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created for invalid implementer"
+}
+
+test_implementer_codex_sonnet_halts() {
+  make_sandbox
+  run_spec2pr --implementer codex:sonnet "$SPEC"
+  assert_eq "1" "$RC" "codex:sonnet exits 1"
+  assert_contains "$OUT" "invalid --implementer: codex:sonnet (want codex|claude|claude:sonnet)" \
+    "codex:sonnet rejected at parse"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree for codex:sonnet"
 }
 
 test_implementer_codex_fast_value_halts() {
   make_sandbox
   run_spec2pr --implementer codex:fast "$SPEC"
   assert_eq "1" "$RC" "codex:fast exits 1"
-  assert_contains "$OUT" "invalid --implementer: codex:fast (want codex|claude)" \
+  assert_contains "$OUT" "invalid --implementer: codex:fast (want codex|claude|claude:sonnet)" \
     "codex:fast rejected at parse"
   assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree for codex:fast"
 }
@@ -25,7 +43,7 @@ test_implementer_bare_claude_colon_halts() {
   make_sandbox
   run_spec2pr --implementer "claude:" "$SPEC"
   assert_eq "1" "$RC" "bare claude: exits 1"
-  assert_contains "$OUT" "invalid --implementer: claude: (want codex|claude)" \
+  assert_contains "$OUT" "invalid --implementer: claude: (want codex|claude|claude:sonnet)" \
     "bare claude: rejected at parse"
 }
 

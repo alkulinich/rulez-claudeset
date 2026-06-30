@@ -5,13 +5,14 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
 START_FROM="spec-review"
 START_FROM_GIVEN=0
 IMPLEMENTER_AGENT="codex"
+IMPLEMENTER_MODEL=""
 IMPLEMENTER_AGENT_GIVEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -58,8 +59,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$IMPLEMENTER_AGENT" in
-  codex|claude) ;;
-  *) halt "invalid --implementer: $IMPLEMENTER_AGENT (want codex|claude)" ;;
+  codex)
+    IMPLEMENTER_MODEL="" ;;
+  claude)
+    IMPLEMENTER_MODEL="" ;;
+  claude:sonnet)
+    IMPLEMENTER_AGENT="claude"
+    IMPLEMENTER_MODEL="sonnet" ;;
+  *)
+    halt "invalid --implementer: $IMPLEMENTER_AGENT (want codex|claude|claude:sonnet)" ;;
 esac
 
 [ -n "$SPEC_INPUT" ] || usage
