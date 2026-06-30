@@ -458,13 +458,16 @@ validate_codex_output() {
 }
 
 claude_json_attempt() {
-  local tag="$1" prompt_file="$2" out="$3"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}"
   local err="$META_DIR/$tag.stderr"
+  local -a claude_args=(-p --output-format json --dangerously-skip-permissions)
+  if [ -n "$model" ]; then
+    claude_args=(-p --model "$model" --output-format json --dangerously-skip-permissions)
+  fi
 
   CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   progress "running claude $tag"
-  if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" -p --output-format json \
-      --dangerously-skip-permissions \
+  if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" "${claude_args[@]}" \
       < "$prompt_file" > "$out" 2> "$err"); then
     clean_worktree_to "$CALL_START_HEAD"
     return 2
@@ -476,10 +479,10 @@ claude_json_attempt() {
 }
 
 run_claude_json() {
-  local tag="$1" prompt_file="$2" out="$3"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}"
   local rc
   set +e
-  claude_json_attempt "$tag" "$prompt_file" "$out"
+  claude_json_attempt "$tag" "$prompt_file" "$out" "$model"
   rc=$?
   set -e
   case "$rc" in

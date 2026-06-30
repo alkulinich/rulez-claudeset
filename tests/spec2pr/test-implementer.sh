@@ -168,6 +168,68 @@ test_implementer_claude_equals_form() {
   assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "equals form recorded as claude"
 }
 
+# ---- claude:sonnet model tier ----------------------------------------------
+
+# Grep the single invocations.log line for a given claude fixture name.
+_claude_argline() { # <fixture-basename, e.g. 05-implement.sh>
+  grep "fixture=$1" "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log"
+}
+
+test_implementer_claude_sonnet_tier_implement_only() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  queue_dirty_codex_pr_review 06-pr-review
+  queue_claude_pr_fix 06-pr-review
+  q_codex_pr_clean 07-pr-review
+  run_spec2pr --implementer claude:sonnet "$SPEC"
+  assert_eq "0" "$RC" "claude:sonnet reaches done"
+  assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "agent recorded as claude"
+  assert_contains "$(_claude_argline 05-implement.sh)" "--model sonnet" \
+    "implement call carries --model sonnet"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "planner call has no --model"
+  assert_not_contains "$(_claude_argline 04-forecast.sh)" "--model" \
+    "forecast call has no --model"
+  assert_not_contains "$(_claude_argline 06-pr-review-claude-fix.sh)" "--model" \
+    "claude pr-review fixer has no --model"
+}
+
+test_implementer_claude_sonnet_equals_form() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer=claude:sonnet "$SPEC"
+  assert_eq "0" "$RC" "--implementer=claude:sonnet reaches done"
+  assert_contains "$(_claude_argline 05-implement.sh)" "--model sonnet" \
+    "equals form pins implement to sonnet"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "equals form leaves planner at default model"
+}
+
+test_implementer_claude_no_tier_emits_no_model() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "0" "$RC" "bare claude reaches done"
+  assert_not_contains "$(_claude_argline 05-implement.sh)" "--model" \
+    "bare claude implement has no --model"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "bare claude planner has no --model"
+}
+
 # ---- claude blocked / schema violation --------------------------------------
 
 test_implementer_claude_blocked_halts() {
