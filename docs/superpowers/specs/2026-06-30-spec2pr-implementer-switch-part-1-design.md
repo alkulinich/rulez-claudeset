@@ -32,6 +32,10 @@ byte-for-byte.
 - **pr-review reviewer = the opposite agent of the implementer.** `codex` ⟹
   claude reviews (today's default); `claude` ⟹ codex reviews. The fixer is the
   engine's opposite-of-reviewer, which equals the implementer.
+- **Resume preserves the implementer choice.** Store the selected implementer in
+  metadata before any worktree setup. A resumed run must use the recorded value,
+  so a run that implemented with claude still gets a codex pr-review even if the
+  resume command omits `--implementer`.
 - **Default `codex` ⟹ identical to current behavior.** The existing suite stays
   green untouched.
 - **Both `require_codex` and `require_claude` remain.** codex still runs
@@ -43,6 +47,8 @@ byte-for-byte.
 - `scripts/spec2pr.sh`
   - usage + arg parsing: document/add `--implementer`, set
     `IMPLEMENTER_AGENT`.
+  - metadata: persist and reload `$META_DIR/implementer-agent` so resumed runs
+    keep the original reviewer/fixer pairing.
   - implement dispatch (`643`–`670`): branch codex vs claude before the shared
     `status` handling.
   - pr-review call (`696`): pass the opposite reviewer when implementer=claude.
@@ -74,6 +80,17 @@ two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`):
 Anything else halts before any worktree setup:
 `halt "invalid --implementer: <value> (want codex|claude)"`.
 
+Persist the selected value in `$META_DIR/implementer-agent` as part of the
+run metadata:
+
+- **New worktree:** write `IMPLEMENTER_AGENT` next to `source-path`,
+  `source-sha256`, and `base-sha` immediately after creating `$META_DIR`.
+- **Resumed worktree:** require the metadata file. If the user supplied
+  `--implementer`, it must match the recorded value or halt before doing any
+  stage work: `halt "worktree implementer is <recorded>; rerun with matching --implementer or omit the flag"`.
+  Then set `IMPLEMENTER_AGENT` from the recorded value before implementation or
+  pr-review decisions.
+
 Update `usage()` in `spec2pr.sh` and the existing preflight usage assertion so
 the contract includes the new flag:
 
@@ -100,6 +117,9 @@ unexpected handling (`644`–`670`) then runs unchanged.
      right base.
   2. Write the claude implement prompt (below) to
      `$META_DIR/implement.claude.prompt`.
+     Preserve the literal `$superpowers` token by escaping `$` in the shell
+     heredoc (`\$superpowers`) or by using a quoted heredoc and substituting the
+     plan/spec paths separately.
   3. `run_claude_json implement "$META_DIR/implement.claude.prompt" \
      "$META_DIR/implement.envelope.json"` (no model argument in part 1).
   4. Normalize the envelope result into `$META_DIR/implement.json`: if `.result`
@@ -139,6 +159,9 @@ fi
 
 The engine already pairs reviewer with the opposite fixer
 (`pr-review-engine.sh:79`–`81`); this only chooses the argument.
+Because `IMPLEMENTER_AGENT` is reloaded from `$META_DIR/implementer-agent` on
+resume, this branch remains correct after implementation, push, PR creation, or
+pr-review retries.
 
 ## Edge cases & invariants
 
@@ -156,6 +179,9 @@ The engine already pairs reviewer with the opposite fixer
   committed-clean (existing check at `652`) — enforced for both agents.
 - **`CALL_START_HEAD` discipline:** set before the claude call so a failed or
   blocked run resets to the pre-call HEAD, matching `codex_call`.
+- **Resume reviewer invariant:** once a worktree exists, the recorded
+  `$META_DIR/implementer-agent` is authoritative. A no-flag resume uses it; a
+  conflicting flag halts before model calls, pushes, or pr-review.
 - **Validation precedes side effects:** `codex:*`, bare `claude:`, and
   `claude:sonnet` (not yet supported) all halt at arg-parse, before any worktree
   or branch is created.
@@ -181,6 +207,11 @@ stubs and sandbox helpers:
   `claude implement returned invalid result`, clean worktree, no markers written.
 - **reviewer opposite:** `--implementer claude` ⟹ pr-review invokes the codex
   reviewer and the claude fixer (assert via stub call records).
+- **resume preserves reviewer opposite:** start with `--implementer claude`,
+  stop after a valid implementation marker or before pr-review completes, then
+  rerun without `--implementer`; assert pr-review still invokes the codex
+  reviewer and claude fixer. A rerun with `--implementer codex` against that
+  worktree halts on the metadata mismatch before model calls.
 - **invalid inputs:** `claude:sonnet`, `codex:fast`, bare `claude:` ⟹ arg-parse
   halt, nonzero exit, no worktree created.
 - **usage:** no-arg preflight output includes
