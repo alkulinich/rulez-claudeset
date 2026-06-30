@@ -3,20 +3,38 @@
 
 # ---- invalid inputs + usage (Task 1) ----------------------------------------
 
-test_implementer_invalid_colon_value_halts_before_worktree() {
+test_implementer_claude_haiku_halts_before_worktree() {
   make_sandbox
-  run_spec2pr --implementer claude:sonnet "$SPEC"
-  assert_eq "1" "$RC" "claude:sonnet exits 1"
-  assert_contains "$OUT" "invalid --implementer: claude:sonnet (want codex|claude)" \
-    "claude:sonnet rejected at parse"
+  run_spec2pr --implementer claude:haiku "$SPEC"
+  assert_eq "1" "$RC" "claude:haiku exits 1"
+  assert_contains "$OUT" "invalid --implementer: claude:haiku (want codex|claude|claude:sonnet)" \
+    "claude:haiku rejected at parse"
   assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created for invalid implementer"
+}
+
+test_implementer_claude_opus_halts_before_worktree() {
+  make_sandbox
+  run_spec2pr --implementer claude:opus "$SPEC"
+  assert_eq "1" "$RC" "claude:opus exits 1"
+  assert_contains "$OUT" "invalid --implementer: claude:opus (want codex|claude|claude:sonnet)" \
+    "claude:opus rejected at parse"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created for invalid implementer"
+}
+
+test_implementer_codex_sonnet_halts() {
+  make_sandbox
+  run_spec2pr --implementer codex:sonnet "$SPEC"
+  assert_eq "1" "$RC" "codex:sonnet exits 1"
+  assert_contains "$OUT" "invalid --implementer: codex:sonnet (want codex|claude|claude:sonnet)" \
+    "codex:sonnet rejected at parse"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree for codex:sonnet"
 }
 
 test_implementer_codex_fast_value_halts() {
   make_sandbox
   run_spec2pr --implementer codex:fast "$SPEC"
   assert_eq "1" "$RC" "codex:fast exits 1"
-  assert_contains "$OUT" "invalid --implementer: codex:fast (want codex|claude)" \
+  assert_contains "$OUT" "invalid --implementer: codex:fast (want codex|claude|claude:sonnet)" \
     "codex:fast rejected at parse"
   assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree for codex:fast"
 }
@@ -25,7 +43,7 @@ test_implementer_bare_claude_colon_halts() {
   make_sandbox
   run_spec2pr --implementer "claude:" "$SPEC"
   assert_eq "1" "$RC" "bare claude: exits 1"
-  assert_contains "$OUT" "invalid --implementer: claude: (want codex|claude)" \
+  assert_contains "$OUT" "invalid --implementer: claude: (want codex|claude|claude:sonnet)" \
     "bare claude: rejected at parse"
 }
 
@@ -148,6 +166,68 @@ test_implementer_claude_equals_form() {
   run_spec2pr --implementer=claude "$SPEC"
   assert_eq "0" "$RC" "--implementer=claude dispatches to claude branch and reaches done"
   assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "equals form recorded as claude"
+}
+
+# ---- claude:sonnet model tier ----------------------------------------------
+
+# Grep the single invocations.log line for a given claude fixture name.
+_claude_argline() { # <fixture-basename, e.g. 05-implement.sh>
+  grep "fixture=$1" "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log"
+}
+
+test_implementer_claude_sonnet_tier_implement_only() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  queue_dirty_codex_pr_review 06-pr-review
+  queue_claude_pr_fix 06-pr-review
+  q_codex_pr_clean 07-pr-review
+  run_spec2pr --implementer claude:sonnet "$SPEC"
+  assert_eq "0" "$RC" "claude:sonnet reaches done"
+  assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "agent recorded as claude"
+  assert_contains "$(_claude_argline 05-implement.sh)" "--model sonnet" \
+    "implement call carries --model sonnet"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "planner call has no --model"
+  assert_not_contains "$(_claude_argline 04-forecast.sh)" "--model" \
+    "forecast call has no --model"
+  assert_not_contains "$(_claude_argline 06-pr-review-claude-fix.sh)" "--model" \
+    "claude pr-review fixer has no --model"
+}
+
+test_implementer_claude_sonnet_equals_form() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer=claude:sonnet "$SPEC"
+  assert_eq "0" "$RC" "--implementer=claude:sonnet reaches done"
+  assert_contains "$(_claude_argline 05-implement.sh)" "--model sonnet" \
+    "equals form pins implement to sonnet"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "equals form leaves planner at default model"
+}
+
+test_implementer_claude_no_tier_emits_no_model() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "0" "$RC" "bare claude reaches done"
+  assert_not_contains "$(_claude_argline 05-implement.sh)" "--model" \
+    "bare claude implement has no --model"
+  assert_not_contains "$(_claude_argline 02-plan.sh)" "--model" \
+    "bare claude planner has no --model"
 }
 
 # ---- claude blocked / schema violation --------------------------------------
@@ -278,4 +358,76 @@ test_resume_legacy_worktree_migrates_to_codex() {
   run_spec2pr --implementer claude "$SPEC"
   assert_eq "1" "$RC" "claude flag against migrated codex worktree halts"
   assert_contains "$OUT" "worktree implementer is codex" "migrated value is authoritative"
+}
+
+# ---- tier resume behavior ---------------------------------------------------
+
+_seed_claude_sonnet_run_blocked_at_implement() {
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_blocked 05-implement
+  run_spec2pr --implementer claude:sonnet "$SPEC"
+  assert_eq "1" "$RC" "seed run halts at blocked implement"
+  assert_eq "sonnet" "$(cat "$SPEC2PR_HOME/$ID/implementer-model")" "fresh run recorded sonnet model"
+}
+
+test_resume_no_flag_preserves_sonnet_tier() {
+  make_sandbox
+  _seed_claude_sonnet_run_blocked_at_implement
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  q_claude_impl_done 08-implement
+  q_codex_pr_clean 09-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "no-flag resume of a claude:sonnet worktree reaches done"
+  assert_contains "$(_claude_argline 08-implement.sh)" "--model sonnet" \
+    "resumed implement call still pinned to sonnet"
+  assert_eq "sonnet" "$(cat "$SPEC2PR_HOME/$ID/implementer-model")" "model metadata unchanged"
+}
+
+test_resume_conflicting_tier_flag_halts_before_models() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude:sonnet "$SPEC"
+  assert_eq "0" "$RC" "seed claude:sonnet run reaches done"
+  printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
+
+  local codex_before; codex_before="$(codex_calls)"
+  local claude_before; claude_before="$(claude_calls)"
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "1" "$RC" "rerun with bare claude conflicts and halts"
+  assert_contains "$OUT" "worktree implementer is claude:sonnet; rerun with matching --implementer or omit the flag" \
+    "conflict halt shows recorded tier as claude:sonnet"
+  assert_eq "$codex_before" "$(codex_calls)" "no codex call after conflict halt"
+  assert_eq "$claude_before" "$(claude_calls)" "no claude call after conflict halt"
+}
+
+test_resume_legacy_claude_worktree_migrates_to_empty_model() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_blocked 05-implement
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "1" "$RC" "seed bare-claude run halts at blocked implement"
+  rm -f "$SPEC2PR_HOME/$ID/implementer-model"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  q_claude_impl_done 08-implement
+  q_codex_pr_clean 09-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "legacy resume reaches done"
+  assert_file_exists "$SPEC2PR_HOME/$ID/implementer-model" "missing model metadata recreated"
+  assert_eq "" "$(cat "$SPEC2PR_HOME/$ID/implementer-model")" "legacy worktree migrated to empty model"
+  assert_not_contains "$(_claude_argline 08-implement.sh)" "--model" \
+    "migrated legacy worktree emits no --model on implement"
 }

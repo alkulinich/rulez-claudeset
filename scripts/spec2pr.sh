@@ -5,13 +5,14 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
 START_FROM="spec-review"
 START_FROM_GIVEN=0
 IMPLEMENTER_AGENT="codex"
+IMPLEMENTER_MODEL=""
 IMPLEMENTER_AGENT_GIVEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -58,8 +59,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$IMPLEMENTER_AGENT" in
-  codex|claude) ;;
-  *) halt "invalid --implementer: $IMPLEMENTER_AGENT (want codex|claude)" ;;
+  codex)
+    IMPLEMENTER_MODEL="" ;;
+  claude)
+    IMPLEMENTER_MODEL="" ;;
+  claude:sonnet)
+    IMPLEMENTER_AGENT="claude"
+    IMPLEMENTER_MODEL="sonnet" ;;
+  *)
+    halt "invalid --implementer: $IMPLEMENTER_AGENT (want codex|claude|claude:sonnet)" ;;
 esac
 
 [ -n "$SPEC_INPUT" ] || usage
@@ -187,20 +195,31 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   [ "$RECORDED_SOURCE_PATH" = "$SPEC_ABS" ] || halt "worktree belongs to $RECORDED_SOURCE_PATH"
   [ "$RECORDED_SOURCE_SHA" = "$SOURCE_SHA" ] || halt "source spec changed since import"
   if [ -f "$META_DIR/implementer-agent" ]; then
-    RECORDED_IMPLEMENTER="$(cat "$META_DIR/implementer-agent")"
-    case "$RECORDED_IMPLEMENTER" in
-      codex|claude) ;;
-      *) halt "invalid worktree implementer metadata: $RECORDED_IMPLEMENTER" ;;
-    esac
+    RECORDED_AGENT="$(cat "$META_DIR/implementer-agent")"
   else
-    RECORDED_IMPLEMENTER="codex"
-    printf '%s\n' "codex" > "$META_DIR/implementer-agent"
+    RECORDED_AGENT="codex"
+    printf '%s\n' "$RECORDED_AGENT" > "$META_DIR/implementer-agent"
+  fi
+  if [ -f "$META_DIR/implementer-model" ]; then
+    RECORDED_MODEL="$(cat "$META_DIR/implementer-model")"
+  else
+    RECORDED_MODEL=""
+    printf '%s\n' "$RECORDED_MODEL" > "$META_DIR/implementer-model"
+  fi
+  case "$RECORDED_AGENT:$RECORDED_MODEL" in
+    codex:|claude:|claude:sonnet) ;;
+    *) halt "invalid worktree implementer metadata: $RECORDED_AGENT/$RECORDED_MODEL" ;;
+  esac
+  recorded_display="$RECORDED_AGENT"
+  if [ -n "$RECORDED_MODEL" ]; then
+    recorded_display="$RECORDED_AGENT:$RECORDED_MODEL"
   fi
   if [ "$IMPLEMENTER_AGENT_GIVEN" -eq 1 ]; then
-    [ "$IMPLEMENTER_AGENT" = "$RECORDED_IMPLEMENTER" ] \
-      || halt "worktree implementer is $RECORDED_IMPLEMENTER; rerun with matching --implementer or omit the flag"
+    [ "$IMPLEMENTER_AGENT" = "$RECORDED_AGENT" ] && [ "$IMPLEMENTER_MODEL" = "$RECORDED_MODEL" ] \
+      || halt "worktree implementer is $recorded_display; rerun with matching --implementer or omit the flag"
   else
-    IMPLEMENTER_AGENT="$RECORDED_IMPLEMENTER"
+    IMPLEMENTER_AGENT="$RECORDED_AGENT"
+    IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse origin/main)" || halt "git rev-parse origin/main failed"
@@ -213,6 +232,7 @@ else
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
   printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
+  printf '%s\n' "$IMPLEMENTER_MODEL" > "$META_DIR/implementer-model"
 fi
 
 commit_with_subject() {
@@ -682,7 +702,7 @@ valid result shapes:
 {"status":"blocked","summary":"...","blocked_reason":"..."}
 EOF
         CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json"
+        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" "$IMPLEMENTER_MODEL"
         if ! jq -e 'if (.result | type) == "object" then .result
                     else (.result | tostring | fromjson?) end
                     | select(type == "object")' \
