@@ -242,7 +242,7 @@ EOF
   fi
 
   set +e
-  marker_hits="$(git -C "$wt" grep -I -n -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . 2>&1)"
+  marker_hits="$(git -C "$wt" grep -I -n -E '^(<<<<<<< .+|[|]{7} .+|=======|>>>>>>> .+)$' HEAD -- . 2>&1)"
   marker_rc=$?
   set -e
   if [ "$marker_rc" -eq 0 ] || [ "$marker_rc" -gt 1 ]; then

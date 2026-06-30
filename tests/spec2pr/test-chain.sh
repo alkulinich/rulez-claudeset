@@ -383,6 +383,36 @@ EOF
     "resolver without commit does not retry merge"
 }
 
+test_chain_conflict_resolver_rejects_diff3_marker_line() {
+  make_sandbox
+  local a
+  a="$(add_spec chain-diff3-marker)"
+  queue_chain_spec 01-chain-diff3-marker chain-diff3-marker
+  printf 'marker-chain-diff3-marker.txt\nmain side for chain-diff3-marker\n' \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+  enqueue 02-chain-diff3-marker-resolve <<'EOF'
+printf 'chain-diff3-marker\nmain side for chain-diff3-marker\n' \
+  > marker-chain-diff3-marker.txt
+printf '||||||| base\n' > diff3-marker-leftover.txt
+git add marker-chain-diff3-marker.txt diff3-marker-leftover.txt
+git commit -qm 'resolve chain-diff3-marker conflict'
+printf '{"summary":"committed leftover diff3 marker"}'
+EOF
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "diff3 marker resolver exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-diff3-marker: conflict resolution failed" \
+    "diff3 marker resolver halt line"
+  assert_not_contains "$OUT" "CHAIN OK resolved-conflict chain-diff3-marker" \
+    "diff3 marker resolver does not emit resolved audit line"
+  assert_eq "4" "$(codex_calls)" "diff3 marker resolver consumes resolver codex call"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "diff3 marker resolver does not retry merge"
+}
+
 test_chain_conflict_requires_local_unmerged_paths() {
   make_sandbox
   local a
