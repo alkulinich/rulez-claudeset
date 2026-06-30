@@ -90,9 +90,11 @@ unexpected handling (`644`–`670`) then runs unchanged.
      `$META_DIR/implement.claude.prompt`.
   3. `run_claude_json implement "$META_DIR/implement.claude.prompt" \
      "$META_DIR/implement.envelope.json"` (no model argument in part 1).
-  4. `jq -r '.result'` the envelope and normalize into `$META_DIR/implement.json`;
-     if `.result` carries surrounding prose/fences, fall back to the last
-     balanced JSON object.
+  4. Normalize the envelope result into `$META_DIR/implement.json`: if `.result`
+     is already an object, write it directly; otherwise treat `.result` as text
+     and extract the first balanced JSON object with the existing
+     `extract_json_object` helper (the same fallback shape used by forecast and
+     pr-review classification).
   5. Validate with `implement_json_valid`. On failure:
      `clean_worktree_to "$CALL_START_HEAD"` then
      `halt "claude implement returned invalid result"`.
@@ -128,9 +130,9 @@ The engine already pairs reviewer with the opposite fixer
 
 - **Default is untouched:** no flag ⟹ codex ⟹ identical contract lines and exit
   codes. Verified by a baseline-equivalence test.
-- **Malformed claude output:** prose- or fence-wrapped JSON is recovered by the
-  last-balanced-object fallback; still invalid ⟹ clean worktree + contract halt
-  (nonzero), recoverable by a resume run. No partial/corrupt state.
+- **Malformed claude output:** prose- or fence-wrapped JSON is recovered with
+  the existing first-balanced-object fallback; still invalid ⟹ clean worktree +
+  contract halt (nonzero), recoverable by a resume run. No partial/corrupt state.
 - **Blocked path parity:** claude `status:blocked` halts with `blocked_reason`,
   exactly like the codex blocked path; no implementation markers written.
 - **Clean-tree invariant:** after `status:done` the worktree must be
