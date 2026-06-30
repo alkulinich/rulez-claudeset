@@ -107,3 +107,40 @@ test_chain_atomic_halt_keeps_main_pristine() {
   assert_eq "1" "$(find "$SPEC2PR_HOME/chains" -name 'project-atom-a.merged' 2>/dev/null | wc -l | tr -d ' ')" \
     "part-1 marker persists for resume"
 }
+
+test_chain_atomic_rollup_admin_retry() {
+  make_sandbox
+  local a b
+  a="$(add_spec atom-a)"
+  b="$(add_spec atom-b)"
+  queue_chain_spec 01-atom-a atom-a
+  queue_chain_spec 02-atom-b atom-b marker-atom-a.txt
+  printf 'Protected branch update failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+
+  run_chain --atomic --admin "$a" "$b"
+
+  assert_eq "0" "$RC" "atomic --admin rollup exits 0"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "admin rollup reaches done"
+  assert_eq "2" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" "rollup retries the merge under --admin"
+  assert_eq "1" "$(grep -c 'args=pr merge .*--admin' "$SPEC2PR_TEST_GH/gh.log")" "rollup retry passes --admin"
+}
+
+test_chain_atomic_rollup_blocked_without_admin_halts() {
+  make_sandbox
+  local a b
+  a="$(add_spec atom-a)"
+  b="$(add_spec atom-b)"
+  queue_chain_spec 01-atom-a atom-a
+  queue_chain_spec 02-atom-b atom-b marker-atom-a.txt
+  printf 'Protected branch update failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail"
+
+  run_chain --atomic "$a" "$b"
+
+  assert_eq "1" "$RC" "atomic rollup blocked without admin halts"
+  assert_contains "$OUT" "CHAIN HALT rollup:" "rollup halt line"
+  assert_eq "1" "$(git -C "$PROJECT" ls-remote origin 'refs/heads/spec2pr-chain/*' | wc -l | tr -d ' ')" \
+    "integ preserved when rollup halts"
+  git -C "$PROJECT" fetch -q origin main
+  assert_eq "" "$(git -C "$PROJECT" show origin/main:marker-atom-a.txt 2>/dev/null || true)" \
+    "main untouched when rollup blocked"
+}

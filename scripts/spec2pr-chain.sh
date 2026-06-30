@@ -407,6 +407,10 @@ chain_run_atomic() {
   set +e
   merge_err="$(cd "$rwt" && gh pr merge "$pr_url" --squash 2>&1 1>/dev/null)"
   merge_rc=$?
+  if [ "$merge_rc" -ne 0 ] && [ "$ADMIN" -eq 1 ]; then
+    merge_err="$(cd "$rwt" && gh pr merge "$pr_url" --squash --admin 2>&1 1>/dev/null)"
+    merge_rc=$?
+  fi
   set -e
   git -C "$GIT_ROOT" worktree remove --force "$rwt" >/dev/null 2>&1 || true
   git -C "$GIT_ROOT" branch -D "$integ" >/dev/null 2>&1 || true
