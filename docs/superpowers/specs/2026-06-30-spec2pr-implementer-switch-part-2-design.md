@@ -115,11 +115,18 @@ where `recorded_display` is `codex`, `claude`, or `claude:sonnet`.
 ### 2. Model plumbing (`spec2pr-runtime.sh`)
 
 `claude_json_attempt` and `run_claude_json` gain an optional trailing `model`
-argument. The invocation becomes:
+argument. Because the scripts run with `set -u`, initialize the optional
+parameter with a default in both functions (for example
+`local model="${4:-}"`) so every existing three-argument caller keeps working.
+Build the Claude argv explicitly and append `--model "$model"` only when the
+model is non-empty:
 
 ```sh
-"$SPEC2PR_CLAUDE_BIN" -p ${model:+--model "$model"} --output-format json \
-  --dangerously-skip-permissions
+local -a claude_args=(-p --output-format json --dangerously-skip-permissions)
+if [ -n "$model" ]; then
+  claude_args=(-p --model "$model" --output-format json --dangerously-skip-permissions)
+fi
+"$SPEC2PR_CLAUDE_BIN" "${claude_args[@]}"
 ```
 
 Empty `model` (the default for every existing caller, including part-1's claude
@@ -163,6 +170,9 @@ Extend `tests/spec2pr/test-implementer.sh` (existing codex/claude stubs):
   `--model sonnet` is present on the implement call and **absent** on the
   plan / forecast calls. Include a dirty codex pr-review round that invokes the
   Claude fixer, and assert that fixer invocation also has no `--model`.
+- **`--implementer=claude:sonnet` (equals form):** same tier behavior as the
+  space form, proving the part-1 parser forms still apply to the expanded
+  grammar.
 - **`--implementer claude` (no tier):** no `--model` on any call.
 - **resume preservation:** seed a `claude:sonnet` worktree that reaches a
   resumable point before implementation completion, rerun without
