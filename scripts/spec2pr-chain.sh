@@ -94,7 +94,7 @@ short_hash() { # <value> <length>
 }
 
 usage() {
-  chain_finish 1 "HALT: usage: spec2pr-chain.sh status | [--fast] [--admin] <spec-path> [<spec-path>...] (--admin specs only)"
+  chain_finish 1 "HALT: usage: spec2pr-chain.sh status | [--fast] [--admin] [--atomic] <spec-path> [<spec-path>...] (--admin/--atomic specs only)"
 }
 
 chain_require_dependency() {
@@ -304,6 +304,108 @@ chain_handle_failed_merge() { # <worktree> <pr-url> <slug> <id> <merge-stderr>
   fi
 }
 
+chain_run_atomic() {
+  local integ="spec2pr-chain/$chain_id"
+  local marker_dir="$SPEC2PR_HOME/chains/$chain_id"
+  mkdir -p "$marker_dir"
+
+  if ! git -C "$GIT_ROOT" fetch -q origin main; then
+    chain_finish 1 "HALT: git fetch origin main failed"
+  fi
+  if ! git -C "$GIT_ROOT" ls-remote --exit-code origin "refs/heads/$integ" >/dev/null 2>&1; then
+    local base_sha
+    base_sha="$(git -C "$GIT_ROOT" rev-parse origin/main)" \
+      || chain_finish 1 "HALT: git rev-parse origin/main failed"
+    git -C "$GIT_ROOT" push -q origin "$base_sha:refs/heads/$integ" \
+      || chain_finish 1 "HALT: could not create integration branch $integ"
+  fi
+
+  local i spec_abs id slug marker branch wt spec_log spec_rc spec_out done_line tree parent sq terminal
+  for i in "${!SPEC_ABS_LIST[@]}"; do
+    spec_abs="${SPEC_ABS_LIST[$i]}"
+    id="${ID_LIST[$i]}"
+    slug="${SLUG_LIST[$i]}"
+    marker="$marker_dir/$id.merged"
+    branch="spec2pr/$slug"
+
+    spec_log="$(mktemp "${TMPDIR:-/tmp}/spec2pr-chain-run.XXXXXX")"
+    set +e
+    if [ "$FAST" -eq 1 ]; then
+      SPEC2PR_PUBLISH_ON_HALT=0 bash "$SCRIPT_DIR/spec2pr.sh" --fast --base "$integ" --no-pr "$spec_abs" 2>&1 | tee "$spec_log"
+    else
+      SPEC2PR_PUBLISH_ON_HALT=0 bash "$SCRIPT_DIR/spec2pr.sh" --base "$integ" --no-pr "$spec_abs" 2>&1 | tee "$spec_log"
+    fi
+    spec_rc=${PIPESTATUS[0]}
+    set -e
+    spec_out="$(cat "$spec_log")"
+    rm -f "$spec_log"
+    if [ "$spec_rc" -ne 0 ]; then
+      terminal="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR / { line = $0 } END { print line }')"
+      [ -n "$terminal" ] || terminal="SPEC2PR failed"
+      chain_finish 1 "HALT $slug: $terminal"
+    fi
+
+    done_line="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR DONE / { line = $0 } END { print line }')"
+    case "$done_line" in
+      "SPEC2PR DONE worktree="*) wt="${done_line#SPEC2PR DONE worktree=}" ;;
+      *) chain_finish 1 "HALT $slug: missing SPEC2PR DONE worktree" ;;
+    esac
+    [ -n "$wt" ] || chain_finish 1 "HALT $slug: empty worktree in SPEC2PR DONE"
+
+    git -C "$GIT_ROOT" fetch -q origin "$integ" || chain_finish 1 "HALT $slug: integ fetch failed"
+    tree="$(git -C "$GIT_ROOT" rev-parse "$branch^{tree}")" || chain_finish 1 "HALT $slug: cannot read part tree"
+    parent="$(git -C "$GIT_ROOT" rev-parse "origin/$integ")" || chain_finish 1 "HALT $slug: cannot read integ tip"
+    sq="$(git -C "$GIT_ROOT" commit-tree "$tree" -p "$parent" -m "spec2pr-chain: $slug")" \
+      || chain_finish 1 "HALT $slug: commit-tree failed"
+    git -C "$GIT_ROOT" push -q origin "$sq:refs/heads/$integ" \
+      || chain_finish 1 "HALT $slug: integ push failed"
+
+    {
+      printf 'integ=%s\n' "$integ"
+      printf 'merge=%s\n' "$sq"
+      printf 'staged_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$marker"
+    chain_status "OK staged $slug on $integ"
+
+    git -C "$GIT_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    git -C "$GIT_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
+  done
+
+  # Rollup: one squash PR integ -> main, from a temporary worktree checked out
+  # on integ so the local HEAD is integ for the merge (no --delete-branch, so gh
+  # runs no local checkout; the temp branch is integ, never main).
+  git -C "$GIT_ROOT" fetch -q origin main "$integ" || chain_finish 1 "HALT rollup: fetch failed"
+  local rwt body pr_url merge_err merge_rc
+  rwt="$SPEC2PR_WORKTREES/rollup-$chain_id"
+  rm -rf "$rwt"
+  mkdir -p "$SPEC2PR_WORKTREES"
+  git -C "$GIT_ROOT" worktree add -q -B "$integ" "$rwt" "origin/$integ" \
+    || chain_finish 1 "HALT rollup: could not create integ worktree"
+  body="Atomic spec2pr-chain rollup of $total part(s)."
+  pr_url="$(cd "$rwt" && gh pr create --base main --head "$integ" \
+    --title "spec2pr-chain: $chain_id ($total parts)" --body "$body" 2>/dev/null)"
+  pr_url="$(printf '%s\n' "$pr_url" | grep -Eo 'https://[^[:space:]]+' | tail -n1 || true)"
+  if [ -z "$pr_url" ]; then
+    git -C "$GIT_ROOT" worktree remove --force "$rwt" >/dev/null 2>&1 || true
+    git -C "$GIT_ROOT" branch -D "$integ" >/dev/null 2>&1 || true
+    chain_finish 1 "HALT rollup: gh pr create failed"
+  fi
+
+  set +e
+  merge_err="$(cd "$rwt" && gh pr merge "$pr_url" --squash 2>&1 1>/dev/null)"
+  merge_rc=$?
+  set -e
+  git -C "$GIT_ROOT" worktree remove --force "$rwt" >/dev/null 2>&1 || true
+  git -C "$GIT_ROOT" branch -D "$integ" >/dev/null 2>&1 || true
+  if [ "$merge_rc" -ne 0 ]; then
+    chain_finish 1 "HALT rollup: $merge_err (integ $integ holds the full task; merge it to main manually or re-run)"
+  fi
+
+  git -C "$GIT_ROOT" push -q origin --delete "$integ" >/dev/null 2>&1 || true
+  rm -rf "$marker_dir"
+  chain_finish 0 "DONE merged=1/1 (atomic: $total parts -> main via $pr_url)"
+}
+
 show_status() {
   FINISHED=1
   if [ -d "$SPEC2PR_HOME/chains" ]; then
@@ -320,6 +422,7 @@ show_status() {
 
 FAST=0
 ADMIN=0
+ATOMIC=0
 SPECS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -331,8 +434,13 @@ while [ "$#" -gt 0 ]; do
       ADMIN=1
       shift
       ;;
+    --atomic)
+      ATOMIC=1
+      shift
+      ;;
     status)
       [ "$ADMIN" -eq 0 ] || usage
+      [ "$ATOMIC" -eq 0 ] || usage
       shift
       [ "$#" -eq 0 ] || usage
       show_status
@@ -411,6 +519,10 @@ cat > "$CHAIN_TMP_DIR/conflict-resolve.json" <<'EOF'
 EOF
 
 chain_status "OK started specs=$total"
+
+if [ "$ATOMIC" -eq 1 ]; then
+  chain_run_atomic
+fi
 
 merged_count=0
 

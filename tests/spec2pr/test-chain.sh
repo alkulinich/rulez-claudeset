@@ -204,7 +204,7 @@ test_chain_admin_does_not_apply_to_status() {
 
   assert_eq "1" "$RC" "--admin status exits usage"
   assert_contains "$OUT" "CHAIN HALT: usage:" "--admin is not accepted for status"
-  assert_contains "$OUT" "spec2pr-chain.sh status | [--fast] [--admin] <spec-path> [<spec-path>...] (--admin specs only)" "usage advertises specs-only admin flag"
+  assert_contains "$OUT" "spec2pr-chain.sh status | [--fast] [--admin] [--atomic] <spec-path> [<spec-path>...] (--admin/--atomic specs only)" "usage advertises specs-only admin flag"
 }
 
 test_chain_resume_skips_merged() {
