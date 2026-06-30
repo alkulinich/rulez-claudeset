@@ -814,8 +814,9 @@ EOF
   if [ -n "$(git -C "$wt" ls-files -u)" ]; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
-  # 4. Worktree clean (index + working tree).
-  if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+  # 4. Worktree clean (index + working tree + untracked files). Force
+  # untracked reporting so local/user git config cannot hide generated files.
+  if [ -n "$(git -C "$wt" status --porcelain --untracked-files=all)" ]; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
   # 5. codex made the resolution commit (HEAD advanced past pre-merge HEAD).
@@ -949,7 +950,7 @@ git commit -m "chore: release v1.10.1 — spec2pr-chain conflict & branch-protec
 | Capture commit patch (`git show … --format=fuller`, not post-commit diff) + summary JSON to meta dir; non-empty | Task 4 |
 | `CHAIN OK resolved-conflict <slug>` audit line | Task 4 (`test_chain_conflict_resolved_and_retried`) |
 | Marker grep is line-shaped regex, inverted; no broad literal grep | Task 4 (`test_chain_conflict_marker_grep_ignores_legit_strings`) |
-| Hard gates: no markers, `diff --check` clean, committed worktree, fetched `origin/main` ancestor of HEAD | Task 4 (six gates) |
+| Hard gates: no markers, `diff --check` clean, committed worktree including untracked files, fetched `origin/main` ancestor of HEAD | Task 4 (six gates) |
 | Reject clean merge / no-unmerged-paths as resolution | Task 4 (`test_chain_conflict_requires_local_unmerged_paths`) |
 | Reject resolver that does not commit / breaks ancestry | Task 4 (`test_chain_conflict_resolver_must_commit`, gates 5-6) |
 | `BEHIND` → fetch + clean merge + push + retry, no model; fetch/merge fail → `branch update failed` | Task 2 (`chain_update_behind`, `test_chain_behind_merge_updates_and_retries`) |
