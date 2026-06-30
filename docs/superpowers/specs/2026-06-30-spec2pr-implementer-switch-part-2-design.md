@@ -36,6 +36,8 @@ cheaper/faster implement pass without weakening the plan or the critic.
 > part-1 is already merged into main; build on it, do not re-specify its changes.
 
 - `scripts/spec2pr.sh`
+  - update `usage()` to advertise
+    `[--implementer codex|claude|claude:sonnet]`.
   - extend the `--implementer` allowlist and parse the `:sonnet` suffix into
     `IMPLEMENTER_MODEL`.
   - persist and validate the normalized model tier in metadata alongside the
@@ -46,6 +48,7 @@ cheaper/faster implement pass without weakening the plan or the critic.
     `run_claude_json`; emit `--model` only when it is non-empty.
 - `VERSION`, `UPGRADE.md`.
 - `tests/spec2pr/test-implementer.sh` (extend with tier cases).
+- `tests/spec2pr/test-preflight.sh` (usage assertion update).
 
 ## The change
 
@@ -61,6 +64,13 @@ Accept `claude:sonnet` in addition to part-1's `codex` / `claude`:
 
 Everything else still halts at parse time, with the message updated to
 `halt "invalid --implementer: <value> (want codex|claude|claude:sonnet)"`.
+
+Update `usage()` in `spec2pr.sh` and the existing preflight usage assertion so
+the contract advertises the expanded grammar:
+
+```sh
+spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>
+```
 
 Initialize `IMPLEMENTER_MODEL=""` before argument parsing. Normalize the raw
 `--implementer` value immediately after parsing:
@@ -165,6 +175,8 @@ Extend `tests/spec2pr/test-implementer.sh` (existing codex/claude stubs):
   but no `implementer-model` resumes as bare `claude` and emits no `--model`.
 - **invalid inputs:** `claude:haiku`, `claude:opus`, `codex:sonnet`, bare
   `claude:` ⟹ arg-parse halt, nonzero exit, no worktree created.
+- **usage:** no-arg preflight output includes
+  `[--implementer codex|claude|claude:sonnet]`.
 - **regression:** part-1 cases (codex default, claude happy/blocked, reviewer
   opposite) still pass.
 
