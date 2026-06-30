@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] <spec-path>"
 }
 
 SPEC_INPUT=""
@@ -14,6 +14,8 @@ START_FROM_GIVEN=0
 IMPLEMENTER_AGENT="codex"
 IMPLEMENTER_MODEL=""
 IMPLEMENTER_AGENT_GIVEN=0
+BASE_BRANCH="main"
+BASE_BRANCH_GIVEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
@@ -45,6 +47,18 @@ while [ "$#" -gt 0 ]; do
     --implementer=*)
       IMPLEMENTER_AGENT="${1#--implementer=}"
       IMPLEMENTER_AGENT_GIVEN=1
+      shift
+      ;;
+    --base)
+      shift
+      [ "$#" -gt 0 ] || usage
+      BASE_BRANCH="$1"
+      BASE_BRANCH_GIVEN=1
+      shift
+      ;;
+    --base=*)
+      BASE_BRANCH="${1#--base=}"
+      BASE_BRANCH_GIVEN=1
       shift
       ;;
     --*)
@@ -170,7 +184,7 @@ require_dependency git
 mkdir -p "$SPEC2PR_HOME" "$SPEC2PR_WORKTREES"
 acquire_lock "$SPEC2PR_HOME/$ID.lock"
 
-git -C "$GIT_ROOT" fetch -q origin main || halt "git fetch origin main failed"
+git -C "$GIT_ROOT" fetch -q origin "$BASE_BRANCH" || halt "git fetch origin $BASE_BRANCH failed"
 SOURCE_SHA="$(sha256_of "$SPEC_ABS")"
 
 if [ -d "$WORKTREE/.git" ] || git -C "$WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -191,6 +205,18 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   RECORDED_SOURCE_PATH="$(cat "$META_DIR/source-path")"
   RECORDED_SOURCE_SHA="$(cat "$META_DIR/source-sha256")"
   BASE_SHA="$(cat "$META_DIR/base-sha")"
+  if [ -f "$META_DIR/base-branch" ]; then
+    RECORDED_BASE_BRANCH="$(cat "$META_DIR/base-branch")"
+  else
+    RECORDED_BASE_BRANCH="main"
+    printf '%s\n' "main" > "$META_DIR/base-branch"
+  fi
+  if [ "$BASE_BRANCH_GIVEN" -eq 1 ]; then
+    [ "$BASE_BRANCH" = "$RECORDED_BASE_BRANCH" ] \
+      || halt "worktree base is $RECORDED_BASE_BRANCH; rerun with matching --base or omit the flag"
+  else
+    BASE_BRANCH="$RECORDED_BASE_BRANCH"
+  fi
 
   [ "$RECORDED_SOURCE_PATH" = "$SPEC_ABS" ] || halt "worktree belongs to $RECORDED_SOURCE_PATH"
   [ "$RECORDED_SOURCE_SHA" = "$SOURCE_SHA" ] || halt "source spec changed since import"
@@ -222,7 +248,7 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
     IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
 else
-  BASE_SHA="$(git -C "$GIT_ROOT" rev-parse origin/main)" || halt "git rev-parse origin/main failed"
+  BASE_SHA="$(git -C "$GIT_ROOT" rev-parse "origin/$BASE_BRANCH")" || halt "git rev-parse origin/$BASE_BRANCH failed"
   if git -C "$GIT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
     halt "branch exists without worktree: $BRANCH"
   fi
@@ -231,6 +257,7 @@ else
   printf '%s\n' "$SPEC_ABS" > "$META_DIR/source-path"
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
+  printf '%s\n' "$BASE_BRANCH" > "$META_DIR/base-branch"
   printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
   printf '%s\n' "$IMPLEMENTER_MODEL" > "$META_DIR/implementer-model"
 fi
@@ -780,8 +807,8 @@ EOF
   pr_body="$(build_pr_body "$pr_head_sha")"
   if ! pr_create_out="$(cd "$WORKTREE" && gh pr create \
       --title "spec2pr: $SLUG" \
+      --base "$BASE_BRANCH" \
       --body "$pr_body" \
-      --base main \
       --head "$BRANCH")"; then
     halt "gh pr create failed"
   fi
