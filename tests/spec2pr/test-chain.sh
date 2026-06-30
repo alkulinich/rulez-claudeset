@@ -324,6 +324,42 @@ test_chain_behind_merge_updates_and_retries() {
     "chain-behind" "merged branch marker reached main"
 }
 
+test_chain_blocked_merge_halts_without_admin() {
+  make_sandbox
+  local a; a="$(add_spec chain-blocked)"
+  queue_chain_spec 01-chain-blocked chain-blocked
+  printf 'Protected branch update failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+  printf '{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "blocked without admin halts"
+  assert_contains "$OUT" "CHAIN HALT chain-blocked: merge blocked by branch protection" \
+    "blocked halt line"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "blocked path does not retry without admin"
+  assert_eq "3" "$(codex_calls)" "blocked path runs no conflict codex call"
+}
+
+test_chain_blocked_merge_with_admin_succeeds() {
+  make_sandbox
+  local a; a="$(add_spec chain-admin)"
+  queue_chain_spec 01-chain-admin chain-admin
+  printf 'Protected branch update failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+  printf '{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+
+  run_chain --admin "$a"
+
+  assert_eq "0" "$RC" "blocked with admin succeeds"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "admin chain reaches done"
+  assert_eq "2" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "admin path retries the merge"
+  assert_eq "1" "$(grep -c 'args=pr merge .* --admin' "$SPEC2PR_TEST_GH/gh.log")" \
+    "admin retry passes --admin"
+}
+
 test_chain_inspection_rejects_malformed_shape() {
   local payload
   for payload in \

@@ -175,14 +175,17 @@ chain_handle_failed_merge() { # <worktree> <pr-url> <slug> <id> <merge-stderr>
   MSS=""
 
   chain_inspect_merge_state "$wt" "$pr_url" "$slug"
-  case "$MSS" in
-    BEHIND)
-      chain_update_behind "$wt" "$pr_url" "$slug"
-      ;;
-    *)
-      chain_finish 1 "HALT $slug: merge state unsupported ($merge_err)"
-      ;;
-  esac
+  if [ "$MSS" = "BEHIND" ]; then
+    chain_update_behind "$wt" "$pr_url" "$slug"
+  elif [ "$MSS" = "BLOCKED" ]; then
+    if [ "$ADMIN" -eq 1 ]; then
+      chain_retry_merge "$wt" "$pr_url" "$slug" --admin
+    else
+      chain_finish 1 "HALT $slug: merge blocked by branch protection"
+    fi
+  else
+    chain_finish 1 "HALT $slug: merge state unsupported ($merge_err)"
+  fi
 }
 
 show_status() {
