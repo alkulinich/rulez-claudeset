@@ -62,6 +62,10 @@ To test statusline: `echo '<json>' | bash scripts/statusline.sh`
 
 ## Version Bumping
 
+**Defer the bump.** Never touch `VERSION`/`UPGRADE.md` during feature/spec2pr/SDD
+work — bump them in a dedicated release step, from whatever `main` then reads
+(hotfixes ship versions out of order, so a mid-feature bump collides/sequences wrong).
+
 Update `VERSION` file. UPGRADE.md sections use format `## To vX.Y.Z — from <source>`.
 
 UPGRADE.md sections are **user-facing** — keep them tight. Each section is
