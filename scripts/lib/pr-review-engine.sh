@@ -309,7 +309,9 @@ EOF
     if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
       git -C "$WORKTREE" add -A
       git -C "$WORKTREE" commit -q -m "$commit_prefix: pr-review review fixes r$round"
-      git -C "$WORKTREE" push -q origin "$push_refspec" || halt "git push failed"
+      if [ -n "$PR_URL" ]; then
+        git -C "$WORKTREE" push -q origin "$push_refspec" || halt "git push failed"
+      fi
       pr_review_engine_write_diff "$diff_file"
     fi
 

@@ -19,6 +19,7 @@ test_chain_atomic_lands_split_task_on_main() {
   assert_contains "$OUT" "CHAIN DONE merged=1/1 (atomic: 2 parts" "atomic done line"
   assert_eq "1" "$(grep -c 'args=pr create' "$SPEC2PR_TEST_GH/gh.log")" "exactly one PR created (rollup)"
   assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" "exactly one PR merge (rollup)"
+  assert_eq "1" "$(grep -c 'args=pr merge .*--squash' "$SPEC2PR_TEST_GH/gh.log")" "rollup collapses integ to one squash commit"
   git -C "$PROJECT" fetch -q origin main
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-atom-a.txt 2>/dev/null || true)" "atom-a" \
     "part-1 landed on main"
