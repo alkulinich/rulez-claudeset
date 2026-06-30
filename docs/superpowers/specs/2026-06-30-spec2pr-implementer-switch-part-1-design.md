@@ -71,13 +71,23 @@ byte-for-byte.
 ### 1. Arg parsing (`spec2pr.sh`)
 
 Accept `--implementer <agent>` and `--implementer=<agent>`. Validate against the
-two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`):
+two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`). Also track
+whether the flag was explicitly supplied, for example with
+`IMPLEMENTER_AGENT_GIVEN=0|1`; resume metadata checks must use this presence bit,
+not the defaulted `IMPLEMENTER_AGENT`, so an omitted flag can adopt the recorded
+worktree value:
 
 | input        | `IMPLEMENTER_AGENT` |
 |--------------|---------------------|
 | *(absent)*   | `codex`             |
 | `codex`      | `codex`             |
 | `claude`     | `claude`            |
+
+| input        | `IMPLEMENTER_AGENT_GIVEN` |
+|--------------|---------------------------|
+| *(absent)*   | `0`                       |
+| `codex`      | `1`                       |
+| `claude`     | `1`                       |
 
 Anything else halts before any worktree setup:
 `halt "invalid --implementer: <value> (want codex|claude)"`.
@@ -91,11 +101,12 @@ run metadata:
   require it to be `codex` or `claude`; any other value halts before stage work
   with `halt "invalid worktree implementer metadata: <recorded>"`. If the file
   is missing, treat the worktree as a pre-`--implementer` codex run and write
-  `codex` to `$META_DIR/implementer-agent` before any stage work. If the user
-  supplied `--implementer`, it must match the recorded or migrated value or halt
-  before doing any stage work:
+  `codex` to `$META_DIR/implementer-agent` before any stage work. If
+  `IMPLEMENTER_AGENT_GIVEN=1`, `IMPLEMENTER_AGENT` must match the recorded or
+  migrated value or halt before doing any stage work:
   `halt "worktree implementer is <recorded>; rerun with matching --implementer or omit the flag"`.
-  Then set `IMPLEMENTER_AGENT` from the recorded or migrated value before
+  If `IMPLEMENTER_AGENT_GIVEN=0`, never compare against the defaulted `codex`;
+  set `IMPLEMENTER_AGENT` from the recorded or migrated value before
   implementation or pr-review decisions.
 
 Update `usage()` in `spec2pr.sh` and the existing preflight usage assertion so
@@ -219,8 +230,9 @@ stubs and sandbox helpers:
 - **resume preserves reviewer opposite:** start with `--implementer claude`,
   stop after a valid implementation marker or before pr-review completes, then
   rerun without `--implementer`; assert pr-review still invokes the codex
-  reviewer and claude fixer. A rerun with `--implementer codex` against that
-  worktree halts on the metadata mismatch before model calls.
+  reviewer and claude fixer and does not halt on the parser's default `codex`
+  value. A rerun with `--implementer codex` against that worktree halts on the
+  metadata mismatch before model calls.
 - **resume legacy worktree:** create or simulate a pre-feature worktree with the
   existing `source-path`, `source-sha256`, and `base-sha` metadata but no
   `implementer-agent`; rerun without `--implementer` and assert the run migrates
