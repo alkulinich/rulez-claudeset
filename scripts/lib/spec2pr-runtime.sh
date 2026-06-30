@@ -391,6 +391,21 @@ codex_call() {
   fi
 }
 
+# implement_json_valid <json-path>
+# Shared strict contract for an implement result, used by both the codex output
+# validator and the claude implement adapter: an object with exactly
+# status/summary/blocked_reason, status in {done,blocked}, string text fields.
+implement_json_valid() {
+  local path="$1"
+  jq -e '
+    type == "object"
+    and ((keys_unsorted | sort) == ["blocked_reason","status","summary"])
+    and (.status == "done" or .status == "blocked")
+    and (.summary | type == "string")
+    and (.blocked_reason | type == "string")
+  ' "$path" > /dev/null 2>&1
+}
+
 validate_codex_output() {
   local role="$1" tag="$2" path="$3"
   local filter
@@ -423,13 +438,8 @@ validate_codex_output() {
       '
       ;;
     implement)
-      filter='
-        type == "object"
-        and ((keys_unsorted | sort) == ["blocked_reason","status","summary"])
-        and (.status == "done" or .status == "blocked")
-        and (.summary | type == "string")
-        and (.blocked_reason | type == "string")
-      '
+      implement_json_valid "$path"
+      return $?
       ;;
     pr-fix)
       filter='
