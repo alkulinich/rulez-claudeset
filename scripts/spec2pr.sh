@@ -196,6 +196,7 @@ else
   printf '%s\n' "$SPEC_ABS" > "$META_DIR/source-path"
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
+  printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
 fi
 
 commit_with_subject() {
@@ -650,8 +651,33 @@ else
         STAGE="implement"
       fi
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-      pf="$META_DIR/implement.prompt"
-      cat > "$pf" <<EOF
+      if [ "$IMPLEMENTER_AGENT" = "claude" ]; then
+        cpf="$META_DIR/implement.claude.prompt"
+        cat > "$cpf" <<EOF
+Use \$superpowers:subagent-driven-development to implement the plan at
+$WT_PLAN_REL for the spec at $WT_SPEC_REL.
+
+Make the necessary code, test, and documentation changes in this worktree.
+Commit the implementation changes. Do not push, do not create a PR.
+Return ONLY a JSON object in the JSON envelope's result field with this shape:
+{"status":"done|blocked","summary":"...","blocked_reason":""}
+EOF
+        CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json"
+        if ! jq -e 'if (.result | type) == "object" then .result
+                    else (.result | tostring | fromjson?) end
+                    | select(type == "object")' \
+            "$META_DIR/implement.envelope.json" > "$META_DIR/implement.json" 2>/dev/null; then
+          jq -r '.result // empty' "$META_DIR/implement.envelope.json" \
+            | extract_json_object > "$META_DIR/implement.json" 2>/dev/null || true
+        fi
+        if ! implement_json_valid "$META_DIR/implement.json"; then
+          clean_worktree_to "$CALL_START_HEAD"
+          halt "claude implement returned invalid result"
+        fi
+      else
+        pf="$META_DIR/implement.prompt"
+        cat > "$pf" <<EOF
 Use \$superpowers:subagent-driven-development to implement the plan at
 $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
@@ -659,7 +685,8 @@ Make the necessary code, test, and documentation changes in this worktree.
 Commit the implementation changes. Do not push, do not create a PR.
 Your final message must be exactly the JSON required by the output schema.
 EOF
-      codex_call implement implement "$pf"
+        codex_call implement implement "$pf"
+      fi
       impl_status="$(jq -r '.status' "$META_DIR/implement.json")"
       case "$impl_status" in
         blocked)
@@ -712,4 +739,8 @@ fi
 
 # pr-review -> done: claude reviews the diff, codex fixes, loop until clean
 # (DONE) or stuck (DIRTY). Engine lives in lib/pr-review-engine.sh.
-pr_review_engine_run
+if [ "$IMPLEMENTER_AGENT" = "claude" ]; then
+  pr_review_engine_run codex      # codex reviews, claude fixes
+else
+  pr_review_engine_run            # default: claude reviews, codex fixes
+fi

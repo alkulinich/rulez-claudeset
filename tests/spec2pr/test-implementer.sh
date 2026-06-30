@@ -35,3 +35,166 @@ test_implementer_missing_value_prints_usage() {
   assert_eq "1" "$RC" "--implementer with no value exits 1"
   assert_contains "$OUT" "usage: spec2pr.sh" "missing value prints usage"
 }
+
+# ---- claude implement fixtures (local) --------------------------------------
+
+q_claude_impl_done() {
+  enqueue_claude "$1" <<'EOF'
+printf '1.0.0\n' > version.txt
+git add version.txt
+git commit -qm 'spec2pr: implement version file'
+printf '{"result":{"status":"done","summary":"implemented with claude","blocked_reason":""}}'
+EOF
+}
+
+q_claude_impl_blocked() {
+  enqueue_claude "$1" <<'EOF'
+printf '{"result":{"status":"blocked","summary":"blocked","blocked_reason":"missing API key"}}'
+EOF
+}
+
+q_claude_impl_badschema() {
+  enqueue_claude "$1" <<'EOF'
+printf '1.0.0\n' > version.txt
+git add version.txt
+git commit -qm 'spec2pr: implement version file'
+printf '{"result":{"status":"done","summary":"x","blocked_reason":"","extra":1}}'
+EOF
+}
+
+q_codex_pr_clean() {
+  enqueue "$1" <<'EOF'
+printf '{"blockers_found":0,"majors_found":0,"findings":[],"notes":"clean codex review."}'
+EOF
+}
+
+# ---- default / codex baseline ------------------------------------------------
+
+test_implementer_default_matches_codex_baseline() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "default run reaches done"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "default done contract"
+  assert_eq "codex" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "default records codex"
+  assert_eq "3" "$(codex_calls)" "default makes three codex calls (spec-review, plan-review, pr-review)"
+}
+
+test_implementer_explicit_codex_space_form() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr --implementer codex "$SPEC"
+  assert_eq "0" "$RC" "--implementer codex reaches done"
+  assert_eq "codex" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "explicit codex recorded"
+}
+
+test_implementer_codex_equals_form() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr --implementer=codex "$SPEC"
+  assert_eq "0" "$RC" "--implementer=codex reaches done"
+}
+
+# ---- claude happy / equals form ----------------------------------------------
+
+test_implementer_claude_happy_done() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "claude implementer reaches done"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "claude done contract"
+  assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "claude recorded in metadata"
+  assert_file_exists "$SPEC2PR_HOME/$ID/implementation-ok" "implementation-ok marker written"
+  assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: implement version file" "claude commit present"
+}
+
+test_implementer_claude_equals_form() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer=claude "$SPEC"
+  assert_eq "0" "$RC" "--implementer=claude dispatches to claude branch and reaches done"
+  assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "equals form recorded as claude"
+}
+
+# ---- claude blocked / schema violation --------------------------------------
+
+test_implementer_claude_blocked_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_blocked 05-implement
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "1" "$RC" "claude blocked exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT implement: missing API key" "blocked reason surfaced"
+  assert_file_absent "$SPEC2PR_HOME/$ID/implementation-ok" "no marker on blocked"
+}
+
+test_implementer_claude_schema_violation_halts() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_badschema 05-implement
+  run_spec2pr --implementer claude "$SPEC"
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "1" "$RC" "claude schema violation exits 1"
+  assert_contains "$OUT" "claude implement returned invalid result" "invalid result halt"
+  assert_file_absent "$SPEC2PR_HOME/$ID/implementation-ok" "no marker on schema violation"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" "worktree clean after halt"
+  assert_not_contains "$(git -C "$wt" log --format=%s)" "spec2pr: implement version file" \
+    "rejected commit was discarded"
+}
+
+# ---- reviewer flip (codex reviews, claude fixes) ----------------------------
+
+test_implementer_claude_pr_review_uses_codex_reviewer_and_claude_fixer() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  queue_dirty_codex_pr_review 06-pr-review   # codex reviewer flags 1 blocker
+  queue_claude_pr_fix 06-pr-review           # claude fixer writes review-fix.txt
+  q_codex_pr_clean 07-pr-review              # codex reviewer clean on round 2
+  run_spec2pr --implementer claude "$SPEC"
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "claude run with one fix round reaches done"
+  assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "reviewer=codex" "pr-review used codex reviewer"
+  assert_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "06-pr-review-codex-review.sh" \
+    "codex reviewer invoked"
+  assert_contains "$(cat "$SPEC2PR_TEST_CLAUDE_FIXTURES/invocations.log")" "06-pr-review-claude-fix.sh" \
+    "claude fixer invoked"
+  assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: pr-review review fixes r1" \
+    "fix round committed"
+}
