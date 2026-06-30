@@ -6,6 +6,14 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.11.3 - from v1.11.2
+
+**Action:** None.
+
+**Caveat:** `--implementer` now also accepts `claude:sonnet`, which pins only
+the implement call to Sonnet (every other Claude stage keeps its default model).
+`claude:haiku`/`claude:opus` are not supported.
+
 ## To v1.11.2 - from v1.11.1
 
 **Action:** None.
