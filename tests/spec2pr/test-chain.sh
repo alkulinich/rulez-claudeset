@@ -324,6 +324,117 @@ test_chain_behind_merge_updates_and_retries() {
     "chain-behind" "merged branch marker reached main"
 }
 
+test_chain_conflict_resolved_and_retried() {
+  make_sandbox
+  local a marker meta_dir
+  a="$(add_spec chain-conflict)"
+  marker="marker-chain-conflict.txt"
+  meta_dir="$SPEC2PR_HOME/project-chain-conflict"
+  queue_chain_spec 01-chain-conflict chain-conflict
+  printf '%s\nmain side for chain-conflict\n' "$marker" \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+  enqueue 02-chain-conflict-resolve <<'EOF'
+printf 'chain-conflict\nmain side for chain-conflict\n' > marker-chain-conflict.txt
+git add marker-chain-conflict.txt
+git commit -qm 'resolve chain-conflict conflict'
+printf '{"summary":"resolved marker conflict"}'
+EOF
+
+  run_chain "$a"
+
+  assert_eq "0" "$RC" "conflict chain exits 0"
+  assert_contains "$OUT" "CHAIN OK resolved-conflict chain-conflict" \
+    "conflict chain records resolved audit line"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "conflict chain reaches done"
+  assert_eq "4" "$(codex_calls)" "conflict path runs one extra codex call"
+  assert_eq "2" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "conflict path retries the merge once"
+  assert_file_exists "$meta_dir/conflict-resolve.patch" "conflict patch audit exists"
+  assert_file_exists "$meta_dir/conflict-resolve.codex.json" "conflict codex JSON audit exists"
+  assert_contains "$(cat "$meta_dir/conflict-resolve.patch" 2>/dev/null || true)" \
+    "$marker" "conflict patch references marker file"
+}
+
+test_chain_conflict_resolver_must_commit() {
+  make_sandbox
+  local a
+  a="$(add_spec chain-nocommit)"
+  queue_chain_spec 01-chain-nocommit chain-nocommit
+  printf 'marker-chain-nocommit.txt\nmain side for chain-nocommit\n' \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+  enqueue 02-chain-nocommit-resolve <<'EOF'
+git merge --abort
+printf '{"summary":"aborted instead of committing"}'
+EOF
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "conflict resolver without commit exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-nocommit: conflict resolution failed" \
+    "resolver without commit halt line"
+  assert_not_contains "$OUT" "resolved-conflict chain-nocommit" \
+    "resolver without commit does not emit resolved audit line"
+  assert_eq "4" "$(codex_calls)" "resolver without commit still consumes resolver codex call"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "resolver without commit does not retry merge"
+}
+
+test_chain_conflict_requires_local_unmerged_paths() {
+  make_sandbox
+  local a
+  a="$(add_spec chain-falseconflict)"
+  queue_chain_spec 01-chain-falseconflict chain-falseconflict
+  printf 'optimistic merge failed\n' > "$SPEC2PR_TEST_GH/pr-merge-fail-once"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "false conflict exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-falseconflict: conflict resolution failed" \
+    "false conflict halt line"
+  assert_eq "3" "$(codex_calls)" "false conflict runs no resolver codex call"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "false conflict does not retry merge"
+}
+
+test_chain_conflict_marker_grep_ignores_legit_strings() {
+  make_sandbox
+  local a
+  a="$(add_spec chain-marker-prose)"
+  queue_chain_spec 01-chain-marker-prose chain-marker-prose
+  enqueue 01-chain-marker-prose-05-implement <<'EOF'
+printf 'chain-marker-prose\n' > marker-chain-marker-prose.txt
+printf 'Inline prose may mention <<<<<<< ours, =======, and >>>>>>> theirs safely.\n' \
+  > conflict-marker-prose.md
+git add marker-chain-marker-prose.txt conflict-marker-prose.md
+git commit -qm 'implement marker prose'
+printf '{"status":"done","summary":"implemented chain-marker-prose","blocked_reason":""}'
+EOF
+  printf 'marker-chain-marker-prose.txt\nmain side for chain-marker-prose\n' \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+  enqueue 02-chain-marker-prose-resolve <<'EOF'
+printf 'chain-marker-prose\nmain side for chain-marker-prose\n' > marker-chain-marker-prose.txt
+git add marker-chain-marker-prose.txt
+git commit -qm 'resolve marker prose conflict'
+printf '{"summary":"resolved marker conflict with prose markers present"}'
+EOF
+
+  run_chain "$a"
+
+  assert_eq "0" "$RC" "prose marker conflict chain exits 0"
+  assert_contains "$OUT" "CHAIN OK resolved-conflict chain-marker-prose" \
+    "prose marker conflict records resolved audit line"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "prose marker conflict reaches done"
+  assert_eq "4" "$(codex_calls)" "prose marker conflict runs one extra codex call"
+}
+
 test_chain_blocked_merge_halts_without_admin() {
   make_sandbox
   local a; a="$(add_spec chain-blocked)"
