@@ -195,20 +195,31 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   [ "$RECORDED_SOURCE_PATH" = "$SPEC_ABS" ] || halt "worktree belongs to $RECORDED_SOURCE_PATH"
   [ "$RECORDED_SOURCE_SHA" = "$SOURCE_SHA" ] || halt "source spec changed since import"
   if [ -f "$META_DIR/implementer-agent" ]; then
-    RECORDED_IMPLEMENTER="$(cat "$META_DIR/implementer-agent")"
-    case "$RECORDED_IMPLEMENTER" in
-      codex|claude) ;;
-      *) halt "invalid worktree implementer metadata: $RECORDED_IMPLEMENTER" ;;
-    esac
+    RECORDED_AGENT="$(cat "$META_DIR/implementer-agent")"
   else
-    RECORDED_IMPLEMENTER="codex"
-    printf '%s\n' "codex" > "$META_DIR/implementer-agent"
+    RECORDED_AGENT="codex"
+    printf '%s\n' "$RECORDED_AGENT" > "$META_DIR/implementer-agent"
+  fi
+  if [ -f "$META_DIR/implementer-model" ]; then
+    RECORDED_MODEL="$(cat "$META_DIR/implementer-model")"
+  else
+    RECORDED_MODEL=""
+    printf '%s\n' "$RECORDED_MODEL" > "$META_DIR/implementer-model"
+  fi
+  case "$RECORDED_AGENT:$RECORDED_MODEL" in
+    codex:|claude:|claude:sonnet) ;;
+    *) halt "invalid worktree implementer metadata: $RECORDED_AGENT/$RECORDED_MODEL" ;;
+  esac
+  recorded_display="$RECORDED_AGENT"
+  if [ -n "$RECORDED_MODEL" ]; then
+    recorded_display="$RECORDED_AGENT:$RECORDED_MODEL"
   fi
   if [ "$IMPLEMENTER_AGENT_GIVEN" -eq 1 ]; then
-    [ "$IMPLEMENTER_AGENT" = "$RECORDED_IMPLEMENTER" ] \
-      || halt "worktree implementer is $RECORDED_IMPLEMENTER; rerun with matching --implementer or omit the flag"
+    [ "$IMPLEMENTER_AGENT" = "$RECORDED_AGENT" ] && [ "$IMPLEMENTER_MODEL" = "$RECORDED_MODEL" ] \
+      || halt "worktree implementer is $recorded_display; rerun with matching --implementer or omit the flag"
   else
-    IMPLEMENTER_AGENT="$RECORDED_IMPLEMENTER"
+    IMPLEMENTER_AGENT="$RECORDED_AGENT"
+    IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse origin/main)" || halt "git rev-parse origin/main failed"
@@ -221,6 +232,7 @@ else
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
   printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
+  printf '%s\n' "$IMPLEMENTER_MODEL" > "$META_DIR/implementer-model"
 fi
 
 commit_with_subject() {
