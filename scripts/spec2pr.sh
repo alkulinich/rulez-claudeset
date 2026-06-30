@@ -675,8 +675,10 @@ $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
 Make the necessary code, test, and documentation changes in this worktree.
 Commit the implementation changes. Do not push, do not create a PR.
-Return ONLY a JSON object in the JSON envelope's result field with this shape:
-{"status":"done|blocked","summary":"...","blocked_reason":""}
+Return ONLY one JSON object in the JSON envelope's result field. Use one of these
+valid result shapes:
+{"status":"done","summary":"...","blocked_reason":""}
+{"status":"blocked","summary":"...","blocked_reason":"..."}
 EOF
         CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
         run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json"

@@ -127,6 +127,13 @@ test_implementer_claude_happy_done() {
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1 worktree=$wt" "claude done contract"
   assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "claude recorded in metadata"
   assert_file_exists "$SPEC2PR_HOME/$ID/implementation-ok" "implementation-ok marker written"
+  local prompt="$SPEC2PR_TEST_CLAUDE_FIXTURES/05-implement.prompt"
+  assert_contains "$(cat "$prompt")" '"done","summary":"...","blocked_reason":""' \
+    "claude implement prompt shows done shape"
+  assert_contains "$(cat "$prompt")" '"blocked","summary":"...","blocked_reason":"..."' \
+    "claude implement prompt shows blocked shape"
+  assert_not_contains "$(cat "$prompt")" '"done|blocked"' \
+    "claude implement prompt avoids ambiguous status literal"
   assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: implement version file" "claude commit present"
 }
 
