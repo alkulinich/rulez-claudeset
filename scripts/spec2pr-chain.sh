@@ -438,14 +438,22 @@ for i in "${!SPEC_ABS_LIST[@]}"; do
     chain_finish 1 "HALT $slug: stale merged marker"
   fi
 
+  # Stream spec2pr's stage narration live (tee) instead of swallowing it in a
+  # command substitution, while still capturing it for the DONE/HALT parsing
+  # below. spec2pr's status()/progress() are plain printf (not tty-gated), so
+  # tee suffices and stays portable; `script` would only matter for tty-gated
+  # rendering. Read the run's exit code from PIPESTATUS[0] (tee's would mask it).
+  spec_log="$(mktemp "${TMPDIR:-/tmp}/spec2pr-chain-run.XXXXXX")"
   set +e
   if [ "$FAST" -eq 1 ]; then
-    spec_out="$(bash "$SCRIPT_DIR/spec2pr.sh" --fast "$spec_abs" 2>&1)"
+    bash "$SCRIPT_DIR/spec2pr.sh" --fast "$spec_abs" 2>&1 | tee "$spec_log"
   else
-    spec_out="$(bash "$SCRIPT_DIR/spec2pr.sh" "$spec_abs" 2>&1)"
+    bash "$SCRIPT_DIR/spec2pr.sh" "$spec_abs" 2>&1 | tee "$spec_log"
   fi
-  spec_rc=$?
+  spec_rc=${PIPESTATUS[0]}
   set -e
+  spec_out="$(cat "$spec_log")"
+  rm -f "$spec_log"
 
   if [ "$spec_rc" -ne 0 ]; then
     terminal="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR / { line = $0 } END { print line }')"
