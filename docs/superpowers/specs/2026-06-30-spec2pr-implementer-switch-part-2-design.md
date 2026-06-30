@@ -38,6 +38,8 @@ cheaper/faster implement pass without weakening the plan or the critic.
 - `scripts/spec2pr.sh`
   - extend the `--implementer` allowlist and parse the `:sonnet` suffix into
     `IMPLEMENTER_MODEL`.
+  - persist and validate the normalized model tier in metadata alongside the
+    part-1 `implementer-agent`, so resumed runs keep the same implement model.
   - forward `IMPLEMENTER_MODEL` into the part-1 claude implement adapter.
 - `scripts/lib/spec2pr-runtime.sh`
   - add an optional trailing `model` argument to `claude_json_attempt` and
@@ -59,6 +61,42 @@ Accept `claude:sonnet` in addition to part-1's `codex` / `claude`:
 
 Everything else still halts at parse time, with the message updated to
 `halt "invalid --implementer: <value> (want codex|claude|claude:sonnet)"`.
+
+Initialize `IMPLEMENTER_MODEL=""` before argument parsing. Normalize the raw
+`--implementer` value immediately after parsing:
+
+- `codex` -> `IMPLEMENTER_AGENT=codex`, `IMPLEMENTER_MODEL=""`
+- `claude` -> `IMPLEMENTER_AGENT=claude`, `IMPLEMENTER_MODEL=""`
+- `claude:sonnet` -> `IMPLEMENTER_AGENT=claude`, `IMPLEMENTER_MODEL=sonnet`
+
+Do not persist the raw flag value as the agent; the rest of the pipeline should
+continue to branch on `IMPLEMENTER_AGENT=codex|claude`.
+
+### 1a. Resume metadata (`spec2pr.sh`)
+
+Persist the normalized tier in `$META_DIR/implementer-model` alongside the
+part-1 `$META_DIR/implementer-agent`:
+
+- Fresh worktree: write both files. `codex` and bare `claude` write an empty
+  `implementer-model`; `claude:sonnet` writes `sonnet`.
+- Resumed worktree with both files: read and validate both. If
+  `--implementer` was supplied, compare the normalized requested
+  `(IMPLEMENTER_AGENT, IMPLEMENTER_MODEL)` pair to the recorded pair and halt on
+  any mismatch before model calls.
+- Resumed part-1 worktree missing `implementer-model`: treat it as an empty
+  model, create the empty metadata file, and keep the existing
+  `implementer-agent` migration behavior for pre-part-1 worktrees.
+- Resumed worktree without `--implementer`: reuse both recorded values, so a
+  partial `claude:sonnet` run still invokes the implement stage with Sonnet
+  after process restart.
+
+Recommended conflict halt text:
+
+```sh
+halt "worktree implementer is $recorded_display; rerun with matching --implementer or omit the flag"
+```
+
+where `recorded_display` is `codex`, `claude`, or `claude:sonnet`.
 
 ### 2. Model plumbing (`spec2pr-runtime.sh`)
 
@@ -88,6 +126,13 @@ branch is unaffected.
   leaks into review, fix, plan, or forecast.
 - **`claude` (no tier) is unchanged:** still the default Claude model, no
   `--model`.
+- **Resume preserves the tier:** after a run started with
+  `--implementer claude:sonnet`, rerunning without `--implementer` reuses
+  `IMPLEMENTER_AGENT=claude` and `IMPLEMENTER_MODEL=sonnet`. Rerunning that
+  worktree with `--implementer claude` halts before any model call because it
+  conflicts with the recorded `claude:sonnet` pair.
+- **Legacy metadata stays compatible:** part-1 worktrees with
+  `implementer-agent` but no `implementer-model` are migrated to an empty model.
 - **Empty model ⟹ byte-identical to part 1** for the `codex` and `claude`
   paths.
 - **Validation precedes side effects:** `claude:haiku`, `claude:opus`,
@@ -102,6 +147,15 @@ Extend `tests/spec2pr/test-implementer.sh` (existing codex/claude stubs):
   `--model sonnet` is present on the implement call and **absent** on the
   plan / forecast / pr-review calls.
 - **`--implementer claude` (no tier):** no `--model` on any call.
+- **resume preservation:** seed a `claude:sonnet` worktree that reaches a
+  resumable point before implementation completion, rerun without
+  `--implementer`, and assert the resumed implement call still receives
+  `--model sonnet`.
+- **resume conflict:** seed a `claude:sonnet` worktree, rerun with
+  `--implementer claude`, and assert it halts before model calls with the
+  recorded implementer shown as `claude:sonnet`.
+- **legacy migration:** a part-1 worktree containing `implementer-agent=claude`
+  but no `implementer-model` resumes as bare `claude` and emits no `--model`.
 - **invalid inputs:** `claude:haiku`, `claude:opus`, `codex:sonnet`, bare
   `claude:` ⟹ arg-parse halt, nonzero exit, no worktree created.
 - **regression:** part-1 cases (codex default, claude happy/blocked, reviewer
