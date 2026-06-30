@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path>"
 }
 
 SPEC_INPUT=""
@@ -16,6 +16,7 @@ IMPLEMENTER_MODEL=""
 IMPLEMENTER_AGENT_GIVEN=0
 BASE_BRANCH="main"
 BASE_BRANCH_GIVEN=0
+NO_PR=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
@@ -59,6 +60,10 @@ while [ "$#" -gt 0 ]; do
     --base=*)
       BASE_BRANCH="${1#--base=}"
       BASE_BRANCH_GIVEN=1
+      shift
+      ;;
+    --no-pr)
+      NO_PR=1
       shift
       ;;
     --*)
@@ -287,8 +292,12 @@ newest_commit_with_prefix() {
 
 if [ "$START_FROM_GIVEN" -eq 1 ]; then
   STAGE="restart"
-  open_pr="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')" \
-    || halt "gh pr list failed"
+  if [ "$NO_PR" -eq 1 ]; then
+    open_pr=""
+  else
+    open_pr="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')" \
+      || halt "gh pr list failed"
+  fi
   if [ -n "$open_pr" ]; then
     halt "open PR or remote branch exists for $BRANCH; close it and delete the branch, then re-run"
   fi
@@ -630,7 +639,9 @@ EOF
 }
 
 STAGE="implement"
-if ! PR_URL="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')"; then
+if [ "$NO_PR" -eq 1 ]; then
+  PR_URL=""
+elif ! PR_URL="$(cd "$WORKTREE" && gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // empty')"; then
   halt "gh pr list failed"
 fi
 
@@ -801,22 +812,24 @@ EOF
     halt "git ls-remote failed"
   fi
 
-  STAGE="pr-create"
-  git -C "$WORKTREE" push -q -u origin "$BRANCH" || halt "git push failed"
-  pr_head_sha="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  pr_body="$(build_pr_body "$pr_head_sha")"
-  if ! pr_create_out="$(cd "$WORKTREE" && gh pr create \
-      --title "spec2pr: $SLUG" \
-      --base "$BASE_BRANCH" \
-      --body "$pr_body" \
-      --head "$BRANCH")"; then
-    halt "gh pr create failed"
+  if [ "$NO_PR" -ne 1 ]; then
+    STAGE="pr-create"
+    git -C "$WORKTREE" push -q -u origin "$BRANCH" || halt "git push failed"
+    pr_head_sha="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+    pr_body="$(build_pr_body "$pr_head_sha")"
+    if ! pr_create_out="$(cd "$WORKTREE" && gh pr create \
+        --title "spec2pr: $SLUG" \
+        --base "$BASE_BRANCH" \
+        --body "$pr_body" \
+        --head "$BRANCH")"; then
+      halt "gh pr create failed"
+    fi
+    # Real `gh pr create` can print advisory lines to stdout alongside the URL;
+    # extract just the PR URL so the DONE contract line stays machine-parseable.
+    PR_URL="$(printf '%s\n' "$pr_create_out" | grep -Eo 'https://[^[:space:]]+' | tail -n1 || true)"
+    [ -n "$PR_URL" ] || halt "gh pr create did not return URL"
+    status "OK" "pr ok $PR_URL"
   fi
-  # Real `gh pr create` can print advisory lines to stdout alongside the URL;
-  # extract just the PR URL so the DONE contract line stays machine-parseable.
-  PR_URL="$(printf '%s\n' "$pr_create_out" | grep -Eo 'https://[^[:space:]]+' | tail -n1 || true)"
-  [ -n "$PR_URL" ] || halt "gh pr create did not return URL"
-  status "OK" "pr ok $PR_URL"
 fi
 
 # pr-review -> done: claude reviews the diff, codex fixes, loop until clean

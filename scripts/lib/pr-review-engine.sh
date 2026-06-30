@@ -319,15 +319,19 @@ EOF
   done
 
   STAGE="done"
-  git -C "$WORKTREE" push -q origin "$push_refspec" || halt "final git push failed"
+  if [ -n "$PR_URL" ]; then
+    git -C "$WORKTREE" push -q origin "$push_refspec" || halt "final git push failed"
+  fi
   local comment_body="$META_DIR/pr-review-comment.md"
   {
     printf '%s\n\n' "$done_comment_header"
     grep ' pr-review r' "$STATUS_PATH" 2>/dev/null || true
     printf '\nLogs: %s\n' "$META_DIR"
   } > "$comment_body"
-  if ! (cd "$WORKTREE" && gh pr comment "$PR_URL" --body-file "$comment_body") >/dev/null 2>"$META_DIR/pr-comment.stderr"; then
-    status "OK" "pr comment failed $META_DIR/pr-comment.stderr"
+  if [ -n "$PR_URL" ]; then
+    if ! (cd "$WORKTREE" && gh pr comment "$PR_URL" --body-file "$comment_body") >/dev/null 2>"$META_DIR/pr-comment.stderr"; then
+      status "OK" "pr comment failed $META_DIR/pr-comment.stderr"
+    fi
   fi
   # Mark the PR reviewed (and ready, if a draft) when the caller opts in. Both
   # are non-fatal: a finished review must not fail on a GitHub-state hiccup, and
@@ -344,5 +348,9 @@ EOF
       fi
     fi
   fi
-  finish 0 "DONE pr=$PR_URL worktree=$WORKTREE"
+  if [ -n "$PR_URL" ]; then
+    finish 0 "DONE pr=$PR_URL worktree=$WORKTREE"
+  else
+    finish 0 "DONE worktree=$WORKTREE"
+  fi
 }
