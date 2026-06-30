@@ -330,7 +330,9 @@ test_chain_inspection_rejects_malformed_shape() {
     '[{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}]' \
     '{"mergeable":"MERGEABLE"}' \
     '{"mergeable":1,"mergeStateStatus":"BEHIND"}' \
-    '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
+    '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}[]' \
+    '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}123'
   do
     make_sandbox
     local a; a="$(add_spec chain-bad)"

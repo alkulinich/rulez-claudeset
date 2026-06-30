@@ -104,7 +104,7 @@ chain_require_dependency() {
 
 chain_inspect_merge_state() { # <worktree> <pr-url> <slug>
   local wt="$1" pr_url="$2" slug="$3"
-  local view_json view_rc parsed parse_rc line_count
+  local view_json view_rc valid_rc mergeable_rc mss_rc
 
   set +e
   view_json="$(cd "$wt" && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null)"
@@ -115,21 +115,26 @@ chain_inspect_merge_state() { # <worktree> <pr-url> <slug>
   fi
 
   set +e
-  parsed="$(printf '%s' "$view_json" | jq -er 'select(type == "object" and (.mergeable | type == "string") and (.mergeStateStatus | type == "string")) | [.mergeable, .mergeStateStatus] | @tsv' 2>/dev/null)"
-  parse_rc=$?
+  printf '%s' "$view_json" | jq -e -s \
+    'length == 1 and (.[0] | type == "object") and (.[0].mergeable | type == "string") and (.[0].mergeStateStatus | type == "string")' \
+    >/dev/null 2>&1
+  valid_rc=$?
   set -e
-  if [ "$parse_rc" -ne 0 ]; then
+  if [ "$valid_rc" -ne 0 ]; then
     chain_finish 1 "HALT $slug: merge state inspection failed"
   fi
 
-  line_count="$(printf '%s\n' "$parsed" | wc -l | tr -d ' ')"
-  if [ "$line_count" != "1" ]; then
+  set +e
+  MERGEABLE="$(printf '%s' "$view_json" | jq -r -s '.[0].mergeable' 2>/dev/null)"
+  mergeable_rc=$?
+  MSS="$(printf '%s' "$view_json" | jq -r -s '.[0].mergeStateStatus' 2>/dev/null)"
+  mss_rc=$?
+  set -e
+  if [ "$mergeable_rc" -ne 0 ] || [ "$mss_rc" -ne 0 ]; then
     chain_finish 1 "HALT $slug: merge state inspection failed"
   fi
 
-  MERGEABLE="${parsed%%	*}"
-  MSS="${parsed#*	}"
-  if [ -z "$MERGEABLE" ] || [ -z "$MSS" ] || [ "$MERGEABLE" = "$parsed" ]; then
+  if [ -z "$MERGEABLE" ] || [ -z "$MSS" ]; then
     chain_finish 1 "HALT $slug: merge state inspection failed"
   fi
 }
@@ -140,7 +145,7 @@ chain_retry_merge() { # <worktree> <pr-url> <slug> [extra-gh-flags...]
   local retry_err retry_rc
 
   set +e
-  retry_err="$(cd "$wt" && gh pr merge "$pr_url" --squash --delete-branch "$@" 2>&1 1>/dev/null)"
+  retry_err="$(cd "$wt" && gh pr merge "$pr_url" "$@" --squash --delete-branch 2>&1 1>/dev/null)"
   retry_rc=$?
   set -e
   if [ "$retry_rc" -ne 0 ]; then
