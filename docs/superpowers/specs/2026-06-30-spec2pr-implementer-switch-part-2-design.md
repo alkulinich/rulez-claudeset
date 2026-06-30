@@ -83,6 +83,10 @@ part-1 `$META_DIR/implementer-agent`:
   `--implementer` was supplied, compare the normalized requested
   `(IMPLEMENTER_AGENT, IMPLEMENTER_MODEL)` pair to the recorded pair and halt on
   any mismatch before model calls.
+- Recorded metadata is valid only for these normalized pairs:
+  `(codex, "")`, `(claude, "")`, and `(claude, "sonnet")`. Reject unknown
+  agents, unknown model strings, and inconsistent pairs such as
+  `(codex, "sonnet")`.
 - Resumed part-1 worktree missing `implementer-model`: treat it as an empty
   model, create the empty metadata file, and keep the existing
   `implementer-agent` migration behavior for pre-part-1 worktrees.
@@ -133,8 +137,10 @@ branch is unaffected.
   conflicts with the recorded `claude:sonnet` pair.
 - **Legacy metadata stays compatible:** part-1 worktrees with
   `implementer-agent` but no `implementer-model` are migrated to an empty model.
-- **Empty model ⟹ byte-identical to part 1** for the `codex` and `claude`
-  paths.
+- **Empty model ⟹ no invocation behavior change from part 1** for the `codex`
+  and bare `claude` paths: no `--model` appears on any Claude call. Metadata is
+  intentionally not byte-identical because the new `implementer-model` file is
+  written even when empty.
 - **Validation precedes side effects:** `claude:haiku`, `claude:opus`,
   `codex:sonnet`, and bare `claude:` halt at arg-parse before any worktree is
   created.
@@ -145,7 +151,8 @@ Extend `tests/spec2pr/test-implementer.sh` (existing codex/claude stubs):
 
 - **`--implementer claude:sonnet`:** stub claude records argv; assert
   `--model sonnet` is present on the implement call and **absent** on the
-  plan / forecast / pr-review calls.
+  plan / forecast calls. Include a dirty codex pr-review round that invokes the
+  Claude fixer, and assert that fixer invocation also has no `--model`.
 - **`--implementer claude` (no tier):** no `--model` on any call.
 - **resume preservation:** seed a `claude:sonnet` worktree that reaches a
   resumable point before implementation completion, rerun without
