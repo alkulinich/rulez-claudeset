@@ -5,12 +5,14 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>"
 }
 
 SPEC_INPUT=""
 START_FROM="spec-review"
 START_FROM_GIVEN=0
+IMPLEMENTER_AGENT="codex"
+IMPLEMENTER_AGENT_GIVEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fast)
@@ -32,6 +34,18 @@ while [ "$#" -gt 0 ]; do
       START_FROM_GIVEN=1
       shift
       ;;
+    --implementer)
+      shift
+      [ "$#" -gt 0 ] || usage
+      IMPLEMENTER_AGENT="$1"
+      IMPLEMENTER_AGENT_GIVEN=1
+      shift
+      ;;
+    --implementer=*)
+      IMPLEMENTER_AGENT="${1#--implementer=}"
+      IMPLEMENTER_AGENT_GIVEN=1
+      shift
+      ;;
     --*)
       usage
       ;;
@@ -42,6 +56,11 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+case "$IMPLEMENTER_AGENT" in
+  codex|claude) ;;
+  *) halt "invalid --implementer: $IMPLEMENTER_AGENT (want codex|claude)" ;;
+esac
 
 [ -n "$SPEC_INPUT" ] || usage
 
@@ -167,6 +186,22 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
 
   [ "$RECORDED_SOURCE_PATH" = "$SPEC_ABS" ] || halt "worktree belongs to $RECORDED_SOURCE_PATH"
   [ "$RECORDED_SOURCE_SHA" = "$SOURCE_SHA" ] || halt "source spec changed since import"
+  if [ -f "$META_DIR/implementer-agent" ]; then
+    RECORDED_IMPLEMENTER="$(cat "$META_DIR/implementer-agent")"
+    case "$RECORDED_IMPLEMENTER" in
+      codex|claude) ;;
+      *) halt "invalid worktree implementer metadata: $RECORDED_IMPLEMENTER" ;;
+    esac
+  else
+    RECORDED_IMPLEMENTER="codex"
+    printf '%s\n' "codex" > "$META_DIR/implementer-agent"
+  fi
+  if [ "$IMPLEMENTER_AGENT_GIVEN" -eq 1 ]; then
+    [ "$IMPLEMENTER_AGENT" = "$RECORDED_IMPLEMENTER" ] \
+      || halt "worktree implementer is $RECORDED_IMPLEMENTER; rerun with matching --implementer or omit the flag"
+  else
+    IMPLEMENTER_AGENT="$RECORDED_IMPLEMENTER"
+  fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse origin/main)" || halt "git rev-parse origin/main failed"
   if git -C "$GIT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -177,6 +212,7 @@ else
   printf '%s\n' "$SPEC_ABS" > "$META_DIR/source-path"
   printf '%s\n' "$SOURCE_SHA" > "$META_DIR/source-sha256"
   printf '%s\n' "$BASE_SHA" > "$META_DIR/base-sha"
+  printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
 fi
 
 commit_with_subject() {
@@ -631,8 +667,35 @@ else
         STAGE="implement"
       fi
       before_impl_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-      pf="$META_DIR/implement.prompt"
-      cat > "$pf" <<EOF
+      if [ "$IMPLEMENTER_AGENT" = "claude" ]; then
+        cpf="$META_DIR/implement.claude.prompt"
+        cat > "$cpf" <<EOF
+Use \$superpowers:subagent-driven-development to implement the plan at
+$WT_PLAN_REL for the spec at $WT_SPEC_REL.
+
+Make the necessary code, test, and documentation changes in this worktree.
+Commit the implementation changes. Do not push, do not create a PR.
+Return ONLY one JSON object in the JSON envelope's result field. Use one of these
+valid result shapes:
+{"status":"done","summary":"...","blocked_reason":""}
+{"status":"blocked","summary":"...","blocked_reason":"..."}
+EOF
+        CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
+        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json"
+        if ! jq -e 'if (.result | type) == "object" then .result
+                    else (.result | tostring | fromjson?) end
+                    | select(type == "object")' \
+            "$META_DIR/implement.envelope.json" > "$META_DIR/implement.json" 2>/dev/null; then
+          jq -r '.result // empty' "$META_DIR/implement.envelope.json" \
+            | extract_json_object > "$META_DIR/implement.json" 2>/dev/null || true
+        fi
+        if ! implement_json_valid "$META_DIR/implement.json"; then
+          clean_worktree_to "$CALL_START_HEAD"
+          halt "claude implement returned invalid result"
+        fi
+      else
+        pf="$META_DIR/implement.prompt"
+        cat > "$pf" <<EOF
 Use \$superpowers:subagent-driven-development to implement the plan at
 $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 
@@ -640,7 +703,8 @@ Make the necessary code, test, and documentation changes in this worktree.
 Commit the implementation changes. Do not push, do not create a PR.
 Your final message must be exactly the JSON required by the output schema.
 EOF
-      codex_call implement implement "$pf"
+        codex_call implement implement "$pf"
+      fi
       impl_status="$(jq -r '.status' "$META_DIR/implement.json")"
       case "$impl_status" in
         blocked)
@@ -693,4 +757,8 @@ fi
 
 # pr-review -> done: claude reviews the diff, codex fixes, loop until clean
 # (DONE) or stuck (DIRTY). Engine lives in lib/pr-review-engine.sh.
-pr_review_engine_run
+if [ "$IMPLEMENTER_AGENT" = "claude" ]; then
+  pr_review_engine_run codex      # codex reviews, claude fixes
+else
+  pr_review_engine_run            # default: claude reviews, codex fixes
+fi

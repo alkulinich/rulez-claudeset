@@ -6,6 +6,14 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.11.0 - from v1.10.1
+
+**Action:** None.
+
+**Caveat:** spec2pr accepts `--implementer codex|claude` (default `codex`,
+identical to before). `claude` implements with the Claude CLI and flips the
+pr-review reviewer to codex. Not available via mctl or spec2pr-chain.
+
 ## To v1.10.1 - from v1.10.0
 
 **Action:** None.

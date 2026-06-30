@@ -32,6 +32,12 @@ byte-for-byte.
 - **pr-review reviewer = the opposite agent of the implementer.** `codex` ⟹
   claude reviews (today's default); `claude` ⟹ codex reviews. The fixer is the
   engine's opposite-of-reviewer, which equals the implementer.
+- **Resume preserves the implementer choice.** Store the selected implementer in
+  metadata as soon as run metadata is created. A resumed run must use the
+  recorded value, so a run that implemented with claude still gets a codex
+  pr-review even if the resume command omits `--implementer`. For worktrees
+  created before this metadata existed, migrate the missing value to `codex`
+  before any stage work so old default-agent runs remain resumable.
 - **Default `codex` ⟹ identical to current behavior.** The existing suite stays
   green untouched.
 - **Both `require_codex` and `require_claude` remain.** codex still runs
@@ -41,24 +47,35 @@ byte-for-byte.
 ## Affected code
 
 - `scripts/spec2pr.sh`
-  - arg parsing: add `--implementer`, set `IMPLEMENTER_AGENT`.
+  - usage + arg parsing: document/add `--implementer`, set
+    `IMPLEMENTER_AGENT`.
+  - metadata: persist and reload `$META_DIR/implementer-agent` so resumed runs
+    keep the original reviewer/fixer pairing.
   - implement dispatch (`643`–`670`): branch codex vs claude before the shared
     `status` handling.
   - pr-review call (`696`): pass the opposite reviewer when implementer=claude.
 - `scripts/lib/spec2pr-runtime.sh`
   - factor the `implement` jq filter out of `validate_codex_output` into a
-    shared `implement_json_valid` check.
+    shared `implement_json_valid` check that preserves the exact current schema:
+    the payload must be an object with exactly `status`, `summary`, and
+    `blocked_reason`; `status` must be `done` or `blocked`; both text fields
+    must be strings; no additional keys are accepted.
   - add the claude implement adapter (calls `run_claude_json` **without** a
     model argument — model plumbing is part 2).
 - `VERSION`, `UPGRADE.md`.
 - `tests/spec2pr/test-implementer.sh` (new).
+- `tests/spec2pr/test-preflight.sh` (usage assertion update).
 
 ## The change
 
 ### 1. Arg parsing (`spec2pr.sh`)
 
 Accept `--implementer <agent>` and `--implementer=<agent>`. Validate against the
-two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`):
+two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`). Also track
+whether the flag was explicitly supplied, for example with
+`IMPLEMENTER_AGENT_GIVEN=0|1`; resume metadata checks must use this presence bit,
+not the defaulted `IMPLEMENTER_AGENT`, so an omitted flag can adopt the recorded
+worktree value:
 
 | input        | `IMPLEMENTER_AGENT` |
 |--------------|---------------------|
@@ -66,8 +83,38 @@ two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`):
 | `codex`      | `codex`             |
 | `claude`     | `claude`            |
 
+| input        | `IMPLEMENTER_AGENT_GIVEN` |
+|--------------|---------------------------|
+| *(absent)*   | `0`                       |
+| `codex`      | `1`                       |
+| `claude`     | `1`                       |
+
 Anything else halts before any worktree setup:
 `halt "invalid --implementer: <value> (want codex|claude)"`.
+
+Persist the selected value in `$META_DIR/implementer-agent` as part of the
+run metadata:
+
+- **New worktree:** write `IMPLEMENTER_AGENT` next to `source-path`,
+  `source-sha256`, and `base-sha` immediately after creating `$META_DIR`.
+- **Resumed worktree:** if `$META_DIR/implementer-agent` exists, read it and
+  require it to be `codex` or `claude`; any other value halts before stage work
+  with `halt "invalid worktree implementer metadata: <recorded>"`. If the file
+  is missing, treat the worktree as a pre-`--implementer` codex run and write
+  `codex` to `$META_DIR/implementer-agent` before any stage work. If
+  `IMPLEMENTER_AGENT_GIVEN=1`, `IMPLEMENTER_AGENT` must match the recorded or
+  migrated value or halt before doing any stage work:
+  `halt "worktree implementer is <recorded>; rerun with matching --implementer or omit the flag"`.
+  If `IMPLEMENTER_AGENT_GIVEN=0`, never compare against the defaulted `codex`;
+  set `IMPLEMENTER_AGENT` from the recorded or migrated value before
+  implementation or pr-review decisions.
+
+Update `usage()` in `spec2pr.sh` and the existing preflight usage assertion so
+the contract includes the new flag:
+
+```
+spec2pr.sh [--fast] [--implementer codex|claude] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>
+```
 
 ### 2. Implement dispatch (`spec2pr.sh`)
 
@@ -88,12 +135,19 @@ unexpected handling (`644`–`670`) then runs unchanged.
      right base.
   2. Write the claude implement prompt (below) to
      `$META_DIR/implement.claude.prompt`.
+     Preserve the literal `$superpowers` token by escaping `$` in the shell
+     heredoc (`\$superpowers`) or by using a quoted heredoc and substituting the
+     plan/spec paths separately.
   3. `run_claude_json implement "$META_DIR/implement.claude.prompt" \
      "$META_DIR/implement.envelope.json"` (no model argument in part 1).
-  4. `jq -r '.result'` the envelope and normalize into `$META_DIR/implement.json`;
-     if `.result` carries surrounding prose/fences, fall back to the last
-     balanced JSON object.
-  5. Validate with `implement_json_valid`. On failure:
+  4. Normalize the envelope result into `$META_DIR/implement.json`: if `.result`
+     is already an object, write it directly; otherwise treat `.result` as text
+     and extract the first balanced JSON object with the existing
+     `extract_json_object` helper (the same fallback shape used by forecast and
+     pr-review classification).
+  5. Validate with `implement_json_valid`, using the same strict contract as the
+     existing codex implement output (`status`, `summary`, and `blocked_reason`
+     only; exact key set; string text fields; `done|blocked` status). On failure:
      `clean_worktree_to "$CALL_START_HEAD"` then
      `halt "claude implement returned invalid result"`.
 
@@ -123,20 +177,31 @@ fi
 
 The engine already pairs reviewer with the opposite fixer
 (`pr-review-engine.sh:79`–`81`); this only chooses the argument.
+Because `IMPLEMENTER_AGENT` is reloaded from `$META_DIR/implementer-agent` on
+resume, this branch remains correct after implementation, push, PR creation, or
+pr-review retries.
 
 ## Edge cases & invariants
 
 - **Default is untouched:** no flag ⟹ codex ⟹ identical contract lines and exit
   codes. Verified by a baseline-equivalence test.
-- **Malformed claude output:** prose- or fence-wrapped JSON is recovered by the
-  last-balanced-object fallback; still invalid ⟹ clean worktree + contract halt
-  (nonzero), recoverable by a resume run. No partial/corrupt state.
+- **Malformed claude output:** prose- or fence-wrapped JSON is recovered with
+  the existing first-balanced-object fallback; still invalid ⟹ clean worktree +
+  contract halt (nonzero), recoverable by a resume run. No partial/corrupt state.
+- **Strict schema parity:** both codex and claude implement results use the same
+  exact `implement_json_valid` schema, including rejection of extra or missing
+  keys.
 - **Blocked path parity:** claude `status:blocked` halts with `blocked_reason`,
   exactly like the codex blocked path; no implementation markers written.
 - **Clean-tree invariant:** after `status:done` the worktree must be
   committed-clean (existing check at `652`) — enforced for both agents.
 - **`CALL_START_HEAD` discipline:** set before the claude call so a failed or
   blocked run resets to the pre-call HEAD, matching `codex_call`.
+- **Resume reviewer invariant:** once a worktree exists, the recorded
+  `$META_DIR/implementer-agent` is authoritative. A no-flag resume uses it; a
+  conflicting flag halts before model calls, pushes, or pr-review. A missing
+  metadata file on an older worktree is migrated once to `codex`, preserving the
+  previous hardcoded implementer/reviewer pairing.
 - **Validation precedes side effects:** `codex:*`, bare `claude:`, and
   `claude:sonnet` (not yet supported) all halt at arg-parse, before any worktree
   or branch is created.
@@ -149,15 +214,34 @@ stubs and sandbox helpers:
 - **default (no flag):** codex implement path reaches DONE; contract matches the
   baseline codex run.
 - **`--implementer codex` (explicit):** identical to default.
+- **`--implementer=codex` (equals form):** identical to default.
 - **`--implementer claude` happy:** stub claude envelope `.result` =
   `{"status":"done",...}` and makes a commit ⟹ DONE, `implementation-ok` marker
   written.
+- **`--implementer=claude` (equals form):** same claude happy path, proving both
+  accepted parser forms dispatch to the claude implement branch.
 - **`--implementer claude` blocked:** `.result` status `blocked` ⟹ HALT with the
   reason; no markers written.
+- **`--implementer claude` schema violation:** extra keys, missing keys, or an
+  invalid `status` in the normalized `.result` ⟹ HALT
+  `claude implement returned invalid result`, clean worktree, no markers written.
 - **reviewer opposite:** `--implementer claude` ⟹ pr-review invokes the codex
   reviewer and the claude fixer (assert via stub call records).
+- **resume preserves reviewer opposite:** start with `--implementer claude`,
+  stop after a valid implementation marker or before pr-review completes, then
+  rerun without `--implementer`; assert pr-review still invokes the codex
+  reviewer and claude fixer and does not halt on the parser's default `codex`
+  value. A rerun with `--implementer codex` against that worktree halts on the
+  metadata mismatch before model calls.
+- **resume legacy worktree:** create or simulate a pre-feature worktree with the
+  existing `source-path`, `source-sha256`, and `base-sha` metadata but no
+  `implementer-agent`; rerun without `--implementer` and assert the run migrates
+  the metadata to `codex` and preserves the default claude-review/codex-fix
+  behavior. A conflicting `--implementer claude` still halts before model calls.
 - **invalid inputs:** `claude:sonnet`, `codex:fast`, bare `claude:` ⟹ arg-parse
   halt, nonzero exit, no worktree created.
+- **usage:** no-arg preflight output includes
+  `[--implementer codex|claude]`.
 
 ## Out of scope
 
