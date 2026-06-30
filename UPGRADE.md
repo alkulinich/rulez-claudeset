@@ -6,6 +6,16 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.10.1 - from v1.10.0
+
+**Action:** None.
+
+**Caveat:** a `/rulez:spec2pr-chain` merge that hits a genuine conflict is now
+auto-resolved by a model call (surfaced as `CHAIN OK resolved-conflict`, with the
+diff kept in the run's meta dir) instead of halting; a `BEHIND` branch is brought
+up to date automatically; and the new `--admin` flag opts into merging past branch
+protection (off by default).
+
 ## To v1.10.0 - from v1.9.0
 
 **Action:** None.

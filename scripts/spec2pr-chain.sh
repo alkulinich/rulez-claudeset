@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/lib/spec2pr-runtime.sh"
 CHAIN_STATUS_PATH=""
 CHAIN_LOCK_DIR=""
 CHAIN_LOCK_PATH=""
+CHAIN_TMP_DIR=""
 
 chain_log() {
   printf '%s\n' "$*"
@@ -24,6 +25,7 @@ chain_status() {
 }
 
 chain_release_lock() {
+  if [ -n "$CHAIN_TMP_DIR" ] && [ -d "$CHAIN_TMP_DIR" ]; then rm -rf "$CHAIN_TMP_DIR"; fi
   if [ -n "$CHAIN_LOCK_DIR" ] && [ -n "$CHAIN_LOCK_PATH" ] && [ -f "$CHAIN_LOCK_PATH" ]; then
     if [ "$(cat "$CHAIN_LOCK_PATH" 2>/dev/null || true)" = "$$" ]; then
       rm -rf "$CHAIN_LOCK_DIR"
@@ -92,13 +94,211 @@ short_hash() { # <value> <length>
 }
 
 usage() {
-  chain_finish 1 "HALT: usage: spec2pr-chain.sh [--fast] status|<spec-path> [<spec-path>...]"
+  chain_finish 1 "HALT: usage: spec2pr-chain.sh status | [--fast] [--admin] <spec-path> [<spec-path>...] (--admin specs only)"
 }
 
 chain_require_dependency() {
   local name="$1"
   if ! command -v "$name" >/dev/null 2>&1; then
     chain_finish 1 "HALT: missing dependency: $name"
+  fi
+}
+
+chain_inspect_merge_state() { # <worktree> <pr-url> <slug>
+  local wt="$1" pr_url="$2" slug="$3"
+  local view_json view_rc valid_rc mergeable_rc mss_rc
+
+  set +e
+  view_json="$(cd "$wt" && gh pr view "$pr_url" --json mergeable,mergeStateStatus 2>/dev/null)"
+  view_rc=$?
+  set -e
+  if [ "$view_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  set +e
+  printf '%s' "$view_json" | jq -e -s \
+    'length == 1 and (.[0] | type == "object") and (.[0].mergeable | type == "string") and (.[0].mergeStateStatus | type == "string")' \
+    >/dev/null 2>&1
+  valid_rc=$?
+  set -e
+  if [ "$valid_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  set +e
+  MERGEABLE="$(printf '%s' "$view_json" | jq -r -s '.[0].mergeable' 2>/dev/null)"
+  mergeable_rc=$?
+  MSS="$(printf '%s' "$view_json" | jq -r -s '.[0].mergeStateStatus' 2>/dev/null)"
+  mss_rc=$?
+  set -e
+  if [ "$mergeable_rc" -ne 0 ] || [ "$mss_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+
+  if [ -z "$MERGEABLE" ] || [ -z "$MSS" ]; then
+    chain_finish 1 "HALT $slug: merge state inspection failed"
+  fi
+}
+
+chain_retry_merge() { # <worktree> <pr-url> <slug> [extra-gh-flags...]
+  local wt="$1" pr_url="$2" slug="$3"
+  shift 3
+  local retry_err retry_rc
+
+  set +e
+  retry_err="$(cd "$wt" && gh pr merge "$pr_url" "$@" --squash --delete-branch 2>&1 1>/dev/null)"
+  retry_rc=$?
+  set -e
+  if [ "$retry_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: merge retry failed ($retry_err)"
+  fi
+}
+
+chain_update_behind() { # <worktree> <pr-url> <slug>
+  local wt="$1" pr_url="$2" slug="$3"
+
+  if ! git -C "$wt" fetch -q origin main; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+  if ! git -C "$wt" merge --no-edit origin/main >/dev/null 2>&1; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+  if ! git -C "$wt" push -q origin HEAD:refs/heads/spec2pr/"$slug"; then
+    chain_finish 1 "HALT $slug: branch update failed"
+  fi
+
+  chain_retry_merge "$wt" "$pr_url" "$slug"
+}
+
+chain_require_codex() { # <slug>
+  local slug="$1"
+  if [[ "$SPEC2PR_CODEX_BIN" == */* ]]; then
+    [ -x "$SPEC2PR_CODEX_BIN" ] || chain_finish 1 "HALT $slug: missing dependency: $SPEC2PR_CODEX_BIN"
+  elif ! command -v "$SPEC2PR_CODEX_BIN" >/dev/null 2>&1; then
+    chain_finish 1 "HALT $slug: missing dependency: $SPEC2PR_CODEX_BIN"
+  fi
+}
+
+chain_resolve_conflict() { # <worktree> <pr-url> <slug> <id>
+  local wt="$1" pr_url="$2" slug="$3" id="$4"
+  local meta_dir="$SPEC2PR_HOME/$id"
+  local fetched_main pre_merge_head merge_rc unmerged prompt_file codex_rc json_rc
+  local marker_rc marker_hits status_out post_head
+
+  mkdir -p "$meta_dir"
+  chain_require_codex "$slug"
+
+  if ! git -C "$wt" fetch -q origin main; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! fetched_main="$(git -C "$wt" rev-parse origin/main)"; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! pre_merge_head="$(git -C "$wt" rev-parse HEAD)"; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  set +e
+  git -C "$wt" merge --no-edit origin/main >/dev/null 2>&1
+  merge_rc=$?
+  unmerged="$(git -C "$wt" ls-files -u 2>/dev/null)"
+  set -e
+  if [ "$merge_rc" -eq 0 ] || [ -z "$unmerged" ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  prompt_file="$CHAIN_TMP_DIR/conflict-resolve.prompt"
+  cat > "$prompt_file" <<EOF
+Resolve the merge conflicts in this worktree for PR $pr_url.
+
+Requirements:
+- Resolve every conflicted file.
+- Preserve both sides' intended content where possible.
+- Leave no line-shaped conflict marker lines.
+- Run git add for resolved files.
+- Commit the resolution to the current branch.
+- Return exactly JSON matching the provided schema with a non-empty summary.
+EOF
+
+  set +e
+  "$SPEC2PR_CODEX_BIN" exec --cd "$wt" \
+    --output-schema "$CHAIN_TMP_DIR/conflict-resolve.json" \
+    --output-last-message "$meta_dir/conflict-resolve.codex.json" \
+    < "$prompt_file" > "$meta_dir/conflict-resolve.stdout" 2> "$meta_dir/conflict-resolve.stderr"
+  codex_rc=$?
+  set -e
+  if [ "$codex_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  set +e
+  jq -e 'type == "object" and (.summary | type == "string" and length > 0)' \
+    "$meta_dir/conflict-resolve.codex.json" >/dev/null 2>&1
+  json_rc=$?
+  set -e
+  if [ "$json_rc" -ne 0 ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  set +e
+  marker_hits="$(git -C "$wt" grep -I -n -E '^(<<<<<<< .+|[|]{7} .+|=======|>>>>>>> .+)$' HEAD -- . 2>&1)"
+  marker_rc=$?
+  set -e
+  if [ "$marker_rc" -eq 0 ] || [ "$marker_rc" -gt 1 ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  if [ -n "$(git -C "$wt" ls-files -u)" ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  status_out="$(git -C "$wt" status --porcelain --untracked-files=all)"
+  if [ -n "$status_out" ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! post_head="$(git -C "$wt" rev-parse HEAD)"; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! git -C "$wt" diff --check "$pre_merge_head" "$post_head" >/dev/null 2>&1; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if [ "$post_head" = "$pre_merge_head" ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! git -C "$wt" merge-base --is-ancestor "$fetched_main" HEAD; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  git -C "$wt" show --stat --patch --format=fuller "$pre_merge_head..$post_head" > "$meta_dir/conflict-resolve.patch" 2>/dev/null || true
+  if [ ! -s "$meta_dir/conflict-resolve.patch" ]; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+  if ! git -C "$wt" push -q origin HEAD:refs/heads/spec2pr/"$slug"; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
+
+  chain_status "OK resolved-conflict $slug"
+  chain_retry_merge "$wt" "$pr_url" "$slug"
+}
+
+chain_handle_failed_merge() { # <worktree> <pr-url> <slug> <id> <merge-stderr>
+  local wt="$1" pr_url="$2" slug="$3" id="$4" merge_err="$5"
+  MERGEABLE=""
+  MSS=""
+
+  chain_inspect_merge_state "$wt" "$pr_url" "$slug"
+  if [ "$MERGEABLE" = "CONFLICTING" ] || [ "$MSS" = "DIRTY" ]; then
+    chain_resolve_conflict "$wt" "$pr_url" "$slug" "$id"
+  elif [ "$MSS" = "BEHIND" ]; then
+    chain_update_behind "$wt" "$pr_url" "$slug"
+  elif [ "$MSS" = "BLOCKED" ]; then
+    if [ "$ADMIN" -eq 1 ]; then
+      chain_retry_merge "$wt" "$pr_url" "$slug" --admin
+    else
+      chain_finish 1 "HALT $slug: merge blocked by branch protection"
+    fi
+  else
+    chain_finish 1 "HALT $slug: merge state unsupported ($merge_err)"
   fi
 }
 
@@ -117,6 +317,7 @@ show_status() {
 }
 
 FAST=0
+ADMIN=0
 SPECS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -124,7 +325,12 @@ while [ "$#" -gt 0 ]; do
       FAST=1
       shift
       ;;
+    --admin)
+      ADMIN=1
+      shift
+      ;;
     status)
+      [ "$ADMIN" -eq 0 ] || usage
       shift
       [ "$#" -eq 0 ] || usage
       show_status
@@ -143,6 +349,7 @@ done
 
 chain_require_dependency git
 chain_require_dependency gh
+chain_require_dependency jq
 
 GIT_ROOT=""
 SPEC_ABS_LIST=()
@@ -191,6 +398,15 @@ mkdir -p "$SPEC2PR_HOME/chains"
 
 repo_id="$(sanitize "$(basename "$GIT_ROOT")")-$(short_hash "$GIT_ROOT" 8)"
 if ! chain_acquire_lock "$SPEC2PR_HOME/$repo_id.chain.lock"; then chain_finish 1 "HALT: chain already running for $repo_id"; fi
+CHAIN_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/spec2pr-chain.XXXXXX")"
+cat > "$CHAIN_TMP_DIR/conflict-resolve.json" <<'EOF'
+{
+  "type": "object",
+  "properties": { "summary": { "type": "string" } },
+  "required": ["summary"],
+  "additionalProperties": false
+}
+EOF
 
 chain_status "OK started specs=$total"
 
@@ -260,7 +476,7 @@ for i in "${!SPEC_ABS_LIST[@]}"; do
   merge_rc=$?
   set -e
   if [ "$merge_rc" -ne 0 ]; then
-    chain_finish 1 "HALT $slug: merge failed ($merge_err)"
+    chain_handle_failed_merge "$wt" "$pr_url" "$slug" "$id" "$merge_err"
   fi
 
   if ! merge_commit="$(git -C "$GIT_ROOT" ls-remote origin refs/heads/main 2>/dev/null | awk 'NR == 1 { print $1 }')"; then
