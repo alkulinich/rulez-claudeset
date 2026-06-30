@@ -5,7 +5,7 @@ test_preflight_no_args_usage() {
   make_sandbox
   run_spec2pr
   assert_eq "1" "$RC" "no args exits 1"
-  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>" "no args prints usage halt"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path>" "no args prints usage halt"
 }
 
 test_preflight_missing_spec() {
