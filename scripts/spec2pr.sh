@@ -186,6 +186,22 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
 
   [ "$RECORDED_SOURCE_PATH" = "$SPEC_ABS" ] || halt "worktree belongs to $RECORDED_SOURCE_PATH"
   [ "$RECORDED_SOURCE_SHA" = "$SOURCE_SHA" ] || halt "source spec changed since import"
+  if [ -f "$META_DIR/implementer-agent" ]; then
+    RECORDED_IMPLEMENTER="$(cat "$META_DIR/implementer-agent")"
+    case "$RECORDED_IMPLEMENTER" in
+      codex|claude) ;;
+      *) halt "invalid worktree implementer metadata: $RECORDED_IMPLEMENTER" ;;
+    esac
+  else
+    RECORDED_IMPLEMENTER="codex"
+    printf '%s\n' "codex" > "$META_DIR/implementer-agent"
+  fi
+  if [ "$IMPLEMENTER_AGENT_GIVEN" -eq 1 ]; then
+    [ "$IMPLEMENTER_AGENT" = "$RECORDED_IMPLEMENTER" ] \
+      || halt "worktree implementer is $RECORDED_IMPLEMENTER; rerun with matching --implementer or omit the flag"
+  else
+    IMPLEMENTER_AGENT="$RECORDED_IMPLEMENTER"
+  fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse origin/main)" || halt "git rev-parse origin/main failed"
   if git -C "$GIT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then

@@ -198,3 +198,77 @@ test_implementer_claude_pr_review_uses_codex_reviewer_and_claude_fixer() {
   assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: pr-review review fixes r1" \
     "fix round committed"
 }
+
+# ---- resume behavior ---------------------------------------------------------
+
+# Helper: drive a claude run to DONE, then make a second invocation see the PR
+# as already-open (resume into the pr-review stage).
+_seed_claude_run_to_done() {
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "0" "$RC" "seed claude run reaches done"
+  # Make the next run resolve the existing open PR.
+  printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
+}
+
+test_resume_no_flag_preserves_codex_reviewer() {
+  make_sandbox
+  _seed_claude_run_to_done
+  queue_clean_spec_review 07-spec-review
+  queue_clean_plan_review 08-plan-review
+  q_codex_pr_clean 09-pr-review   # resumed pr-review, codex reviewer again
+  run_spec2pr "$SPEC"            # NB: no --implementer
+  assert_eq "0" "$RC" "no-flag resume of a claude worktree exits 0"
+  assert_not_contains "$OUT" "worktree implementer is" "no-flag resume does not halt on default codex"
+  assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "reviewer=codex" \
+    "resumed pr-review still uses codex reviewer"
+  assert_eq "claude" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "recorded value unchanged"
+}
+
+test_resume_conflicting_flag_halts_before_models() {
+  make_sandbox
+  _seed_claude_run_to_done
+  local codex_before; codex_before="$(codex_calls)"
+  local claude_before; claude_before="$(claude_calls)"
+  run_spec2pr --implementer codex "$SPEC"
+  assert_eq "1" "$RC" "conflicting --implementer codex halts"
+  assert_contains "$OUT" "worktree implementer is claude; rerun with matching --implementer or omit the flag" \
+    "conflict halt message"
+  assert_eq "$codex_before" "$(codex_calls)" "no codex model call after conflict halt"
+  assert_eq "$claude_before" "$(claude_calls)" "no claude model call after conflict halt"
+}
+
+test_resume_legacy_worktree_migrates_to_codex() {
+  make_sandbox
+  # Seed a default (codex) run to DONE, then simulate a pre-feature worktree by
+  # deleting the metadata file.
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "seed codex run reaches done"
+  rm -f "$SPEC2PR_HOME/$ID/implementer-agent"
+  printf 'https://example.com/pr/1\n' > "$SPEC2PR_TEST_GH/pr-list-url"
+
+  queue_clean_spec_review 07-spec-review
+  queue_clean_plan_review 08-plan-review
+  queue_clean_pr_review 09-pr-review   # default claude reviewer on resume
+  run_spec2pr "$SPEC"                  # no flag
+  assert_eq "0" "$RC" "legacy resume exits 0"
+  assert_eq "codex" "$(cat "$SPEC2PR_HOME/$ID/implementer-agent")" "legacy metadata migrated to codex"
+  assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "pr-review r1 blockers=0 majors=0 clean" \
+    "default claude reviewer (no reviewer= suffix) preserved"
+
+  # A conflicting claude flag against the migrated worktree still halts.
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "1" "$RC" "claude flag against migrated codex worktree halts"
+  assert_contains "$OUT" "worktree implementer is codex" "migrated value is authoritative"
+}
