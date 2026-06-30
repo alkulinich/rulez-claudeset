@@ -339,6 +339,9 @@ test_chain_conflict_resolved_and_retried() {
 printf 'chain-conflict\nmain side for chain-conflict\n' > marker-chain-conflict.txt
 git add marker-chain-conflict.txt
 git commit -qm 'resolve chain-conflict conflict'
+printf 'resolution audit note\n' > conflict-resolution-note.txt
+git add conflict-resolution-note.txt
+git commit -qm 'document chain-conflict resolution'
 printf '{"summary":"resolved marker conflict"}'
 EOF
 
@@ -355,6 +358,8 @@ EOF
   assert_file_exists "$meta_dir/conflict-resolve.codex.json" "conflict codex JSON audit exists"
   assert_contains "$(cat "$meta_dir/conflict-resolve.patch" 2>/dev/null || true)" \
     "$marker" "conflict patch references marker file"
+  assert_contains "$(cat "$meta_dir/conflict-resolve.patch" 2>/dev/null || true)" \
+    "conflict-resolution-note.txt" "conflict patch includes later resolver commit"
 }
 
 test_chain_conflict_resolver_must_commit() {
@@ -381,6 +386,35 @@ EOF
   assert_eq "4" "$(codex_calls)" "resolver without commit still consumes resolver codex call"
   assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
     "resolver without commit does not retry merge"
+}
+
+test_chain_conflict_resolver_rejects_committed_trailing_whitespace() {
+  make_sandbox
+  local a
+  a="$(add_spec chain-badspace)"
+  queue_chain_spec 01-chain-badspace chain-badspace
+  printf 'marker-chain-badspace.txt\nmain side for chain-badspace\n' \
+    > "$SPEC2PR_TEST_GH/pr-merge-diverge"
+  printf '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+  enqueue 02-chain-badspace-resolve <<'EOF'
+printf 'chain-badspace \nmain side for chain-badspace\n' > marker-chain-badspace.txt
+git add marker-chain-badspace.txt
+git commit -qm 'resolve chain-badspace conflict with bad whitespace'
+printf '{"summary":"committed trailing whitespace"}'
+EOF
+
+  run_chain "$a"
+
+  assert_eq "1" "$RC" "committed trailing whitespace resolver exits 1"
+  assert_contains "$OUT" "CHAIN HALT chain-badspace: conflict resolution failed" \
+    "committed trailing whitespace resolver halt line"
+  assert_not_contains "$OUT" "CHAIN OK resolved-conflict chain-badspace" \
+    "committed trailing whitespace resolver does not emit resolved audit line"
+  assert_eq "4" "$(codex_calls)" \
+    "committed trailing whitespace resolver consumes resolver codex call"
+  assert_eq "1" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" \
+    "committed trailing whitespace resolver does not retry merge"
 }
 
 test_chain_conflict_resolver_rejects_diff3_marker_line() {

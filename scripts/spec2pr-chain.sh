@@ -249,9 +249,6 @@ EOF
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
 
-  if ! git -C "$wt" diff --check >/dev/null 2>&1; then
-    chain_finish 1 "HALT $slug: conflict resolution failed"
-  fi
   if [ -n "$(git -C "$wt" ls-files -u)" ]; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
@@ -262,6 +259,9 @@ EOF
   if ! post_head="$(git -C "$wt" rev-parse HEAD)"; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
+  if ! git -C "$wt" diff --check "$pre_merge_head" "$post_head" >/dev/null 2>&1; then
+    chain_finish 1 "HALT $slug: conflict resolution failed"
+  fi
   if [ "$post_head" = "$pre_merge_head" ]; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
@@ -269,7 +269,7 @@ EOF
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
 
-  git -C "$wt" show --stat --patch --format=fuller HEAD > "$meta_dir/conflict-resolve.patch" 2>/dev/null || true
+  git -C "$wt" show --stat --patch --format=fuller "$pre_merge_head..$post_head" > "$meta_dir/conflict-resolve.patch" 2>/dev/null || true
   if [ ! -s "$meta_dir/conflict-resolve.patch" ]; then
     chain_finish 1 "HALT $slug: conflict resolution failed"
   fi
