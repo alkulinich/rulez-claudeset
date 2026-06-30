@@ -132,6 +132,38 @@ test_chain_happy_path() {
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-c.txt 2>/dev/null || true)" "chain-c" "origin/main contains chain-c marker"
 }
 
+test_chain_admin_flag_accepted_on_happy_path() {
+  make_sandbox
+  local a; a="$(add_spec chain-okadmin)"
+  queue_chain_spec 01-chain-okadmin chain-okadmin
+
+  run_chain --admin "$a"
+
+  assert_eq "0" "$RC" "--admin happy chain exits 0"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "--admin happy chain reaches done"
+  assert_not_contains "$OUT" "HALT: usage" "--admin is a recognized flag"
+}
+
+test_chain_admin_and_fast_flags_combine() {
+  make_sandbox
+  local a; a="$(add_spec chain-okboth)"
+  queue_chain_spec 01-chain-okboth chain-okboth
+
+  run_chain --admin --fast "$a"
+
+  assert_eq "0" "$RC" "--admin --fast chain exits 0"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "--admin --fast reaches done"
+}
+
+test_chain_admin_does_not_apply_to_status() {
+  make_sandbox
+
+  run_chain --admin status
+
+  assert_eq "1" "$RC" "--admin status exits usage"
+  assert_contains "$OUT" "CHAIN HALT: usage:" "--admin is not accepted for status"
+}
+
 test_chain_resume_skips_merged() {
   make_sandbox
   local a b c a_sha

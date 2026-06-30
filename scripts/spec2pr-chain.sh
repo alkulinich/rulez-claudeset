@@ -117,6 +117,7 @@ show_status() {
 }
 
 FAST=0
+ADMIN=0
 SPECS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -124,7 +125,12 @@ while [ "$#" -gt 0 ]; do
       FAST=1
       shift
       ;;
+    --admin)
+      ADMIN=1
+      shift
+      ;;
     status)
+      [ "$ADMIN" -eq 0 ] || usage
       shift
       [ "$#" -eq 0 ] || usage
       show_status

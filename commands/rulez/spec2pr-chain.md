@@ -9,6 +9,9 @@ not merge cleanly, stops the chain.
 
 - `/rulez:spec2pr-chain <spec…>` — run the ordered list of specs
 - `/rulez:spec2pr-chain --fast <spec…>` — forward `--fast` to each spec2pr run
+- `/rulez:spec2pr-chain --admin [--fast] <spec…>` — also allow merging past
+  branch protection (uses `gh pr merge --admin`) when a PR is `BLOCKED`. Off by
+  default; the chain never silently overrides a protection you set.
 - `/rulez:spec2pr-chain status` — show the latest state of every chain
 
 ## Instructions
@@ -21,14 +24,14 @@ If the argument is `status`:
 
 Otherwise:
 
-1. Parse an optional leading `--fast` flag; everything after it is the ordered
-   spec list. Require at least one spec path.
+1. Parse optional leading `--admin` and `--fast` flags (either order); everything
+   after them is the ordered spec list. Require at least one spec path.
 2. If any spec file does not exist, tell the user and stop.
 3. Launch the orchestrator as one **background** Bash task (single call,
    `run_in_background: true`), the same pattern `/rulez:spec2pr` uses:
-   `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-chain.sh [--fast] <spec…>`
-   If `--fast` was not supplied, omit it. The orchestrator supports Bash 3.2+
-   so macOS system Bash is valid.
+   `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-chain.sh [--admin] [--fast] <spec…>`
+   Pass `--admin` and/or `--fast` only if the user supplied them. The orchestrator
+   supports Bash 3.2+ so macOS system Bash is valid.
 4. Tell the user the chain has started, that a completion notification will
    arrive in this session, and that `/rulez:spec2pr-chain status` shows
    progress meanwhile. Do not poll.
