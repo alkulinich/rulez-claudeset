@@ -6,6 +6,15 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.12.0 - from v1.11.3
+
+**Action:** None.
+
+**Caveat:** `spec2pr` gains `--base <branch>` and `--no-pr`; `spec2pr-chain`
+gains `--atomic`, which lands all parts of a split task on `main` as one
+squashed commit (a mid-chain halt leaves `main` pristine). All opt-in; default
+behavior unchanged.
+
 ## To v1.11.3 - from v1.11.2
 
 **Action:** None.
