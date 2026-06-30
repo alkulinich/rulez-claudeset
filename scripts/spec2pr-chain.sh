@@ -355,7 +355,7 @@ chain_run_atomic() {
     if [ "$spec_rc" -ne 0 ]; then
       terminal="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR / { line = $0 } END { print line }')"
       [ -n "$terminal" ] || terminal="SPEC2PR failed"
-      chain_finish 1 "HALT $slug: $terminal"
+      chain_finish 1 "HALT $slug: $terminal (atomic: nothing merged to main; integ $integ holds completed parts; re-run to resume)"
     fi
 
     done_line="$(printf '%s\n' "$spec_out" | awk '/^SPEC2PR DONE / { line = $0 } END { print line }')"

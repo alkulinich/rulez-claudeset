@@ -79,3 +79,31 @@ test_chain_atomic_resume_skips_staged_part() {
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-atom-b.txt 2>/dev/null || true)" "atom-b" \
     "part-2 lands on main after resume"
 }
+
+test_chain_atomic_halt_keeps_main_pristine() {
+  make_sandbox
+  local a b
+  a="$(add_spec atom-a)"
+  b="$(add_spec atom-b)"
+  queue_chain_spec 01-atom-a atom-a
+  queue_chain_spec_dirty 2 atom-b           # part-2 spec-review stays blocked -> DIRTY
+
+  touch "$SPEC2PR_TEST_GH/gh.log"  # pre-create so grep -c returns 0 (not error) when gh is never called
+  export MAX_FIX_ROUNDS=3
+  run_chain --atomic "$a" "$b"
+  unset MAX_FIX_ROUNDS
+
+  assert_eq "1" "$RC" "atomic halt exits 1"
+  assert_contains "$OUT" "CHAIN HALT atom-b" "atomic halts on part-2"
+  assert_contains "$OUT" "integ spec2pr-chain/" "halt note names the integ branch"
+  assert_contains "$OUT" "re-run to resume" "halt note points at the resume path"
+  assert_eq "0" "$(grep -c 'args=pr merge ' "$SPEC2PR_TEST_GH/gh.log")" "no rollup merge on halt"
+  assert_eq "0" "$(grep -c 'args=pr create' "$SPEC2PR_TEST_GH/gh.log")" "no PR created on halt"
+  git -C "$PROJECT" fetch -q origin main
+  assert_eq "" "$(git -C "$PROJECT" show origin/main:marker-atom-a.txt 2>/dev/null || true)" \
+    "main has no part-1 marker after halt"
+  assert_eq "1" "$(git -C "$PROJECT" ls-remote origin 'refs/heads/spec2pr-chain/*' | wc -l | tr -d ' ')" \
+    "integ branch preserved on halt"
+  assert_eq "1" "$(find "$SPEC2PR_HOME/chains" -name 'project-atom-a.merged' 2>/dev/null | wc -l | tr -d ' ')" \
+    "part-1 marker persists for resume"
+}
