@@ -41,7 +41,8 @@ byte-for-byte.
 ## Affected code
 
 - `scripts/spec2pr.sh`
-  - arg parsing: add `--implementer`, set `IMPLEMENTER_AGENT`.
+  - usage + arg parsing: document/add `--implementer`, set
+    `IMPLEMENTER_AGENT`.
   - implement dispatch (`643`–`670`): branch codex vs claude before the shared
     `status` handling.
   - pr-review call (`696`): pass the opposite reviewer when implementer=claude.
@@ -52,6 +53,7 @@ byte-for-byte.
     model argument — model plumbing is part 2).
 - `VERSION`, `UPGRADE.md`.
 - `tests/spec2pr/test-implementer.sh` (new).
+- `tests/spec2pr/test-preflight.sh` (usage assertion update).
 
 ## The change
 
@@ -68,6 +70,13 @@ two-value allowlist and set `IMPLEMENTER_AGENT` (default `codex`):
 
 Anything else halts before any worktree setup:
 `halt "invalid --implementer: <value> (want codex|claude)"`.
+
+Update `usage()` in `spec2pr.sh` and the existing preflight usage assertion so
+the contract includes the new flag:
+
+```
+spec2pr.sh [--fast] [--implementer codex|claude] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] <spec-path>
+```
 
 ### 2. Implement dispatch (`spec2pr.sh`)
 
@@ -151,15 +160,20 @@ stubs and sandbox helpers:
 - **default (no flag):** codex implement path reaches DONE; contract matches the
   baseline codex run.
 - **`--implementer codex` (explicit):** identical to default.
+- **`--implementer=codex` (equals form):** identical to default.
 - **`--implementer claude` happy:** stub claude envelope `.result` =
   `{"status":"done",...}` and makes a commit ⟹ DONE, `implementation-ok` marker
   written.
+- **`--implementer=claude` (equals form):** same claude happy path, proving both
+  accepted parser forms dispatch to the claude implement branch.
 - **`--implementer claude` blocked:** `.result` status `blocked` ⟹ HALT with the
   reason; no markers written.
 - **reviewer opposite:** `--implementer claude` ⟹ pr-review invokes the codex
   reviewer and the claude fixer (assert via stub call records).
 - **invalid inputs:** `claude:sonnet`, `codex:fast`, bare `claude:` ⟹ arg-parse
   halt, nonzero exit, no worktree created.
+- **usage:** no-arg preflight output includes
+  `[--implementer codex|claude]`.
 
 ## Out of scope
 
