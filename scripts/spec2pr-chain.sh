@@ -146,8 +146,10 @@ chain_retry_merge() { # <worktree> <pr-url> <slug> [extra-gh-flags...]
   shift 3
   local retry_err retry_rc
 
+  # No --delete-branch: see the note on the primary merge below. The remote
+  # branch is deleted explicitly after the merge loop confirms success.
   set +e
-  retry_err="$(cd "$wt" && gh pr merge "$pr_url" "$@" --squash --delete-branch 2>&1 1>/dev/null)"
+  retry_err="$(cd "$wt" && gh pr merge "$pr_url" "$@" --squash 2>&1 1>/dev/null)"
   retry_rc=$?
   set -e
   if [ "$retry_rc" -ne 0 ]; then
@@ -479,8 +481,16 @@ for i in "${!SPEC_ABS_LIST[@]}"; do
     chain_finish 1 "HALT $slug: missing pr or worktree in SPEC2PR DONE"
   fi
 
+  # Merge with --squash but WITHOUT --delete-branch. --delete-branch makes gh
+  # run local git after the remote merge (`git checkout <default>` to step off
+  # the merged branch), which fails inside this linked worktree when the primary
+  # worktree has main checked out (`fatal: 'main' is already used by worktree
+  # ...`). gh then exits nonzero even though the PR already merged, and the chain
+  # would misread that as a merge failure and HALT. Dropping the flag keeps the
+  # merge a pure remote op; the worktree, local branch, and remote branch are
+  # cleaned up explicitly after the loop confirms the merge landed.
   set +e
-  merge_err="$(cd "$wt" && gh pr merge "$pr_url" --squash --delete-branch 2>&1 1>/dev/null)"
+  merge_err="$(cd "$wt" && gh pr merge "$pr_url" --squash 2>&1 1>/dev/null)"
   merge_rc=$?
   set -e
   if [ "$merge_rc" -ne 0 ]; then
@@ -501,6 +511,11 @@ for i in "${!SPEC_ABS_LIST[@]}"; do
 
   chain_status "OK merged $slug pr=$pr_url"
   merged_count=$((merged_count + 1))
+  # Delete the now-merged remote branch ourselves (a pure ref delete needs no
+  # checkout, so it works regardless of what the primary worktree has checked
+  # out — unlike gh's --delete-branch). Best-effort: GitHub may have auto-deleted
+  # it on merge, in which case this is a harmless no-op.
+  git -C "$GIT_ROOT" push -q origin --delete "spec2pr/$slug" >/dev/null 2>&1 || true
   git -C "$GIT_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$GIT_ROOT" branch -D "spec2pr/$slug" >/dev/null 2>&1 || true
 done

@@ -132,6 +132,37 @@ test_chain_happy_path() {
   assert_contains "$(git -C "$PROJECT" show origin/main:marker-chain-c.txt 2>/dev/null || true)" "chain-c" "origin/main contains chain-c marker"
 }
 
+test_chain_merge_tolerates_gh_delete_branch_local_cleanup_failure() {
+  # Regression: real `gh pr merge --delete-branch`, run inside the spec2pr
+  # worktree, lands the merge on the remote and THEN runs local cleanup
+  # (`git checkout <default>`), which fails when the primary worktree has main
+  # checked out (`fatal: 'main' is already used by worktree ...`). gh exits
+  # nonzero despite a successful merge; the old chain misread that as a
+  # merge-state failure and HALTed (false negative). The fix stops passing
+  # --delete-branch (so gh does no local git) and deletes the remote branch
+  # itself, so the run reaches DONE.
+  make_sandbox
+  local a; a="$(add_spec chain-cleanup)"
+  queue_chain_spec 01-chain-cleanup chain-cleanup
+  printf "failed to run git: fatal: 'main' is already used by worktree at '/home/u/repo'\n" \
+    > "$SPEC2PR_TEST_GH/pr-merge-deletebranch-local-fail"
+  # If the chain still inspected merge state, this UNKNOWN/UNKNOWN would fall to
+  # the unsupported-state HALT — so a green run proves we never re-inspect.
+  printf '{"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN"}' \
+    > "$SPEC2PR_TEST_GH/pr-view-json"
+
+  run_chain "$a"
+
+  assert_eq "0" "$RC" "merge tolerates gh --delete-branch local-cleanup failure"
+  assert_contains "$OUT" "CHAIN DONE merged=1/1" "chain reaches done despite gh local cleanup failure"
+  assert_not_contains "$OUT" "merge state unsupported" "no false unsupported-state halt"
+  assert_eq "0" "$(grep -c -- '--delete-branch' "$SPEC2PR_TEST_GH/gh.log")" \
+    "chain no longer passes --delete-branch to gh"
+  assert_file_exists "$SPEC2PR_HOME/project-chain-cleanup.merged" "merge marker written"
+  assert_eq "" "$(git -C "$PROJECT" ls-remote origin refs/heads/spec2pr/chain-cleanup 2>/dev/null || true)" \
+    "fix deletes the remote spec2pr branch explicitly"
+}
+
 test_chain_admin_flag_accepted_on_happy_path() {
   make_sandbox
   local a; a="$(add_spec chain-okadmin)"

@@ -6,6 +6,19 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.11.2 - from v1.11.1
+
+**Action:** None.
+
+**Caveat:** spec2pr-chain no longer halts a run when GitHub merged the PR but
+`gh` failed its own post-merge branch cleanup. This happened when the chain ran
+from a repo whose primary worktree had `main` checked out: `gh pr merge
+--delete-branch`, run inside the spec2pr worktree, merged remotely and then hit
+`fatal: 'main' is already used by worktree …` on its local `git checkout`,
+exiting non-zero — so the chain reported `merge state unsupported` even though
+the merge succeeded, and never advanced to the next spec. The chain now merges
+without `--delete-branch` and deletes the remote branch itself.
+
 ## To v1.11.1 - from v1.11.0
 
 **Action:** None.
