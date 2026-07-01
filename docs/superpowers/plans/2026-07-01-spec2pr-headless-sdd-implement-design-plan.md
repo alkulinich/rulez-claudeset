@@ -440,7 +440,7 @@ Prove the whole point of the change: a claude implement call that runs past `SPE
 
 - [ ] **Step 1: Write the failing test and its fixture helper**
 
-Add to `tests/spec2pr/test-implement-headless.sh`. The fixture writes an untracked scratch file first (instant), then sleeps well past the tiny timeout; when the wrapper fires, `clean_worktree_to` must remove that file and hold HEAD at `CALL_START_HEAD`.
+Add to `tests/spec2pr/test-implement-headless.sh`. The fixture creates a commit and an untracked scratch file first (instant), then sleeps well past the tiny timeout; when the wrapper fires, `clean_worktree_to` must reset HEAD and remove the untracked file.
 
 ```bash
 # A claude implement fixture that dirties the worktree, then hangs. With a tiny
@@ -448,6 +448,9 @@ Add to `tests/spec2pr/test-implement-headless.sh`. The fixture writes an untrack
 # existing process-failure -> clean_worktree_to -> halt path.
 q_claude_impl_hangs() {
   enqueue_claude "$1" <<'EOF'
+printf 'committed before timeout\n' > timed-out-commit.txt
+git add timed-out-commit.txt
+git commit -qm 'spec2pr: timed-out fixture commit'
 printf 'scratch\n' > timed-out-scratch.txt
 sleep 30
 printf '{"result":{"status":"done","summary":"unreachable","blocked_reason":""}}'
@@ -480,7 +483,7 @@ test_implement_timeout_halts_clean() {
   assert_file_absent "$wt/timed-out-scratch.txt" "timeout resets untracked scratch file"
   assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
     "worktree is clean after a timed-out implement"
-  assert_not_contains "$(git -C "$wt" log --format=%s)" "unreachable" \
+  assert_not_contains "$(git -C "$wt" log --format=%s)" "spec2pr: timed-out fixture commit" \
     "no implementation commit after a timed-out implement"
 }
 ```
