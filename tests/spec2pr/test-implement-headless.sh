@@ -82,13 +82,29 @@ EOF
 
 test_implement_timeout_halts_clean() {
   # Requires a real timeout binary; skip where neither exists (e.g. bare macOS).
-  if ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
+  local timeout_bin
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin=gtimeout
+  else
     printf '  skip: test_implement_timeout_halts_clean (no timeout/gtimeout)\n'
     return 0
   fi
 
   make_sandbox
+  local old_implement_timeout="${SPEC2PR_IMPLEMENT_TIMEOUT-}"
+  local old_implement_timeout_set=0
+  if [ "${SPEC2PR_IMPLEMENT_TIMEOUT+x}" = x ]; then
+    old_implement_timeout_set=1
+  fi
+  local old_timeout_bin="${SPEC2PR_TIMEOUT_BIN-}"
+  local old_timeout_bin_set=0
+  if [ "${SPEC2PR_TIMEOUT_BIN+x}" = x ]; then
+    old_timeout_bin_set=1
+  fi
   export SPEC2PR_IMPLEMENT_TIMEOUT=1
+  export SPEC2PR_TIMEOUT_BIN="$timeout_bin"
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
@@ -96,13 +112,35 @@ test_implement_timeout_halts_clean() {
   q_claude_impl_hangs 05-implement
   # No pr-review fixture needed: the run halts at implement.
   run_spec2pr --implementer claude "$SPEC"
-  unset SPEC2PR_IMPLEMENT_TIMEOUT
+  if [ "$old_implement_timeout_set" -eq 1 ]; then
+    export SPEC2PR_IMPLEMENT_TIMEOUT="$old_implement_timeout"
+  else
+    unset SPEC2PR_IMPLEMENT_TIMEOUT
+  fi
+  if [ "$old_timeout_bin_set" -eq 1 ]; then
+    export SPEC2PR_TIMEOUT_BIN="$old_timeout_bin"
+  else
+    unset SPEC2PR_TIMEOUT_BIN
+  fi
 
   local wt="$SPEC2PR_WORKTREES/$ID"
+  local expected_head=""
+  local line subject
+  while IFS= read -r line; do
+    subject="${line#* }"
+    if [ "$subject" = "spec2pr: write plan" ]; then
+      expected_head="${line%% *}"
+      break
+    fi
+  done < <(git -C "$wt" log --format='%H %s')
+  local actual_head
+  actual_head="$(git -C "$wt" rev-parse HEAD)"
   assert_eq "1" "$RC" "timed-out implement exits 1"
   assert_contains "$OUT" "SPEC2PR HALT implement:" "prints the implement halt contract line"
   # Atomicity: the failed call's scratch file is gone and HEAD is back at the
   # spec+plan commit (no implementation commit landed).
+  assert_eq "$expected_head" "$actual_head" \
+    "timeout resets HEAD to the pre-implement plan boundary"
   assert_file_absent "$wt/timed-out-scratch.txt" "timeout resets untracked scratch file"
   assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
     "worktree is clean after a timed-out implement"
