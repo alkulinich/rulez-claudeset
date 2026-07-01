@@ -201,7 +201,7 @@ This is a pure additive change to the log format; existing `_claude_argline` gre
 
 Add two tests to `tests/spec2pr/test-implement-headless.sh`.
 
-Test A — the ceiling env reaches the implement call but not the plan/forecast claude calls:
+Test A — the ceiling env reaches the implement call but not the other claude calls, including a pr-review fix call:
 
 ```bash
 # _claude_argline greps the single invocations.log line for a fixture; defined
@@ -213,7 +213,9 @@ test_ceiling_env_scoped_to_implement_call() {
   queue_clean_plan_review 03-plan-review
   queue_clean_forecast 04-forecast
   q_claude_impl_done 05-implement
-  q_codex_pr_clean 06-pr-review
+  queue_dirty_codex_pr_review 06-pr-review
+  queue_claude_pr_fix 06-pr-review
+  q_codex_pr_clean 07-pr-review
   run_spec2pr --implementer claude "$SPEC"
   assert_eq "0" "$RC" "claude implement reaches done"
 
@@ -223,6 +225,8 @@ test_ceiling_env_scoped_to_implement_call() {
     "plan call is unaffected by the ceiling env"
   assert_contains "$(_claude_argline 04-forecast.sh)" "ceiling=UNSET" \
     "forecast call is unaffected by the ceiling env"
+  assert_contains "$(_claude_argline 06-pr-review-claude-fix.sh)" "ceiling=UNSET" \
+    "pr-review claude fixer is unaffected by the ceiling env"
 }
 ```
 
@@ -412,7 +416,7 @@ with (the 5th arg is the configured timeout; this is the only call site that pas
 - [ ] **Step 9: Run the new tests to verify they pass**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -E -A3 'test_ceiling_env_scoped_to_implement_call|test_implement_unwrapped_when_no_timeout_binary'`
-Expected: all `ok:`, no `FAIL`. (On the Linux runner `resolve_timeout_bin` returns `timeout`, so Test A's implement stub runs under `timeout -k 30 1800` and still returns instantly; Test B forces the unwrapped branch via `SPEC2PR_TIMEOUT_BIN=none`.)
+Expected: all `ok:`, no `FAIL`. (On the Linux runner `resolve_timeout_bin` returns `timeout`, so Test A's implement stub runs under `timeout -k 30 1800` and still returns instantly; its pr-review claude fixer has no timeout arg and logs `ceiling=UNSET`. Test B forces the unwrapped branch via `SPEC2PR_TIMEOUT_BIN=none`.)
 
 - [ ] **Step 10: Commit**
 
@@ -542,9 +546,9 @@ git commit -m "fix(spec2pr): <describe the regression fix>"
 | Interface `run_claude_json <tag> <prompt> <out> [model] [timeout_secs]`; empty timeout = current behavior | Task 2 (Steps 6, 7) |
 | Existing callers byte-unchanged (`plan`, `pr-review*`, `forecast`) | Task 2 (default-empty params), verified Task 4 |
 | Harden implement prompt (wait-for-subagents, no finishing-branch, JSON-only) | Task 1 |
-| Env scoping — ceiling on implement subshell only | Task 2, verified by `test_ceiling_env_scoped_to_implement_call` |
+| Env scoping — ceiling on implement subshell only; absent from plan, forecast, and pr-review claude calls | Task 2, verified by `test_ceiling_env_scoped_to_implement_call` |
 | Timeout → clean halt (exit 1, contract line, worktree reset) | Task 3 |
-| Ceiling env reaches implement, not others | Task 2 Test A |
+| Ceiling env reaches implement, not other claude calls | Task 2 Test A |
 | Prompt directives present | Task 1 |
 | Unwrapped path succeeds | Task 2 Test B |
 | Regression: plan/spec-review/pr-review/chain pass | Task 4 |
