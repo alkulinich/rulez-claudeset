@@ -745,7 +745,8 @@ of these valid result shapes:
 {"status":"blocked","summary":"...","blocked_reason":"..."}
 EOF
         CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" "$IMPLEMENTER_MODEL"
+        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" \
+          "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT"
         if ! jq -e 'if (.result | type) == "object" then .result
                     else (.result | tostring | fromjson?) end
                     | select(type == "object")' \

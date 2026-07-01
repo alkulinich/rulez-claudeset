@@ -13,8 +13,9 @@ if [ -z "$fixture" ]; then
   exit 86
 fi
 
-printf 'CALL cwd=%s args=%s fixture=%s\n' \
-  "$(pwd -P)" "$*" "$(basename "$fixture")" >> "$queue/invocations.log"
+printf 'CALL cwd=%s args=%s ceiling=%s fixture=%s\n' \
+  "$(pwd -P)" "$*" "${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-UNSET}" "$(basename "$fixture")" \
+  >> "$queue/invocations.log"
 printf '%s\n' "$prompt" > "$queue/$(basename "$fixture" .sh).prompt"
 
 out="$(bash "$fixture")"
