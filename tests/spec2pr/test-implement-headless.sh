@@ -65,3 +65,47 @@ test_implement_unwrapped_when_no_timeout_binary() {
   assert_contains "$(_claude_argline 05-implement.sh)" "ceiling=0" \
     "ceiling env applied even on the unwrapped path"
 }
+
+# A claude implement fixture that dirties the worktree, then hangs. With a tiny
+# SPEC2PR_IMPLEMENT_TIMEOUT the timeout wrapper SIGTERMs it (rc 124), driving the
+# existing process-failure -> clean_worktree_to -> halt path.
+q_claude_impl_hangs() {
+  enqueue_claude "$1" <<'EOF'
+printf 'committed before timeout\n' > timed-out-commit.txt
+git add timed-out-commit.txt
+git commit -qm 'spec2pr: timed-out fixture commit'
+printf 'scratch\n' > timed-out-scratch.txt
+sleep 30
+printf '{"result":{"status":"done","summary":"unreachable","blocked_reason":""}}'
+EOF
+}
+
+test_implement_timeout_halts_clean() {
+  # Requires a real timeout binary; skip where neither exists (e.g. bare macOS).
+  if ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
+    printf '  skip: test_implement_timeout_halts_clean (no timeout/gtimeout)\n'
+    return 0
+  fi
+
+  make_sandbox
+  export SPEC2PR_IMPLEMENT_TIMEOUT=1
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  q_claude_impl_hangs 05-implement
+  # No pr-review fixture needed: the run halts at implement.
+  run_spec2pr --implementer claude "$SPEC"
+  unset SPEC2PR_IMPLEMENT_TIMEOUT
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "1" "$RC" "timed-out implement exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT implement:" "prints the implement halt contract line"
+  # Atomicity: the failed call's scratch file is gone and HEAD is back at the
+  # spec+plan commit (no implementation commit landed).
+  assert_file_absent "$wt/timed-out-scratch.txt" "timeout resets untracked scratch file"
+  assert_eq "" "$(git -C "$wt" status --porcelain --untracked-files=all)" \
+    "worktree is clean after a timed-out implement"
+  assert_not_contains "$(git -C "$wt" log --format=%s)" "spec2pr: timed-out fixture commit" \
+    "no implementation commit after a timed-out implement"
+}
