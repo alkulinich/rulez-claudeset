@@ -440,6 +440,13 @@ Expected: `... tests run, 0 failed` — existing forecast tests (`test-forecast.
 
 > **Note for the implementer:** the existing forecast fixtures in `tests/spec2pr/helpers.sh` (`queue_clean_forecast`, `queue_exceeds_forecast`) emit the payload under `.result`. Once forecast is schema-bound, `claude_json_attempt` requires `.structured_output`, so those fixtures would make forecast WARN-skip. Update both helper fixtures to emit the payload under `.structured_output` (keep any short prose in `.result`), mirroring `q_claude_forecast_structured` above. Re-run `bash tests/spec2pr/run-tests.sh` after editing and confirm `0 failed`.
 
+Also update the direct forecast fixtures and expectations in `tests/spec2pr/test-forecast.sh` so they match the new no-fallback schema-bound contract:
+
+- `test_forecast_malformed_payload_warns_and_proceeds`: put the invalid forecast payload under `.structured_output` (with prose in `.result`) so the test still exercises `forecast_payload_valid` and still expects `SPEC2PR WARN forecast: malformed forecast JSON; proceeding to implement`.
+- `test_forecast_recovers_fenced_json`: this legacy fallback behavior is intentionally removed for schema-bound forecast. Replace it with a missing-structured-output case (for example prose/fenced JSON in `.result` and no `.structured_output`) and expect `SPEC2PR WARN forecast: invalid claude JSON; proceeding to implement`, no `forecast.json`, and the run still reaching DONE.
+- `test_forecast_worktree_modification_is_cleaned_and_warns`: keep the worktree edit/commit, but put any JSON payload under `.structured_output` so the test reaches the existing worktree-modified rc `4` path rather than short-circuiting on missing `.structured_output`.
+- `test_forecast_regenerated_mismatch_warns_and_proceeds`: put the mismatched payload under `.structured_output` so the test continues to cover semantic validator rejection (`malformed forecast JSON`) instead of missing structured output.
+
 - [ ] **Step 6: Commit**
 
 ```bash
