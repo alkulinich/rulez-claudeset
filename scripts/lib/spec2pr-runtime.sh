@@ -18,6 +18,7 @@ RULEZ_CLAUDESET_HOME="${RULEZ_CLAUDESET_HOME:-$HOME/.rulez-claudeset}"
 SPEC2PR_HOME="${SPEC2PR_HOME:-$RULEZ_CLAUDESET_HOME/spec2pr}"
 SPEC2PR_WORKTREES="${SPEC2PR_WORKTREES:-$HOME/.worktrees}"
 MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-3}"
+SPEC2PR_IMPLEMENT_TIMEOUT="${SPEC2PR_IMPLEMENT_TIMEOUT:-1800}"
 SPEC2PR_CODEX_FAST="${SPEC2PR_CODEX_FAST:-}"
 # Set to any non-empty value to echo review findings and stage summaries to stdout.
 SPEC2PR_VERBOSE="${SPEC2PR_VERBOSE:-}"
@@ -457,17 +458,54 @@ validate_codex_output() {
     || return 1
 }
 
+# resolve_timeout_bin
+# Echoes the wall-clock timeout binary to use, or the empty string for an
+# unwrapped call. Honors SPEC2PR_TIMEOUT_BIN: unset -> autodetect
+# (timeout, then gtimeout); "none" -> force unwrapped; any other value ->
+# use verbatim. Keeps spec2pr free of a hard GNU-coreutils dependency.
+resolve_timeout_bin() {
+  case "${SPEC2PR_TIMEOUT_BIN-}" in
+    none) printf '' ;;
+    ?*)   printf '%s' "$SPEC2PR_TIMEOUT_BIN" ;;
+    *)
+      if command -v timeout >/dev/null 2>&1; then
+        printf 'timeout'
+      elif command -v gtimeout >/dev/null 2>&1; then
+        printf 'gtimeout'
+      else
+        printf ''
+      fi
+      ;;
+  esac
+}
+
 claude_json_attempt() {
-  local tag="$1" prompt_file="$2" out="$3" model="${4:-}"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}"
   local err="$META_DIR/$tag.stderr"
   local -a claude_args=(-p --output-format json --dangerously-skip-permissions)
   if [ -n "$model" ]; then
     claude_args=(-p --model "$model" --output-format json --dangerously-skip-permissions)
   fi
 
+  # When a timeout is requested (implement call only), neutralize the harness's
+  # background-wait ceiling so the parent waits for its dispatched subagents,
+  # and bound the whole call with a hard wall-clock timeout. Both are applied to
+  # this subshell only; every other caller passes no timeout and is unchanged.
+  local -a env_prefix=() timeout_prefix=()
+  if [ -n "$timeout_secs" ]; then
+    env_prefix=(env CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0)
+    local tbin
+    tbin="$(resolve_timeout_bin)"
+    if [ -n "$tbin" ]; then
+      timeout_prefix=("$tbin" -k 30 "$timeout_secs")
+    fi
+  fi
+
   CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
   progress "running claude $tag"
-  if ! (cd "$WORKTREE" && "$SPEC2PR_CLAUDE_BIN" "${claude_args[@]}" \
+  if ! (cd "$WORKTREE" \
+      && "${env_prefix[@]+"${env_prefix[@]}"}" "${timeout_prefix[@]+"${timeout_prefix[@]}"}" \
+         "$SPEC2PR_CLAUDE_BIN" "${claude_args[@]}" \
       < "$prompt_file" > "$out" 2> "$err"); then
     clean_worktree_to "$CALL_START_HEAD"
     return 2
@@ -479,10 +517,10 @@ claude_json_attempt() {
 }
 
 run_claude_json() {
-  local tag="$1" prompt_file="$2" out="$3" model="${4:-}"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}"
   local rc
   set +e
-  claude_json_attempt "$tag" "$prompt_file" "$out" "$model"
+  claude_json_attempt "$tag" "$prompt_file" "$out" "$model" "$timeout_secs"
   rc=$?
   set -e
   case "$rc" in

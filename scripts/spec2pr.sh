@@ -734,13 +734,19 @@ $WT_PLAN_REL for the spec at $WT_SPEC_REL.
 Make the necessary code, test, and documentation changes in this worktree.
 Commit the implementation changes on the current branch. Do not create,
 switch, or rename git branches. Do not push, do not create a PR.
-Return ONLY one JSON object in the JSON envelope's result field. Use one of these
-valid result shapes:
+
+Wait for every dispatched subagent to fully complete before continuing. Do
+not report interim, partial, or "waiting for completion" status.
+Do not invoke finishing-a-development-branch — spec2pr owns the branch and PR
+lifecycle.
+Your final message must be ONLY the JSON result object, nothing else. Use one
+of these valid result shapes:
 {"status":"done","summary":"...","blocked_reason":""}
 {"status":"blocked","summary":"...","blocked_reason":"..."}
 EOF
         CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" "$IMPLEMENTER_MODEL"
+        run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" \
+          "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT"
         if ! jq -e 'if (.result | type) == "object" then .result
                     else (.result | tostring | fromjson?) end
                     | select(type == "object")' \
