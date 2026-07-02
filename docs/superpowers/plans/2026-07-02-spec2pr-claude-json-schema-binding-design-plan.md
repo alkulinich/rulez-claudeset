@@ -41,6 +41,7 @@
 - Modify: `scripts/lib/spec2pr-runtime.sh` (`claude_json_attempt` ~482-517; `run_claude_json` ~519-531; new `spec2pr_schema`)
 - Modify: `scripts/spec2pr.sh` (`run_claude_json implement ...` ~748)
 - Modify: `tests/spec2pr/stub-claude.sh`
+- Modify: `tests/spec2pr/test-implementer.sh` (existing claude implement fixtures)
 - Test: `tests/spec2pr/test-schema-binding.sh` (new)
 
 **Interfaces:**
@@ -299,20 +300,52 @@ export STUB_CLAUDE_SCHEMA_BOUND="$schema_bound"
 
 (The existing `args=%s` field in the `invocations.log` printf already captures `--json-schema`, so `_claude_argline` assertions work without further change.)
 
-- [ ] **Step 8: Run the new tests to verify they pass**
+- [ ] **Step 8: Update existing claude implement fixtures**
+
+Before running the suite-wide regression, update the existing claude implement fixtures in `tests/spec2pr/test-implementer.sh` so tests that use the now schema-bound implement call still exercise their original scenarios. Replace the three fixture `printf` payloads near lines 59-80 with:
+
+```bash
+q_claude_impl_done() {
+  enqueue_claude "$1" <<'EOF'
+printf '1.0.0\n' > version.txt
+git add version.txt
+git commit -qm 'spec2pr: implement version file'
+printf '{"result":"implemented with claude","structured_output":{"status":"done","summary":"implemented with claude","blocked_reason":""}}'
+EOF
+}
+
+q_claude_impl_blocked() {
+  enqueue_claude "$1" <<'EOF'
+printf '{"result":"blocked","structured_output":{"status":"blocked","summary":"blocked","blocked_reason":"missing API key"}}'
+EOF
+}
+
+q_claude_impl_badschema() {
+  enqueue_claude "$1" <<'EOF'
+printf '1.0.0\n' > version.txt
+git add version.txt
+git commit -qm 'spec2pr: implement version file'
+printf '{"result":"invalid implement object","structured_output":{"status":"done","summary":"x","blocked_reason":"","extra":1}}'
+EOF
+}
+```
+
+This keeps the existing done/blocked/invalid-result coverage intact after `.structured_output` becomes mandatory for `implement`.
+
+- [ ] **Step 9: Run the new tests to verify they pass**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A2 -E 'test_implement_(carries_json_schema|consumes_structured|missing_structured)'`
 Expected: PASS for all three (`--json-schema` present, `implement.json` normalized from `structured_output`, missing-`structured_output` halts clean with worktree reset).
 
-- [ ] **Step 9: Run the full suite (regression)**
+- [ ] **Step 10: Run the full suite (regression)**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | tail -3`
-Expected: `... tests run, 0 failed` — every existing caller passes no schema name, so the new arg is inert.
+Expected: `... tests run, 0 failed` — existing claude implement fixtures now emit `.structured_output`, while prose calls still pass no schema name and remain inert.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add scripts/lib/spec2pr-runtime.sh scripts/spec2pr.sh tests/spec2pr/stub-claude.sh tests/spec2pr/test-schema-binding.sh
+git add scripts/lib/spec2pr-runtime.sh scripts/spec2pr.sh tests/spec2pr/stub-claude.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/test-implementer.sh
 git commit -m "spec2pr: schema-bind the claude implement call via --json-schema"
 ```
 
@@ -420,6 +453,8 @@ git commit -m "spec2pr: schema-bind the claude forecast call via --json-schema"
 
 **Files:**
 - Modify: `scripts/lib/pr-review-engine.sh` (classify `claude_json_attempt` ~163)
+- Modify: `tests/spec2pr/test-pipeline.sh` (existing classifier fixtures)
+- Modify: `tests/spec2pr/test-review-pr.sh` (existing classifier fixtures)
 - Test: `tests/spec2pr/test-schema-binding.sh`
 
 **Interfaces:**
@@ -490,16 +525,83 @@ to:
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_classify_carries_flag_and_prose`
 Expected: PASS — classify carries `--json-schema`, plan and pr-review round do not.
 
-- [ ] **Step 5: Run the full suite (regression)**
+- [ ] **Step 5: Update existing classifier fixtures**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | tail -3`
-Expected: `... tests run, 0 failed`. If `test-review-loop.sh` / `test-review-pr.sh` classifier fixtures returned counts under `.result`, update them to emit under `.structured_output` (keep prose in `.result`), the same way Task 2 updated the forecast helpers. Re-run and confirm `0 failed`.
+Update every pre-existing claude classifier fixture that is supposed to return a count object so the count object is in `.structured_output`. Keep intentionally malformed classifier fixtures malformed by leaving `.structured_output` absent.
 
-- [ ] **Step 6: Commit**
+In `tests/spec2pr/test-pipeline.sh`, update the two shared helpers at the top:
 
 ```bash
-git add scripts/lib/pr-review-engine.sh tests/spec2pr/test-schema-binding.sh
-# include any classifier-fixture updates in test-review-loop.sh / test-review-pr.sh
+queue_clean_pr_review() {
+  enqueue_claude "$1-a-review" <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  enqueue_claude "$1-b-classify" <<'EOF'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
+EOF
+}
+
+queue_dirty_pr_review() {
+  enqueue_claude "$1-a-review" <<'EOF'
+printf '{"result":"BLOCKER: missing review fix. Evidence: review-fix.txt absent."}'
+EOF
+  enqueue_claude "$1-b-classify" <<'EOF'
+printf '{"result":"classified dirty review","structured_output":{"blockers_found":1,"majors_found":0}}'
+EOF
+  enqueue "$1-fix" <<'EOF'
+printf 'review fix\n' > review-fix.txt
+printf '{"summary":"fixed review finding"}'
+EOF
+}
+```
+
+Then replace the remaining classifier count fixtures in `tests/spec2pr/test-pipeline.sh` by the same rule:
+
+```bash
+# clean / success count
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
+
+# major count
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
+
+# fractional-count retry fixture: still schema-bound, still semantically invalid
+printf '{"result":"classified fractional review","structured_output":{"blockers_found":0.5,"majors_found":0}}'
+```
+
+Leave these deliberately malformed retry/halt fixtures unchanged so `claude_json_attempt` returns `3` and exercises the retry path:
+
+```bash
+printf '{"result":"not json"}'
+printf '%s' '{"result":"Here: {\"blockers_found\":0,\"majors_found\":0}"}'
+printf 'not a json envelope'
+```
+
+In `tests/spec2pr/test-review-pr.sh`, replace every `*-b-classify` fixture that currently prints a count object under `.result` with the matching `.structured_output` payload:
+
+```bash
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
+```
+
+The `01-pr-b-classify` fixture near the worktree-modification test keeps its file edit before the `printf`; only the final JSON envelope changes:
+
+```bash
+printf 'classifier edit\n' > classifier-edit.txt
+git add classifier-edit.txt
+git commit -qm 'classifier edit'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
+```
+
+- [ ] **Step 6: Run the full suite (regression)**
+
+Run: `bash tests/spec2pr/run-tests.sh 2>&1 | tail -3`
+Expected: `... tests run, 0 failed`. The existing classifier fixtures in `test-pipeline.sh` and `test-review-pr.sh` now emit count objects under `.structured_output`, while intentionally malformed classifier fixtures still exercise retry/halt behavior by omitting `.structured_output`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/lib/pr-review-engine.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/test-pipeline.sh tests/spec2pr/test-review-pr.sh
 git commit -m "spec2pr: schema-bind the pr-review classify call via --json-schema"
 ```
 
@@ -773,6 +875,6 @@ git commit -m "spec2pr: advise claude >= 2.1.187 for schema-bound output in chec
 - §Testing: stub learns `--json-schema` (Task 1 Step 7); flag present for four / absent for three (Tasks 1-4 present + Task 3 absent asserts); normalization (Tasks 1-4); missing → halt (Task 1); punts-enrich (Task 4); regression (every task's full-suite step). ✓
 - §Out of scope: VERSION/UPGRADE.md, codex path, `*_valid` semantics, `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` — none touched. ✓
 
-**Placeholder scan:** the two flagged implementer notes (Task 2 Step 5 forecast helper fixtures, Task 3 fixture wiring) are deliberate — the exact pre-existing fixture stems for a claude pr-reviewer round depend on the harness's current call ordering, which the implementer must read from `invocations.log` / `test-review-loop.sh`. The *contract* asserted (which calls carry `--json-schema`) is fixed; only the fixture plumbing is left to match the harness. No code step ships a TODO or an unshown implementation.
+**Placeholder scan:** the plan names the existing fixture files that must move payloads from `.result` to `.structured_output` and shows the replacement payload shapes. No code step ships a TODO or an unshown implementation.
 
 **Type consistency:** `schema_name` is the 6th positional in both `claude_json_attempt` and `run_claude_json`; call sites pad with `"" ""`. `spec2pr_schema <name>` names (`implement`/`forecast`/`classify`) match the strings passed at each call site. `.structured_output` → `.result` normalization is identical across the runtime and mirrored (array form) in punts-enrich.
