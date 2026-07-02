@@ -800,6 +800,8 @@ test_check_deps_claude_too_old_warns() {
   _mk_dep_stubdir_ver "$d" "context7  https://mcp.context7.com/mcp" "2.1.100 (Claude Code)"
   out="$(PATH="$d:$PATH" bash "$CHECK_DEPS" 2>&1)"
   assert_contains "$out" "2.1.187" "old claude => version advisory names the floor"
+  assert_contains "$out" "spec2pr dependencies present" \
+    "old claude advisory does not mark dependencies missing"
   rm -rf "$d"
 }
 
@@ -837,7 +839,6 @@ EOF
        || { [ "$cv_maj" -eq 2 ] && [ "$cv_min" -eq 1 ] && [ "$cv_pat" -lt 187 ]; }; then
       warn "claude $claude_ver is below 2.1.187 — spec2pr's schema-bound claude"
       warn "  implement, forecast, and pr-review calls need >= 2.1.187 for --json-schema."
-      missing=1
     fi
   fi
 ```
@@ -845,7 +846,7 @@ EOF
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A2 -E 'test_check_deps_claude_(too_old|new_enough)'`
-Expected: PASS — too-old warns naming `2.1.187`; new-enough does not.
+Expected: PASS — too-old warns naming `2.1.187` while still printing the dependency-present line; new-enough does not warn.
 
 - [ ] **Step 5: Run the full suite (regression)**
 
