@@ -6,6 +6,17 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.13.0 - from v1.12.0
+
+**Action:** Using `--implementer claude`? Upgrade the Claude CLI to >= 2.1.187;
+`check-deps` now prints a non-fatal advisory below that.
+
+**Caveat:** spec2pr's structured claude calls (implement, forecast, pr-review
+classify, punts-enrich) now use `--json-schema` constrained decoding, so a
+`claude` run no longer halts with "invalid result" when the model returns prose
+instead of the required JSON. Prose stages (plan, pr-review) and the default
+`codex` path are unchanged.
+
 ## To v1.12.0 - from v1.11.3
 
 **Action:** None.
