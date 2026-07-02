@@ -746,14 +746,10 @@ of these valid result shapes:
 EOF
         CALL_START_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
         run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" \
-          "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT"
-        if ! jq -e 'if (.result | type) == "object" then .result
-                    else (.result | tostring | fromjson?) end
-                    | select(type == "object")' \
-            "$META_DIR/implement.envelope.json" > "$META_DIR/implement.json" 2>/dev/null; then
-          jq -r '.result // empty' "$META_DIR/implement.envelope.json" \
-            | extract_json_object > "$META_DIR/implement.json" 2>/dev/null || true
-        fi
+          "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT" implement
+        jq -e '.result | select(type == "object")' \
+          "$META_DIR/implement.envelope.json" > "$META_DIR/implement.json" 2>/dev/null \
+          || true
         if ! implement_json_valid "$META_DIR/implement.json"; then
           clean_worktree_to "$CALL_START_HEAD"
           halt "claude implement returned invalid result"

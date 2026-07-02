@@ -6,6 +6,13 @@ set -uo pipefail
 
 queue="${SPEC2PR_TEST_CLAUDE_FIXTURES:?SPEC2PR_TEST_CLAUDE_FIXTURES not set}"
 prompt="$(cat)"
+STUB_CLAUDE_SCHEMA_BOUND=0
+case " $* " in
+  *" --json-schema "*)
+    STUB_CLAUDE_SCHEMA_BOUND=1
+    ;;
+esac
+export STUB_CLAUDE_SCHEMA_BOUND
 
 fixture="$(ls "$queue"/[0-9]*.sh 2>/dev/null | head -n1 || true)"
 if [ -z "$fixture" ]; then
