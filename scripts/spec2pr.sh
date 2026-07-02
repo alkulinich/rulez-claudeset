@@ -614,20 +614,11 @@ EOF
     4) status "WARN" "claude modified worktree; proceeding to implement"; return 0 ;;
   esac
 
-  if ! jq -e 'if (.result | type) == "object" then .result
-              else (.result | tostring | fromjson?) end
-              | select(type == "object")' \
+  if ! jq -e 'select((.result | type) == "object") | .result' \
       "$META_DIR/forecast.claude.json" > "$META_DIR/forecast.json" 2>/dev/null; then
-    # Fallback: the model may wrap the JSON in prose or a ```json fence. Recover
-    # the first balanced object the same way the pr-review classifier does
-    # (scripts/lib/pr-review-engine.sh) before giving up.
-    jq -r '.result // empty' "$META_DIR/forecast.claude.json" \
-      | extract_json_object > "$META_DIR/forecast.json" 2>/dev/null || true
-    if [ ! -s "$META_DIR/forecast.json" ]; then
-      rm -f "$META_DIR/forecast.json"
-      status "WARN" "malformed forecast JSON; proceeding to implement"
-      return 0
-    fi
+    rm -f "$META_DIR/forecast.json"
+    status "WARN" "malformed forecast JSON; proceeding to implement"
+    return 0
   fi
   if ! forecast_payload_valid "$META_DIR/forecast.json" "$plan_sha" "$spec_sha" "$cur_bytes"; then
     rm -f "$META_DIR/forecast.json"

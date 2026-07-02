@@ -222,6 +222,34 @@ EOF
     "missing structured output still reaches done"
 }
 
+test_forecast_string_structured_output_is_not_recovered() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  enqueue_claude 04-forecast <<'EOF'
+plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
+spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+est=$((cur_bytes + 40))
+payload=$(printf '{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}' "$plan_sha" "$spec_sha" "$cur_bytes" "$est")
+prose=$(printf 'Here are my per-file estimates.\n\n```json\n%s\n```' "$payload")
+jq -n --arg result "Forecast returned as structured prose." --arg structured "$prose" \
+  '{result:$result, structured_output:$structured}'
+EOF
+  queue_spec2pr_subject_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr "$SPEC"
+
+  assert_eq "0" "$RC" "string structured forecast output does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: malformed forecast JSON; proceeding to implement" \
+    "string structured output warns as malformed forecast JSON"
+  assert_file_absent "$SPEC2PR_HOME/$ID/forecast.json" "string structured output writes no forecast payload"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" \
+    "string structured output still reaches done"
+}
+
 test_forecast_worktree_modification_is_cleaned_and_warns() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
