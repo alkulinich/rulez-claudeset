@@ -431,11 +431,10 @@ git commit -m "spec2pr: schema-bind the claude forecast call via --json-schema"
 Append to `tests/spec2pr/test-schema-binding.sh`. This reuses the round→classify pr-review flow; a classify fixture returns counts only in `.structured_output`:
 
 ```bash
-# Codex-reviewer path is the default; the claude classifier runs inside
-# pr-review-engine after each reviewer round. Drive a dirty codex review so a
-# claude fixer + a claude classifier round occur, and prove:
+# The claude reviewer/classifier path is the default pr-review flow. Queue one
+# prose reviewer round plus one schema-bound classifier round and prove:
 #   - classify carries --json-schema and consumes structured_output
-#   - the pr-review round + fix claude calls do NOT carry --json-schema
+#   - the plan and pr-review prose claude calls do NOT carry --json-schema
 
 # Classifier fixture: prose in .result, counts ONLY in .structured_output.
 q_claude_classify_structured() {
@@ -451,23 +450,21 @@ test_classify_carries_flag_and_prose_calls_do_not() {
   queue_clean_plan_review 03-plan-review
   q_claude_forecast_structured 04-forecast
   q_claude_impl_structured_done 05-implement
-  # Claude-reviewer pr-review round (prose) + claude classify (schema-bound),
-  # clean verdict -> single round, done.
-  queue_claude_pr_review_round 06-pr-review
-  q_claude_classify_structured 06-classify
-  run_spec2pr --implementer claude --pr-reviewer claude "$SPEC"
+  enqueue_claude 06-pr-review-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  q_claude_classify_structured 06-pr-review-b-classify
+  run_spec2pr --implementer claude "$SPEC"
   assert_eq "0" "$RC" "claude-reviewer + classify run reaches done"
 
-  assert_contains "$(_claude_argline 06-classify.sh)" "--json-schema" \
+  assert_contains "$(_claude_argline 06-pr-review-b-classify.sh)" "--json-schema" \
     "classify call carries --json-schema"
   assert_not_contains "$(_claude_argline 02-plan.sh)" "--json-schema" \
     "plan call stays prose (no --json-schema)"
-  assert_not_contains "$(_claude_argline 06-pr-review.sh)" "--json-schema" \
+  assert_not_contains "$(_claude_argline 06-pr-review-a-review.sh)" "--json-schema" \
     "pr-review round stays prose (no --json-schema)"
 }
 ```
-
-> **Implementer note on fixtures/flags:** confirm the exact fixture stem the claude pr-review round and classifier consume (`invocations.log` records `fixture=<name>`), and confirm the flag for a claude pr-reviewer (`--pr-reviewer claude` vs the codex default) by reading `scripts/lib/pr-review-engine.sh` and how `test-review-loop.sh` / `test-review-pr.sh` queue reviewer + classifier fixtures. Use an existing `queue_*` reviewer-round helper if one exists (e.g. in `test-review-loop.sh`) instead of the placeholder `queue_claude_pr_review_round`; adjust fixture stems to match the run's actual call order. The assertion content (`--json-schema` present for `classify`, absent for `plan`/round) is the fixed contract; the fixture wiring is whatever the harness already uses for a claude-reviewer round + classifier.
 
 - [ ] **Step 2: Run to verify it fails**
 
