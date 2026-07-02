@@ -30,7 +30,7 @@
 - `scripts/check-deps.sh` — non-fatal `claude >= 2.1.187` advisory.
 - `tests/spec2pr/stub-claude.sh` — learns `--json-schema` (exposes a flag to fixtures).
 - `tests/spec2pr/test-schema-binding.sh` — **new** — flag-present/absent, normalization, missing-`structured_output` halt.
-- `tests/spec2pr/test-punts-enrich.sh` — **new** — punts-enrich schema binding.
+- `tests/punts/test-enrich.sh` — extend existing punts-enrich coverage for schema binding.
 - `tests/spec2pr/test-check-deps.sh` — extend with the version advisory cases.
 
 ---
@@ -611,76 +611,86 @@ git commit -m "spec2pr: schema-bind the pr-review classify call via --json-schem
 
 **Files:**
 - Modify: `scripts/punts-enrich.sh` (the `claude -p` call ~72-81)
-- Test: `tests/spec2pr/test-punts-enrich.sh` (new)
+- Modify: `tests/punts/test-enrich.sh` (existing punts-enrich suite)
 
 **Interfaces:**
 - Consumes: nothing from the runtime (this script does not source `spec2pr-runtime.sh`). It defines its array schema inline.
 - Produces: after a schema-bound single-turn call, the promoted raw file is the structured punt **array** extracted from `.structured_output`, not the Claude envelope.
 
-- [ ] **Step 1: Add the failing test file**
+- [ ] **Step 1: Update the existing punts-enrich test helper and add the failing assertion**
 
-Create `tests/spec2pr/test-punts-enrich.sh`:
+In `tests/punts/test-enrich.sh`, replace `install_fake_claude_structured` with a
+schema-aware stub that logs args and emits the promoted punt array only in
+`.structured_output`:
 
 ```bash
+install_fake_claude_structured() {
+  local bin_dir="$1" id="$2" log_file="${3:-}"
+  mkdir -p "$bin_dir"
+  cat > "$bin_dir/claude" <<EOF
 #!/usr/bin/env bash
-# punts-enrich schema binding: the raw promotion reads .structured_output (an
-# array), and the call carries --json-schema. See the plan.
-
-PUNTS_ENRICH="$REPO_ROOT/scripts/punts-enrich.sh"
-
-# Build a throwaway PATH with a claude stub that logs its args and emits a Claude
-# envelope: prose in .result, the punt array ONLY in .structured_output.
-_mk_punts_claude_stub() { # <dir>
-  local d="$1"
-  mkdir -p "$d"
-  cat > "$d/claude" <<'EOF'
-#!/usr/bin/env bash
-printf 'CLAUDE_ARGS=%s\n' "$*" >> "$PUNTS_STUB_LOG"
-cat <<'JSON'
-{"result":"Extracted one punt from the slice.","structured_output":[{"id":"p1","session_id":"s1","session_ended_at":"2026-07-02T00:00:00Z","branch":"main","evidence_quote":"[PUNT]: x","context_quote":"around here","claim":"x is punted","files_mentioned":["a.sh"],"regex_hit":"PUNT","source":"regex","subagent_confidence":"high"}]}
+if [ -n "$log_file" ]; then
+  printf 'CLAUDE_ARGS=%s\n' "\$*" >> "$log_file"
+fi
+cat <<JSON
+{
+  "result": "Extracted one punt from the slice.",
+  "structured_output": [
+    {
+      "id": "$id",
+      "session_id": "fake",
+      "session_ended_at": "2026-05-06T14:30:00Z",
+      "branch": "main",
+      "evidence_quote": "pre-existing bug",
+      "context_quote": "...",
+      "claim": "auth bug",
+      "files_mentioned": [],
+      "regex_hit": "pre-existing",
+      "source": "regex",
+      "subagent_confidence": "medium"
+    }
+  ]
+}
 JSON
 EOF
-  chmod +x "$d/claude"
+  chmod +x "$bin_dir/claude"
 }
+```
 
-test_punts_enrich_promotes_structured_output_array() {
-  local root d log
-  root="$(mktemp -d -t punts.XXXXXX)"
-  d="$(mktemp -d -t puntsbin.XXXXXX)"
-  log="$root/claude-args.log"
-  _mk_punts_claude_stub "$d"
+Then update `test_enrich_promotes_regex_only_to_structured` to pass a log file
+and assert both the flag and the promoted raw-file type:
 
-  mkdir -p "$root/.claude/punts/raw" "$root/.claude/punts/state"
-  # A regex-only raw file + its paired slice.
-  printf '{"fallback":"regex-only","session_id":"s1","regex_hits":"[PUNT]: x"}' \
-    > "$root/.claude/punts/raw/s1-100-42.json"
-  printf '{"role":"user","content":"[PUNT]: x"}\n' \
-    > "$root/.claude/punts/state/slice-s1-100-42.jsonl"
+```bash
+test_enrich_promotes_regex_only_to_structured() {
+  local proj fake_bin first_id call_log
+  proj="$(make_temp_project)"
+  prime_regex_only_pair "$proj" "session-enrich-001" 12345 999
 
-  TESTS_RUN=$((TESTS_RUN + 1))
-  local out
-  out="$(PATH="$d:$PATH" PUNTS_ROOT="$root" PUNTS_STUB_LOG="$log" \
-         bash "$PUNTS_ENRICH" 2>&1)"
+  fake_bin="$proj/bin"
+  call_log="$proj/claude-args.log"
+  install_fake_claude_structured "$fake_bin" \
+    "abc1230000000000000000000000000000000000" "$call_log"
 
-  assert_contains "$out" "enriched=1" "punts-enrich reports one enrichment"
-  # Promoted raw file is the structured ARRAY, not the envelope.
-  assert_eq "array" "$(jq -r 'type' "$root/.claude/punts/raw/s1-100-42.json")" \
-    "promoted raw file is the punt array"
-  assert_eq "p1" "$(jq -r '.[0].id' "$root/.claude/punts/raw/s1-100-42.json")" \
-    "promoted raw file holds the extracted punt row"
-  assert_contains "$(cat "$log")" "--json-schema" \
-    "punts-enrich claude call carries --json-schema"
-  assert_file_absent "$root/.claude/punts/state/slice-s1-100-42.jsonl" \
-    "consumed slice removed on success"
+  ( cd "$proj" && export PATH="$fake_bin:$PATH" && bash "$SCRIPTS_DIR/punts-enrich.sh" >/dev/null )
 
-  rm -rf "$root" "$d"
+  assert_eq "array" "$(jq -r 'type' "$PRIME_RAW" 2>/dev/null)" \
+    "enrich: promoted raw file is the structured punt array, not the Claude envelope"
+  first_id=$(jq -r '.[0].id // empty' "$PRIME_RAW" 2>/dev/null)
+  assert_eq "abc1230000000000000000000000000000000000" "$first_id" \
+    "enrich: regex-only file promoted to structured array"
+  assert_contains "$(cat "$call_log")" "--json-schema" \
+    "enrich: claude call carries --json-schema"
+  assert_file_absent "$PRIME_SLICE" "enrich: consumed slice file removed"
+  rm -rf "$proj"
 }
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_punts_enrich_promotes`
-Expected: FAIL — no `--json-schema` in the log, and the promoted raw file is the whole envelope (`type == "object"`), not the array.
+Run: `bash tests/punts/run-tests.sh 2>&1 | grep -A5 test_enrich_promotes_regex_only_to_structured`
+Expected: FAIL — no `--json-schema` in the log, and the promoted raw file is
+the whole Claude envelope (`type == "object"`) rather than the structured punt
+array.
 
 - [ ] **Step 3: Rewrite the punts-enrich call block**
 
@@ -743,18 +753,26 @@ Then replace the call block with:
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_punts_enrich_promotes`
+Run: `bash tests/punts/run-tests.sh 2>&1 | grep -A5 test_enrich_promotes_regex_only_to_structured`
 Expected: PASS — the promoted raw file is the array, and the call carries `--json-schema`.
 
 - [ ] **Step 5: Run the full suite (regression)**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | tail -3`
-Expected: `... tests run, 0 failed`.
+Run:
+
+```bash
+bash tests/punts/run-tests.sh 2>&1 | tail -3
+bash tests/spec2pr/run-tests.sh 2>&1 | tail -3
+```
+
+Expected: both suites report `... tests run, 0 failed`. The punts suite is the
+owner for `scripts/punts-enrich.sh`; the spec2pr suite still covers the shared
+runtime and ensures this change did not disturb the spec2pr pipeline.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/punts-enrich.sh tests/spec2pr/test-punts-enrich.sh
+git add scripts/punts-enrich.sh tests/punts/test-enrich.sh
 git commit -m "spec2pr: schema-bind the punts-enrich claude call via --json-schema"
 ```
 
