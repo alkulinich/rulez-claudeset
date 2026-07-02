@@ -1,136 +1,120 @@
 # Handoff
 
 ## Task
-Two threads this session:
-1. **Investigate** a `spec2pr` halt on the unattended dogfood box (`rulez@dogfood`,
-   repo `~/barevibe-ETL` = `alkulinich/dc-import-2026`). The run
-   `spec2pr.sh --implementer claude:sonnet
-   docs/superpowers/specs/2026-07-01-leaseweb-bundle-first-base-recovery-design.md`
-   halted with `SPEC2PR HALT implement: claude implement returned invalid result`,
-   and publish-on-halt then failed to push. Find root cause, recover the box.
-2. **Design a fix** for the underlying bug (spec2pr's claude implement stage does
-   not compose with subagent-driven-development in headless mode), via the
-   brainstorm→spec flow. Deliver = user's call.
+Two things this session, both in `rulez-claudeset`
+(`/Users/rulez/Dropbox/Projects/26.03-shared-tools`, GitHub `alkulinich/rulez-claudeset`):
+1. **Merge PR #29** — the headless-SDD implement fix (ceiling=0 +
+   `SPEC2PR_IMPLEMENT_TIMEOUT` + prompt hardening) designed last session.
+2. **Research + design a v2 hardening**: the user suspected the `claude -p` +
+   subagent + background-wait-timeout trap is not unique to us. Research the web
+   for better fixes, then design a v2. Outcome: a spec to **schema-bind every
+   structured claude call** with `--json-schema`. Deliver = user chose spec →
+   committed + pushed.
 
 ## Current State
-- **This repo** (`rulez-claudeset`, `/Users/rulez/Dropbox/Projects/26.03-shared-tools`),
-  branch `main`, HEAD `6a4b795`, synced with `origin/main`.
-- **Fix is DESIGNED, not implemented.** Spec committed + pushed:
-  `docs/superpowers/specs/2026-07-01-spec2pr-headless-sdd-implement-design.md`
-  (`6a4b795`). No code changed in `scripts/` yet.
-- **Dogfood box recovered and clean.** `~/barevibe-ETL` `main` = `origin/main`
-  = `10611a5` (carries the leaseweb spec-review-fixed spec + generated plan). All
-  stale spec2pr state for the leaseweb run was removed — it is a clean slate, ready
-  for a fresh codex run. (`.claude/settings.local.json` is locally modified there —
-  unrelated, left untouched.)
-
-## What Worked
-- **Root cause (leaseweb halt).** Evidence from the run's meta dir
-  (`/home/rulez/.rulez-claudeset/spec2pr/barevibe-etl-2026-07-01-leaseweb-bundle-first-base-recovery-design/`):
-  - `implement.envelope.json` `.result` = the prose `"Task 2 implementer
-    dispatched. Waiting for completion."` (not JSON); `origin:{"kind":
-    "task-notification"}`; `modelUsage` shows both `claude-sonnet-4-6` (controller)
-    and `claude-haiku-4-5` (a dispatched sub-implementer).
-  - `implement.stderr`: `Background tasks still running after 600s; terminating.`
-  - `implement.json` = 0 bytes.
-  - Chain: the `claude:sonnet` implement prompt uses subagent-driven-development,
-    which dispatches per-task subagents. In headless `claude -p` those run as
-    background tasks; the print-mode background-wait ceiling
-    (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, 600s) killed them; the parent had
-    already yielded with interim prose; spec2pr's `implement_json_valid` rejected
-    it and halted, resetting the worktree to `CALL_START_HEAD` (guard worked as
-    designed — nothing half-done kept). Only the **claude** implementer is
-    affected; **codex** (`codex exec --output-schema`, single schema-bound agent,
-    no fan-out) is immune. Every working headless-claude stage (plan/spec-review/
-    forecast) uses a self-contained skill.
-- **Box git reconcile.** publish-on-halt had committed the spec+plan to LOCAL
-  `main` (`08824df`) but its push was rejected ("fetch first") because GitHub
-  `main` advanced during the ~29-min run. Fetched, confirmed disjoint files
-  (remote added only `546fa01` HANDOFF; local touched only the leaseweb plan+spec),
-  stashed `settings.local.json`, `git rebase origin/main` (conflict-free) →
-  `10611a5`, pushed (`546fa01..10611a5`), popped stash.
-- **Clean-slate for codex retry.** Verified via `spec2pr.sh` preflight (lines
-  ~210-268) that a re-run would halt: recorded `source-sha256` = the *original*
-  spec but `main` now has the spec-review-*edited* spec → "source spec changed
-  since import"; and recorded implementer `claude/sonnet` blocks a codex run. So
-  removed all stale state: `git worktree remove --force
-  ~/.worktrees/barevibe-etl-2026-07-01-leaseweb-bundle-first-base-recovery-design`
-  + `worktree prune`, `git branch -D
-  spec2pr/2026-07-01-leaseweb-bundle-first-base-recovery-design`,
-  `rm -rf` the meta dir + `.status`. Nothing unique lost (spec+plan on `main`).
-- **Fix designed.** brainstorming skill → house-style spec (9,072 bytes). Two
-  user forks decided by AskUserQuestion: (a) *keep SDD, make it survive headless*
-  (not replace with inline); (b) *outer wall-clock timeout + ceiling=0*. Spec
-  self-review clean; committed direct to main (doc-only; user delegated
-  main-vs-branch; matches spec2pr-flow where specs live on main).
-
-## What Didn't Work
-- The original `--implementer claude:sonnet` leaseweb run — see root cause above.
-  Not retried this session (user chose to hold off, then design the fix).
-- Note: this is NOT a spec2pr code defect. The halt + worktree reset is correct
-  defensive behavior. The bug is a composition mismatch (fan-out skill inside a
-  single headless print-mode call with a 600s bg ceiling).
-
-## Next Steps
-Ordered; none are blocking each other.
-1. **(User-triggered) Retry the leaseweb spec with codex on dogfood.** Box is
-   clean/ready. Codex is immune to the bug:
-   ```bash
-   cd ~/barevibe-ETL && ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh \
-     docs/superpowers/specs/2026-07-01-leaseweb-bundle-first-base-recovery-design.md
-   ```
-   (default implementer = codex; no flag needed). Fresh run re-imports the fixed
-   spec, re-reviews (should pass), re-plans, implements via codex, opens a PR.
-2. **Implement the headless-SDD fix.** Spec:
-   `docs/superpowers/specs/2026-07-01-spec2pr-headless-sdd-implement-design.md`.
-   Do NOT split it (see Key Decisions). Deliver via either: dogfood spec2pr with
-   **codex** (publish spec → spec2pr writes plan + implements + PR; codex immune),
-   or manual writing-plans + subagent-driven-development → PR (how atomic-chains,
-   PR #28, shipped). Expect a ~2-3 task TDD plan:
-   - runtime plumbing: `run_claude_json`/`claude_json_attempt` gain an optional
-     `timeout_secs` arg; when set, prefix `timeout -k 30 <secs>` (detect
-     `timeout`→`gtimeout`→unwrapped) and export
-     `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for that subshell only. Files:
-     `scripts/lib/spec2pr-runtime.sh` (~460-493).
-   - implement call-site: pass `SPEC2PR_IMPLEMENT_TIMEOUT` (default 1800s) at the
-     `run_claude_json implement` call, and add 3 directives to the
-     `implement.claude.prompt` here-doc (wait for all subagents; do NOT invoke
-     finishing-a-development-branch; final message = ONLY the
-     `{status,summary,blocked_reason}` JSON). Files: `scripts/spec2pr.sh`
-     (~728-754).
-   - tests: `tests/spec2pr/` stub-driven (timeout→clean halt; ceiling env reaches
-     implement not plan/pr-review; prompt directives present; unwrapped degrade).
-3. **(Deferred, out of scope of the spec)** Optional JSON-fallback: if the parent
-   still returns non-JSON but the worktree gained commits + tests pass, treat as
-   done. A larger, separate change.
-4. **VERSION/UPGRADE.md bump** when the fix ships (minor: opt-in-by-config,
-   backward-compatible). Deferred per the "Defer the bump" rule — do it in a
-   dedicated release step from whatever `main` then reads.
-
-## Key Decisions
-- **Keep subagent-driven-development; make it survive headless** (user's explicit
-  choice over replacing it with inline execution). Rationale: its per-task
-  fresh-reviewer TDD gate is worth keeping.
-- **ceiling=0 + outer wall-clock timeout** (`SPEC2PR_IMPLEMENT_TIMEOUT`, default
-  1800s), riding spec2pr's existing non-zero-exit → `clean_worktree_to` + `halt`
-  path (no new halt machinery; atomicity preserved). User's explicit choice over
-  "just raise the ceiling" or "indefinite, no bound".
-- **Prompt hardening is load-bearing with the ceiling fix.** Fixing only the
-  ceiling would let subagents finish but the parent could still end in
-  finishing-a-development-branch menu prose — one non-JSON return traded for
-  another. Both must change together.
-- **Do NOT `spec2pr-split` the fix spec.** 9,072 B << 32 KB size gate; forecast
-  well under 131,072. And the three edits are interdependent, touch the same two
-  files, and have no standalone testable value — the opposite of what split is
-  for (independent sub-specs, minimal shared files). Decompose at the PLAN level
-  (2-3 tasks in one spec), not by splitting the spec.
-- **codex is the safe implementer** for both the leaseweb retry and for
-  dogfooding this fix — single schema-bound agent, no subagent fan-out, immune to
-  the bug being fixed. Editing spec2pr's own source in a worktree is safe because
-  the running orchestrator is the installed copy, not the worktree copy.
-- **Commit trailer = co-author line only** (matching repo history `d444f1e`/
-  `e832c80`), not the harness's two-line default.
-- **Protected untracked paths never staged** (still present, untracked):
+- **Branch `main`**, HEAD `ff90c4b`, synced with `origin/main` (pushed).
+- **PR #29 merged** into main (`5 files +779 -9`), local+remote branch deleted,
+  remotes pruned. Verified green first: **1004/1004** spec2pr tests passed on the
+  PR head (run in a subagent). No CI on this repo — local suite is the only gate.
+- **v2 spec written, committed, pushed:**
+  `docs/superpowers/specs/2026-07-02-spec2pr-claude-json-schema-binding-design.md`
+  (`ff90c4b`, 13,359 bytes). **Not yet implemented** — no `scripts/` changes for
+  v2 yet. Spec is on `origin/main`, so a dogfood spec2pr run can pick it up.
+- Protected untracked paths still present/untracked (never staged):
   `references/`, `tmp/`, `docs/research-auto-handoff-at-context-threshold.md`,
   `docs/superpowers/specs/2026-06-29-spec2pr-chain-design.md`,
   `docs/superpowers/specs/2026-06-30-spec2pr-implementer-switch-design.md`.
+
+## What Worked
+- **PR #29 merge** via `git-merge-pr.sh 29 merge` after a subagent ran
+  `tests/spec2pr/run-tests.sh` on the PR branch (1004/1004, repo returned to main
+  clean). Merge touched `scripts/spec2pr.sh`, `scripts/lib/spec2pr-runtime.sh`,
+  `tests/spec2pr/stub-claude.sh`, `tests/spec2pr/test-implement-headless.sh`,
+  and the plan doc.
+- **Web research (3 parallel subagents + self-verification against primary docs).**
+  Confirmed verbatim from https://code.claude.com/docs/en/headless and
+  https://code.claude.com/docs/en/env-vars:
+  - In `claude -p`, background subagents ARE awaited, but that wait is **capped
+    at 10 min since v2.1.182**; `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` = wait
+    unlimited. (Our merged fix rests on this documented switch — validated.)
+  - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` makes subagents run
+    **synchronously/foreground** (a cleaner lever than ceiling=0) — user chose to
+    **defer** it this round.
+  - `--output-format json --json-schema <schema>` = **constrained decoding**
+    (grammar restricts token generation; model literally cannot emit
+    non-conforming tokens) and **composes with full agentic tool use** — the
+    agent uses tools, returns schema JSON in `.structured_output`. Reliability
+    fix landed in **claude 2.1.187** (2026-06-23).
+  - Community corroboration of the exact failure: GitHub #56540, #49150, #59962
+    (parallel Task fan-out under a non-TTY parent can deadlock; both closed
+    "not planned"). SDD dispatches serially, so we're mostly not exposed — but
+    the outer `timeout` is doing real work, not theater.
+  - superpowers `subagent-driven-development` is scoped in its SKILL.md to
+    "the current session" — never designed for `claude -p`; sibling
+    `executing-plans` is the inline, no-fan-out path. (obra/superpowers)
+- **v2 design (brainstorming skill → spec).** Inventoried every claude JSON call
+  and classified structured (schema-bindable) vs prose (must NOT touch):
+  - Schema-bind: `implement`, `forecast`, `pr-review classify` (all share
+    `claude_json_attempt`), `punts-enrich` (separate script).
+  - Leave alone: `plan`, `pr-review` round, `pr-review` fix (freeform prose);
+    `spec-review`/`plan-review` already run through `codex_call`.
+  - Exact result shapes captured from `implement_json_valid`,
+    `forecast_payload_valid`, the classify checks, and
+    `punts-extract-prompt.sh`; schemas written into the spec.
+
+## What Didn't Work
+- First spec commit attempt failed: backticks in the `-m "$(cat <<'EOF'…)"`
+  message were eval'd inside command substitution (`unexpected EOF`). Fixed by
+  committing with `git commit -F <msgfile>` (message file in scratchpad). File
+  was already correctly staged; only the commit re-ran.
+
+## Next Steps
+Ordered; none blocking.
+1. **Write the implementation plan** for the v2 spec (writing-plans skill). It is
+   NOT to be split (13 KB << 32 KB gate; cohesive; core-plus-dependents). Plan =
+   ~3 TDD tasks in one spec:
+   - **Task 1 (core):** `schema_name` param on `claude_json_attempt` /
+     `run_claude_json`; new `spec2pr_schema <name>` helper (case → JSON for
+     implement/forecast/classify); on success normalize
+     `.result = .structured_output` via one `jq`. Files:
+     `scripts/lib/spec2pr-runtime.sh` (~482-531). + tests.
+   - **Task 2:** pass schema names at the three call sites — implement
+     (`scripts/spec2pr.sh` ~748), forecast (`forecast_claude_attempt` ~1388),
+     classify (`scripts/lib/pr-review-engine.sh` ~163). Assert flag present for
+     these, absent for plan/pr-review/fix; normalization end-to-end.
+   - **Task 3:** `punts-enrich.sh` (~72) `--json-schema` + inline array schema +
+     local `.structured_output` normalization; `check-deps.sh` non-fatal
+     `claude >= 2.1.187` advisory. + tests.
+   - Tests: `tests/spec2pr/` stub-driven; `stub-claude.sh` must accept
+     `--json-schema <file>` and emit `.structured_output`.
+2. **Deliver v2** via either dogfood spec2pr with **codex** (spec already on
+   origin/main; `cd ~/barevibe-ETL`-style, but this repo is
+   `alkulinich/rulez-claudeset` — run from a clone) or manual writing-plans +
+   subagent-driven-development → PR (how #29 shipped).
+3. **(User-triggered, still open) leaseweb codex retry** on the dogfood box
+   (`rulez@dogfood`, `~/barevibe-ETL`): `spec2pr.sh docs/.../2026-07-01-leaseweb-
+   bundle-first-base-recovery-design.md` (default codex; immune). Won't exercise
+   the claude fixes.
+4. **Deferred:** `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` lever; VERSION/UPGRADE
+   bump when v2 ships (minor, backward-compatible, opt-in-per-call).
+
+## Key Decisions
+- **`--json-schema` enforces SHAPE only; the `*_valid` validators STAY** as the
+  semantic gate (sha matching, forecast arithmetic, exact-key sets — not
+  expressible in JSON Schema). The schema just stops prose-instead-of-JSON.
+- **Opt-in per call via `schema_name`, never tag-inferred** — a prose call can
+  never be schema-bound by accident.
+- **One normalization line, zero extraction-site edits.** Downstream parsers
+  already handle an object-valued `.result` (`if (.result|type)=="object" …`),
+  so setting `.result = .structured_output` in `claude_json_attempt` needs no
+  other changes.
+- **Scope = all four structured calls** (incl. punts-enrich); prose calls
+  untouched. **Compat = assume support + floor claude ≥ 2.1.187 + check-deps
+  advisory** (user's explicit choices via AskUserQuestion).
+- **Do NOT split the v2 spec** (size + cohesion). Decompose at plan level.
+- **Merged implement fix stays** — ceiling=0 + timeout solve the subagent-WAIT
+  problem, orthogonal to output shape; both changes are complementary.
+- **codex is the safe implementer** for dogfooding this fix (single schema-bound
+  agent, no fan-out).
+- **Commit trailer = co-author line only**
+  (`Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`).
