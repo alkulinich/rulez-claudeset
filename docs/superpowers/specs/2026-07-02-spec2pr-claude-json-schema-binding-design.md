@@ -188,7 +188,7 @@ run the existing validation / `mv` on that extracted array:
 ```bash
 if "$CLAUDE_BIN" -p "$prompt" --output-format json --max-turns 1 \
      --json-schema "$schema_json" > "$raw_file.envelope.tmp" 2>/dev/null \
-   && jq -e '.structured_output | type == "array"' \
+   && jq -e '.structured_output | select(type == "array")' \
         "$raw_file.envelope.tmp" > "$raw_file.tmp" 2>/dev/null \
    && jq -e . "$raw_file.tmp" >/dev/null 2>&1; then
   mv "$raw_file.tmp" "$raw_file"
