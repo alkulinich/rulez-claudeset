@@ -160,7 +160,7 @@ Review:
 $(cat "$review_file")
 EOF
         set +e
-        claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
+        claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json" "" "" classify
         classify_rc=$?
         set -e
         after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"

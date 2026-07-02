@@ -172,7 +172,7 @@ test_review_pr_codex_fixer_prompt_includes_prior_round_history() {
 printf '{"result":"BLOCKER: R1_REVIEWER_FINDING_ALPHA. Evidence: review-fix-r1.txt absent."}'
 EOF
   enqueue_claude 01-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue 01-pr-fix <<'EOF'
 printf 'round 1 fix\n' > review-fix-r1.txt
@@ -182,7 +182,7 @@ EOF
 printf '{"result":"MAJOR: R2_REVIEWER_FINDING_BRAVO. Evidence: review-fix-r2.txt absent."}'
 EOF
   enqueue_claude 02-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":1}}'
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
 EOF
   enqueue 02-pr-fix <<'EOF'
 printf 'round 2 fix\n' > review-fix-r2.txt
@@ -192,7 +192,7 @@ EOF
 printf '{"result":"No blocker or major findings."}'
 EOF
   enqueue_claude 03-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_review_pr "$PR_NUMBER"
 
@@ -218,7 +218,7 @@ test_review_pr_fixer_history_skips_missing_prior_metadata() {
 printf '{"result":"BLOCKER: MISSING_META_R1_FINDING. Evidence: missing-meta-r1.txt absent."}'
 EOF
   enqueue_claude 01-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue 01-pr-fix <<'EOF'
 printf 'round 1 missing metadata fix\n' > missing-meta-r1.txt
@@ -229,7 +229,7 @@ rm -f "$SPEC2PR_HOME"/project-pr-*/pr-review-r1.fix
 printf '{"result":"MAJOR: MISSING_META_R2_FINDING. Evidence: missing-meta-r2.txt absent."}'
 EOF
   enqueue_claude 02-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":1}}'
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
 EOF
   enqueue 02-pr-fix <<'EOF'
 printf 'round 2 missing metadata fix\n' > missing-meta-r2.txt
@@ -239,7 +239,7 @@ EOF
 printf '{"result":"No blocker or major findings."}'
 EOF
   enqueue_claude 03-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_review_pr "$PR_NUMBER"
 
@@ -272,7 +272,7 @@ test_review_pr_cap_exits_dirty() {
 printf '{"result":"BLOCKER: CAP_R1_FINDING. Evidence: fix-01.txt missing."}'
 EOF
   enqueue_claude 01-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue 01-pr-fix <<'EOF'
 printf 'attempt 01\n' > fix-01.txt
@@ -282,7 +282,7 @@ EOF
 printf '{"result":"BLOCKER: CAP_R2_FINDING. Evidence: fix-02.txt missing."}'
 EOF
   enqueue_claude 02-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue 02-pr-fix <<'EOF'
 printf 'attempt 02\n' > fix-02.txt
@@ -292,7 +292,7 @@ EOF
 printf '{"result":"BLOCKER: CAP_R3_FINDING. Evidence: still missing."}'
 EOF
   enqueue_claude 03-pr-b-classify <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue 03-pr-fix <<'EOF'
 printf 'attempt 03\n' > fix-03.txt
@@ -550,7 +550,7 @@ EOF
 printf 'classifier commit\n' > classifier-commit.txt
 git add classifier-commit.txt
 git commit -qm 'classifier self-commit'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_review_pr "$PR_NUMBER"
 

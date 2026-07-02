@@ -74,7 +74,7 @@ EOF
 printf '{"result":"No blocker or major findings."}'
 EOF
   enqueue_claude "$pr_review_b" <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
 }
 

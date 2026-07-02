@@ -6,7 +6,7 @@ queue_clean_pr_review() {
 printf '{"result":"No blocker or major findings."}'
 EOF
   enqueue_claude "$1-b-classify" <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
 }
 
@@ -15,7 +15,7 @@ queue_dirty_pr_review() {
 printf '{"result":"BLOCKER: missing review fix. Evidence: review-fix.txt absent."}'
 EOF
   enqueue_claude "$1-b-classify" <<'EOF'
-printf '{"result":{"blockers_found":1,"majors_found":0}}'
+printf '{"result":"classified blocker review","structured_output":{"blockers_found":1,"majors_found":0}}'
 EOF
   enqueue "$1-fix" <<'EOF'
 printf 'review fix\n' > review-fix.txt
@@ -54,7 +54,7 @@ test_pr_review_verbose_prints_clean_review() {
 printf '{"result":"VERBOSE_CLEAN_PR_REVIEW"}'
 EOF
   enqueue_claude 06-pr-review-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   SPEC2PR_VERBOSE=1 run_spec2pr "$SPEC"
 
@@ -117,7 +117,7 @@ test_pr_review_fix_schema_violation_halts() {
 printf '{"result":"MAJOR: missing review fix. Evidence: review-fix.txt absent."}'
 EOF
   enqueue_claude 06-pr-review-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":1}}'
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
 EOF
   enqueue 06-pr-review-fix <<'EOF'
 printf 'review fix\n' > review-fix.txt
@@ -142,7 +142,7 @@ test_pr_review_fix_self_commit_halts() {
 printf '{"result":"MAJOR: missing review fix. Evidence: review-fix.txt absent."}'
 EOF
   enqueue_claude 06-pr-review-b-classify <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":1}}'
+printf '{"result":"classified major review","structured_output":{"blockers_found":0,"majors_found":1}}'
 EOF
   enqueue 06-pr-review-fix <<'EOF'
 printf 'review fix\n' > review-fix.txt
@@ -187,7 +187,7 @@ printf '{"result":"No issues."}'
 EOF
   enqueue_claude 06-pr-review-b-classify <<'EOF'
 printf 'classifier edit\n' > classifier-edit.txt
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_spec2pr "$SPEC"
 
@@ -195,7 +195,7 @@ EOF
   assert_contains "$OUT" "SPEC2PR HALT pr-review: classifier modified worktree" "classifier edit halt"
 }
 
-test_pr_review_malformed_classifier_retries_once() {
+test_pr_review_malformed_classifier_embedded_json_halts_after_retry() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
@@ -213,9 +213,10 @@ printf '%s' '{"result":"Here: {\"blockers_found\":0,\"majors_found\":0}"}'
 EOF
   run_spec2pr "$SPEC"
 
-  assert_eq "0" "$RC" "malformed classifier retry exits 0"
+  assert_eq "1" "$RC" "malformed classifier embedded JSON retry exits 1"
   assert_eq "5" "$(claude_calls)" "classifier malformed reply retried once after claude plan + forecast"
-  assert_contains "$OUT" "SPEC2PR DONE" "retry still finishes done"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: classifier returned malformed JSON" \
+    "embedded JSON without structured output still halts"
 }
 
 test_pr_review_fractional_classifier_count_retries_once() {
@@ -229,10 +230,10 @@ test_pr_review_fractional_classifier_count_retries_once() {
 printf '{"result":"No issues."}'
 EOF
   enqueue_claude 06-pr-review-b-classify-bad <<'EOF'
-printf '{"result":{"blockers_found":0.5,"majors_found":0}}'
+printf '{"result":"classified fractional review","structured_output":{"blockers_found":0.5,"majors_found":0}}'
 EOF
   enqueue_claude 06-pr-review-c-classify-good <<'EOF'
-printf '{"result":{"blockers_found":0,"majors_found":0}}'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 EOF
   run_spec2pr "$SPEC"
 
