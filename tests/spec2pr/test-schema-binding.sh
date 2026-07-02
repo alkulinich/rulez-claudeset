@@ -38,6 +38,12 @@ printf '{"result":"classified clean review","structured_output":{"blockers_found
 EOF
 }
 
+q_claude_classify_structured_string() {
+  enqueue_claude "$1" <<'EOF'
+printf '%s' '{"result":"classified string review","structured_output":"{\"blockers_found\":0,\"majors_found\":0}"}'
+EOF
+}
+
 q_claude_impl_no_structured() {
   enqueue_claude "$1" <<'EOF'
 printf 'scratch\n' > leftover-scratch.txt
@@ -148,6 +154,30 @@ EOF
     "plan prose call does not carry --json-schema"
   assert_not_contains "$(_claude_argline 06-pr-review-a-review.sh)" "--json-schema" \
     "pr-review prose call does not carry --json-schema"
+}
+
+test_classify_string_structured_output_is_malformed() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  q_claude_forecast_structured 04-forecast
+  queue_spec2pr_subject_implementation_commit 05-implement
+  enqueue_claude 06-pr-review-a-review <<'EOF'
+printf '{"result":"No blocker or major findings."}'
+EOF
+  q_claude_classify_structured_string 06-pr-review-b-classify-string
+  enqueue_claude 06-pr-review-c-classify-bad <<'EOF'
+printf '{"result":"not json"}'
+EOF
+  run_spec2pr "$SPEC"
+
+  assert_eq "1" "$RC" "string structured classify output exits 1 after retry"
+  assert_contains "$(_claude_argline 06-pr-review-b-classify-string.sh)" "--json-schema" \
+    "string structured classify call carries --json-schema"
+  assert_contains "$OUT" "SPEC2PR HALT pr-review: classifier returned malformed JSON" \
+    "string structured output is not accepted as clean"
+  assert_eq "5" "$(claude_calls)" "string structured classifier reply is retried"
 }
 
 test_pr_review_fix_prose_call_does_not_carry_flag() {
