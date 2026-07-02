@@ -495,12 +495,12 @@ test_classify_carries_flag_and_prose_calls_do_not() {
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
   q_claude_forecast_structured 04-forecast
-  q_claude_impl_structured_done 05-implement
+  queue_spec2pr_subject_implementation_commit 05-implement
   enqueue_claude 06-pr-review-a-review <<'EOF'
 printf '{"result":"No blocker or major findings."}'
 EOF
   q_claude_classify_structured 06-pr-review-b-classify
-  run_spec2pr --implementer claude "$SPEC"
+  run_spec2pr "$SPEC"
   assert_eq "0" "$RC" "claude-reviewer + classify run reaches done"
 
   assert_contains "$(_claude_argline 06-pr-review-b-classify.sh)" "--json-schema" \
@@ -510,12 +510,31 @@ EOF
   assert_not_contains "$(_claude_argline 06-pr-review-a-review.sh)" "--json-schema" \
     "pr-review round stays prose (no --json-schema)"
 }
+
+test_pr_review_fix_prose_call_does_not_carry_flag() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  q_claude_forecast_structured 04-forecast
+  q_claude_impl_structured_done 05-implement
+  queue_dirty_codex_pr_review 06-pr-review
+  queue_claude_pr_fix 06-pr-review
+  q_codex_pr_clean 07-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+  assert_eq "0" "$RC" "claude-fixer run reaches done"
+
+  assert_not_contains "$(_claude_argline 06-pr-review-claude-fix.sh)" "--json-schema" \
+    "pr-review fix stays prose (no --json-schema)"
+}
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_classify_carries_flag_and_prose`
 Expected: FAIL — classify argline lacks `--json-schema` (and, before the fix, classify consumed `.result` not `.structured_output`, so with a structured-only fixture it would halt "classifier returned malformed JSON").
+Also run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_pr_review_fix_prose_call_does_not_carry_flag`
+Expected: PASS before and after the classify change — it locks the third prose claude call (`pr-review-r1.fix`) to the no-schema contract.
 
 - [ ] **Step 3: Pass `classify` at the classify call site**
 
@@ -535,6 +554,8 @@ to:
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_classify_carries_flag_and_prose`
 Expected: PASS — classify carries `--json-schema`, plan and pr-review round do not.
+Also re-run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A3 test_pr_review_fix_prose_call_does_not_carry_flag`
+Expected: PASS — pr-review fix still has no `--json-schema`.
 
 - [ ] **Step 5: Update existing classifier fixtures**
 
@@ -839,6 +860,7 @@ test_check_deps_claude_too_old_warns() {
   _mk_dep_stubdir_ver "$d" "context7  https://mcp.context7.com/mcp" "2.1.100 (Claude Code)"
   out="$(PATH="$d:$PATH" bash "$CHECK_DEPS" 2>&1)"
   assert_contains "$out" "2.1.187" "old claude => version advisory names the floor"
+  assert_contains "$out" "punts-enrich" "old claude => advisory names every schema-bound claude caller"
   assert_contains "$out" "spec2pr dependencies present" \
     "old claude advisory does not mark dependencies missing"
   rm -rf "$d"
@@ -876,8 +898,8 @@ EOF
     if [ "$cv_maj" -lt 2 ] \
        || { [ "$cv_maj" -eq 2 ] && [ "$cv_min" -lt 1 ]; } \
        || { [ "$cv_maj" -eq 2 ] && [ "$cv_min" -eq 1 ] && [ "$cv_pat" -lt 187 ]; }; then
-      warn "claude $claude_ver is below 2.1.187 — spec2pr's schema-bound claude"
-      warn "  implement, forecast, and pr-review calls need >= 2.1.187 for --json-schema."
+      warn "claude $claude_ver is below 2.1.187 — schema-bound claude calls"
+      warn "  implement, forecast, pr-review classify, and punts-enrich need >= 2.1.187 for --json-schema."
     fi
   fi
 ```
@@ -912,7 +934,7 @@ git commit -m "spec2pr: advise claude >= 2.1.187 for schema-bound output in chec
 - §"The merged implement fix stays" → Global Constraints preserve ceiling env/timeout; call site keeps `IMPLEMENTER_MODEL`/`SPEC2PR_IMPLEMENT_TIMEOUT`. ✓
 - §The change 1-5 → Tasks 1-5 respectively. ✓
 - §Edge cases: absent `.structured_output` → clean halt rc 3 (Task 1 Steps 4 + the missing-structured test); normalization no-op without schema (Task 1, arg inert — regression steps); schema subset (spec2pr_schema uses only the safe subset); atomicity via `clean_worktree_to` (unchanged). ✓
-- §Testing: stub learns `--json-schema` (Task 1 Step 7); flag present for four / absent for three (Tasks 1-4 present + Task 3 absent asserts); normalization (Tasks 1-4); missing → halt (Task 1); punts-enrich (Task 4); regression (every task's full-suite step). ✓
+- §Testing: stub learns `--json-schema` (Task 1 Step 7); flag present for four / absent for three (Tasks 1-4 present + Task 3 asserts plan/round/fix absent); normalization (Tasks 1-4); missing → halt (Task 1); punts-enrich (Task 4); regression (every task's full-suite step). ✓
 - §Out of scope: VERSION/UPGRADE.md, codex path, `*_valid` semantics, `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` — none touched. ✓
 
 **Placeholder scan:** the plan names the existing fixture files that must move payloads from `.result` to `.structured_output` and shows the replacement payload shapes. No code step ships a TODO or an unshown implementation.
