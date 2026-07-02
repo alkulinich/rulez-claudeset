@@ -177,9 +177,28 @@ Its call is a single-turn extraction (`--max-turns 1`, no subagents) — the ide
 case for schema binding. Write an inline array schema to a temp file, compact it
 with `schema_json="$(jq -c . "$schema_file")"`, pass
 `--json-schema "$schema_json"`, and read the result from `.structured_output`
-(this script does not source the runtime, so it applies the same
-`.result = .structured_output` normalization locally before the existing
-`jq -e .` validation / `mv`). Schema:
+(this script does not source the runtime, and its raw-file contract is the
+structured punt array itself, not a Claude envelope). Write the Claude envelope
+to a separate temp file, extract `.structured_output` to `$raw_file.tmp`, then
+run the existing validation / `mv` on that extracted array:
+
+```bash
+if "$CLAUDE_BIN" -p "$prompt" --output-format json --max-turns 1 \
+     --json-schema "$schema_json" > "$raw_file.envelope.tmp" 2>/dev/null \
+   && jq -e '.structured_output | type == "array"' \
+        "$raw_file.envelope.tmp" > "$raw_file.tmp" 2>/dev/null \
+   && jq -e . "$raw_file.tmp" >/dev/null 2>&1; then
+  mv "$raw_file.tmp" "$raw_file"
+  rm -f "$raw_file.envelope.tmp"
+  rm -f "$slice_file"
+  enriched=$((enriched + 1))
+else
+  rm -f "$raw_file.tmp" "$raw_file.envelope.tmp"
+  failed=$((failed + 1))
+fi
+```
+
+Schema:
 ```json
 { "type": "array", "items": {
   "type": "object", "additionalProperties": false,
@@ -245,8 +264,10 @@ Stub-driven, matching the suite's `SPEC2PR_CLAUDE_BIN` stub pattern:
 - **`.structured_output` missing → halt.** A schema-bound stub that omits
   `.structured_output` and returns prose in `.result` halts cleanly with the
   worktree reset.
-- **punts-enrich.** A stub run asserts `--json-schema` is passed and the array
-  is read from `.structured_output`.
+- **punts-enrich.** A stub run emits a Claude JSON envelope with prose in
+  `.result` and the array only in `.structured_output`; assert
+  `--json-schema` is passed and the promoted raw file is the structured array,
+  not the envelope.
 - **Regression.** The full existing suite passes unchanged (no schema name → the
   new arg is inert for every current caller and for codex).
 
