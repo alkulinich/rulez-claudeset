@@ -35,6 +35,46 @@ failed=0
 skipped_no_slice=0
 already_structured=0
 
+PUNTS_SCHEMA_JSON="$(jq -c . <<'JSON'
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "session_id",
+      "session_ended_at",
+      "branch",
+      "evidence_quote",
+      "context_quote",
+      "claim",
+      "files_mentioned",
+      "regex_hit",
+      "source",
+      "subagent_confidence"
+    ],
+    "properties": {
+      "id": { "type": "string" },
+      "session_id": { "type": "string" },
+      "session_ended_at": { "type": "string" },
+      "branch": { "type": "string" },
+      "evidence_quote": { "type": "string" },
+      "context_quote": { "type": "string" },
+      "claim": { "type": "string" },
+      "files_mentioned": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "regex_hit": { "type": "string" },
+      "source": { "type": "string", "enum": ["marker", "regex"] },
+      "subagent_confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+    }
+  }
+}
+JSON
+)"
+
 for raw_file in "$RAW_DIR"/*.json; do
   [ -f "$raw_file" ] || continue
 
@@ -69,14 +109,15 @@ for raw_file in "$RAW_DIR"/*.json; do
 
   prompt="$(bash "$SCRIPT_DIR/punts-extract-prompt.sh" "$slice_file" "$session_id" "$regex_hits")"
 
-  if "$CLAUDE_BIN" -p "$prompt" --output-format json --max-turns 1 \
-       > "$raw_file.tmp" 2>/dev/null \
+  if "$CLAUDE_BIN" -p "$prompt" --output-format json --max-turns 1 --json-schema "$PUNTS_SCHEMA_JSON" \
+       > "$raw_file.envelope.tmp" 2>/dev/null \
+     && jq -e '.structured_output | select(type == "array")' "$raw_file.envelope.tmp" > "$raw_file.tmp" 2>/dev/null \
      && jq -e . "$raw_file.tmp" >/dev/null 2>&1; then
     mv "$raw_file.tmp" "$raw_file"
-    rm -f "$slice_file"
+    rm -f "$raw_file.envelope.tmp" "$slice_file"
     enriched=$((enriched + 1))
   else
-    rm -f "$raw_file.tmp"
+    rm -f "$raw_file.envelope.tmp" "$raw_file.tmp"
     failed=$((failed + 1))
   fi
 done

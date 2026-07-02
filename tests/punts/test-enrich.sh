@@ -2,28 +2,34 @@
 # Tests for scripts/punts-enrich.sh — the deferred-subagent path that promotes
 # regex-only raw files to structured rows.
 
-# Helper: install a fake `claude` binary that emits a structured array.
+# Helper: install a fake `claude` binary that emits a Claude JSON envelope with
+# structured output only in `.structured_output`.
 install_fake_claude_structured() {
-  local bin_dir="$1" id="$2"
+  local bin_dir="$1" id="$2" log_file="${3:-}"
   mkdir -p "$bin_dir"
   cat > "$bin_dir/claude" <<EOF
 #!/usr/bin/env bash
+[ -n "$log_file" ] && printf 'CLAUDE_ARGS=%s\n' "\$*" >> "$log_file"
 cat <<JSON
-[
-  {
-    "id": "$id",
-    "session_id": "fake",
-    "session_ended_at": "2026-05-06T14:30:00Z",
-    "branch": "main",
-    "evidence_quote": "pre-existing bug",
-    "context_quote": "...",
-    "claim": "auth bug",
-    "files_mentioned": [],
-    "regex_hit": "pre-existing",
-    "source": "regex",
-    "subagent_confidence": "medium"
-  }
-]
+{
+  "type": "result",
+  "result": "I found one punt in the slice.",
+  "structured_output": [
+    {
+      "id": "$id",
+      "session_id": "fake",
+      "session_ended_at": "2026-05-06T14:30:00Z",
+      "branch": "main",
+      "evidence_quote": "pre-existing bug",
+      "context_quote": "...",
+      "claim": "auth bug",
+      "files_mentioned": [],
+      "regex_hit": "pre-existing",
+      "source": "regex",
+      "subagent_confidence": "medium"
+    }
+  ]
+}
 JSON
 EOF
   chmod +x "$bin_dir/claude"
@@ -49,18 +55,32 @@ EOF
 }
 
 test_enrich_promotes_regex_only_to_structured() {
-  local proj fake_bin first_id
+  local proj fake_bin call_log first_id raw_type
   proj="$(make_temp_project)"
   prime_regex_only_pair "$proj" "session-enrich-001" 12345 999
 
   fake_bin="$proj/bin"
-  install_fake_claude_structured "$fake_bin" "abc1230000000000000000000000000000000000"
+  call_log="$proj/claude-calls.txt"
+  install_fake_claude_structured "$fake_bin" "abc1230000000000000000000000000000000000" "$call_log"
 
   ( cd "$proj" && export PATH="$fake_bin:$PATH" && bash "$SCRIPTS_DIR/punts-enrich.sh" >/dev/null )
+
+  raw_type=$(jq -r 'type' "$PRIME_RAW" 2>/dev/null)
+  assert_eq "array" "$raw_type" \
+    "enrich: promoted raw file is structured punt array, not Claude envelope"
 
   first_id=$(jq -r '.[0].id // empty' "$PRIME_RAW" 2>/dev/null)
   assert_eq "abc1230000000000000000000000000000000000" "$first_id" \
     "enrich: regex-only file promoted to structured array"
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if grep -q -- '--json-schema' "$call_log"; then
+    printf '  ok: enrich: claude called with --json-schema\n'
+  else
+    printf '  FAIL: enrich: claude was not called with --json-schema\n'
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
+
   assert_file_absent "$PRIME_SLICE" "enrich: consumed slice file removed"
   rm -rf "$proj"
 }
