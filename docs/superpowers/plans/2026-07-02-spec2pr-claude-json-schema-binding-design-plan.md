@@ -355,6 +355,7 @@ git commit -m "spec2pr: schema-bind the claude implement call via --json-schema"
 
 **Files:**
 - Modify: `scripts/lib/spec2pr-runtime.sh` (`forecast_claude_attempt` ~541-562)
+- Modify: `tests/spec2pr/test-chain.sh` (`queue_chain_spec` forecast fixture)
 - Test: `tests/spec2pr/test-schema-binding.sh`
 
 **Interfaces:**
@@ -447,10 +448,12 @@ Also update the direct forecast fixtures and expectations in `tests/spec2pr/test
 - `test_forecast_worktree_modification_is_cleaned_and_warns`: keep the worktree edit/commit, but put any JSON payload under `.structured_output` so the test reaches the existing worktree-modified rc `4` path rather than short-circuiting on missing `.structured_output`.
 - `test_forecast_regenerated_mismatch_warns_and_proceeds`: put the mismatched payload under `.structured_output` so the test continues to cover semantic validator rejection (`malformed forecast JSON`) instead of missing structured output.
 
+Also update `tests/spec2pr/test-chain.sh`'s `queue_chain_spec` forecast fixture so the forecast payload is emitted under `.structured_output` (with short prose in `.result`). The chain suite drives the real `forecast_claude_attempt`, so leaving this fixture as `.result`-only would make schema-bound forecast warn-skip instead of exercising the intended clean forecast path.
+
 - [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/lib/spec2pr-runtime.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/helpers.sh
+git add scripts/lib/spec2pr-runtime.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/helpers.sh tests/spec2pr/test-forecast.sh tests/spec2pr/test-chain.sh
 git commit -m "spec2pr: schema-bind the claude forecast call via --json-schema"
 ```
 
@@ -460,6 +463,7 @@ git commit -m "spec2pr: schema-bind the claude forecast call via --json-schema"
 
 **Files:**
 - Modify: `scripts/lib/pr-review-engine.sh` (classify `claude_json_attempt` ~163)
+- Modify: `tests/spec2pr/test-chain.sh` (`queue_chain_spec` classifier fixture)
 - Modify: `tests/spec2pr/test-pipeline.sh` (existing classifier fixtures)
 - Modify: `tests/spec2pr/test-review-pr.sh` (existing classifier fixtures)
 - Test: `tests/spec2pr/test-schema-binding.sh`
@@ -600,15 +604,25 @@ git commit -qm 'classifier edit'
 printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
 ```
 
+In `tests/spec2pr/test-chain.sh`, update `queue_chain_spec`'s `pr_review_b` fixture from a `.result` object to the schema-bound envelope form:
+
+```bash
+enqueue_claude "$pr_review_b" <<'EOF'
+printf '{"result":"classified clean review","structured_output":{"blockers_found":0,"majors_found":0}}'
+EOF
+```
+
+This chain helper is not covered by the shared `queue_clean_pr_review` helper, but it still drives the same schema-bound pr-review classifier path.
+
 - [ ] **Step 6: Run the full suite (regression)**
 
 Run: `bash tests/spec2pr/run-tests.sh 2>&1 | tail -3`
-Expected: `... tests run, 0 failed`. The existing classifier fixtures in `test-pipeline.sh` and `test-review-pr.sh` now emit count objects under `.structured_output`, while intentionally malformed classifier fixtures still exercise retry/halt behavior by omitting `.structured_output`.
+Expected: `... tests run, 0 failed`. The existing classifier fixtures in `test-pipeline.sh`, `test-review-pr.sh`, and `test-chain.sh` now emit count objects under `.structured_output`, while intentionally malformed classifier fixtures still exercise retry/halt behavior by omitting `.structured_output`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add scripts/lib/pr-review-engine.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/test-pipeline.sh tests/spec2pr/test-review-pr.sh
+git add scripts/lib/pr-review-engine.sh tests/spec2pr/test-schema-binding.sh tests/spec2pr/test-pipeline.sh tests/spec2pr/test-review-pr.sh tests/spec2pr/test-chain.sh
 git commit -m "spec2pr: schema-bind the pr-review classify call via --json-schema"
 ```
 
