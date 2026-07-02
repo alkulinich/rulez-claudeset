@@ -181,7 +181,8 @@ test_forecast_malformed_payload_warns_and_proceeds() {
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
   enqueue_claude 04-forecast <<'EOF'
-printf '{"result":{"verdict":"maybe"}}'
+jq -n --arg result "Malformed forecast payload." \
+  '{result:$result, structured_output:{verdict:"maybe"}}'
 EOF
   queue_spec2pr_subject_implementation_commit 05-implement
   queue_clean_pr_review 06-pr-review
@@ -192,14 +193,13 @@ EOF
   assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "malformed fail-soft reaches done"
 }
 
-test_forecast_recovers_fenced_json() {
+test_forecast_missing_structured_output_warns_and_proceeds() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
   queue_valid_planner 02-plan
   queue_clean_plan_review 03-plan-review
-  # A valid payload (same arithmetic as queue_clean_forecast) but wrapped in a
-  # prose preamble + a ```json fence, the way the model did on a real run. The
-  # extractor must recover it instead of warning "malformed forecast JSON".
+  # Schema-bound forecast requires structured_output; prose/fenced JSON in
+  # result is no longer recovered.
   enqueue_claude 04-forecast <<'EOF'
 plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
 spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
@@ -214,10 +214,12 @@ EOF
   queue_clean_pr_review 06-pr-review
   run_spec2pr "$SPEC"
 
-  assert_eq "0" "$RC" "fenced forecast JSON is recovered and run reaches done"
-  assert_contains "$OUT" "SPEC2PR OK forecast: fits est=" "recovered forecast reports fits"
-  assert_not_contains "$OUT" "malformed forecast JSON" "fenced JSON not treated as malformed"
-  assert_file_exists "$SPEC2PR_HOME/$ID/forecast.json" "forecast payload extracted from fence"
+  assert_eq "0" "$RC" "missing structured forecast output does not block the run"
+  assert_contains "$OUT" "SPEC2PR WARN forecast: invalid claude JSON; proceeding to implement" \
+    "missing structured output warns as invalid claude JSON"
+  assert_file_absent "$SPEC2PR_HOME/$ID/forecast.json" "missing structured output writes no forecast payload"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" \
+    "missing structured output still reaches done"
 }
 
 test_forecast_worktree_modification_is_cleaned_and_warns() {
@@ -229,7 +231,18 @@ test_forecast_worktree_modification_is_cleaned_and_warns() {
 printf 'sneaky\n' > sneaky.txt
 git add sneaky.txt
 git commit -qm "forecast should not commit"
-printf '{"result":{"verdict":"fits"}}'
+plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
+spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+est=$((cur_bytes + 40))
+jq -n \
+  --arg result "Forecast after modifying worktree." \
+  --arg plan_sha "$plan_sha" \
+  --arg spec_sha "$spec_sha" \
+  --argjson cur_bytes "$cur_bytes" \
+  --argjson est "$est" \
+  '{result:$result, structured_output:{plan_sha256:$plan_sha, spec_sha256:$spec_sha, current_diff_bytes:$cur_bytes, files:[{path:"version.txt", loc:1}], total_loc:1, implementation_est_bytes:40, est_bytes:$est, verdict:"fits"}}'
 EOF
   queue_spec2pr_subject_implementation_commit 05-implement
   queue_clean_pr_review 06-pr-review
@@ -381,7 +394,8 @@ test_forecast_regenerated_mismatch_warns_and_proceeds() {
   queue_clean_spec_review 06-spec-review
   queue_clean_plan_review 07-plan-review
   enqueue_claude 08-forecast <<'EOF'
-printf '{"result":{"plan_sha256":"WRONG","spec_sha256":"WRONG","current_diff_bytes":999999,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":1000039,"verdict":"fits"}}'
+jq -n --arg result "Mismatched forecast payload." \
+  '{result:$result, structured_output:{plan_sha256:"WRONG", spec_sha256:"WRONG", current_diff_bytes:999999, files:[{path:"version.txt", loc:1}], total_loc:1, implementation_est_bytes:40, est_bytes:1000039, verdict:"fits"}}'
 EOF
   queue_spec2pr_subject_implementation_commit 09-implement
   queue_clean_pr_review 10-pr-review

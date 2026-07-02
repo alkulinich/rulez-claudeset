@@ -633,7 +633,7 @@ forecast_claude_attempt() {
   local pre_head post_head rc
 
   pre_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  if claude_json_attempt "$tag" "$prompt_file" "$out"; then
+  if claude_json_attempt "$tag" "$prompt_file" "$out" "" "" forecast; then
     rc=0
   else
     rc=$?

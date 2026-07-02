@@ -15,6 +15,23 @@ jq -n \
 EOF
 }
 
+q_claude_forecast_structured() {
+  enqueue_claude "$1" <<'EOF'
+plan_sha="$(sha256sum docs/superpowers/plans/toy-spec-plan.md | awk '{print $1}')"
+spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
+base_sha="$(git merge-base origin/main HEAD)"
+cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
+est=$((cur_bytes + 40))
+jq -n \
+  --arg result "Forecast available in structured output." \
+  --arg plan_sha "$plan_sha" \
+  --arg spec_sha "$spec_sha" \
+  --argjson cur_bytes "$cur_bytes" \
+  --argjson est "$est" \
+  '{result:$result, structured_output:{plan_sha256:$plan_sha, spec_sha256:$spec_sha, current_diff_bytes:$cur_bytes, files:[{path:"version.txt", loc:1}], total_loc:1, implementation_est_bytes:40, est_bytes:$est, verdict:"fits"}}'
+EOF
+}
+
 q_claude_impl_no_structured() {
   enqueue_claude "$1" <<'EOF'
 printf 'scratch\n' > leftover-scratch.txt
@@ -73,4 +90,34 @@ test_implement_missing_structured_output_halts_clean() {
     "worktree clean after missing structured output"
   assert_not_contains "$(git -C "$wt" log --format=%s)" "spec2pr: implement scratch file" \
     "fixture commit discarded after missing structured output"
+}
+
+test_forecast_carries_json_schema_flag() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  q_claude_forecast_structured 04-forecast
+  q_claude_impl_structured_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+
+  assert_eq "0" "$RC" "schema-bound claude forecast reaches done"
+  assert_contains "$(_claude_argline 04-forecast.sh)" "--json-schema" \
+    "forecast call carries --json-schema"
+}
+
+test_forecast_consumes_structured_output() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  q_claude_forecast_structured 04-forecast
+  q_claude_impl_structured_done 05-implement
+  q_codex_pr_clean 06-pr-review
+  run_spec2pr --implementer claude "$SPEC"
+
+  assert_eq "0" "$RC" "structured forecast run reaches done"
+  assert_eq "fits" "$(jq -r '.verdict' "$SPEC2PR_HOME/$ID/forecast.json")" \
+    "forecast.json verdict comes from structured output"
 }

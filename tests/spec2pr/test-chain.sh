@@ -52,8 +52,13 @@ spec_sha="\$(sha256sum docs/superpowers/specs/$slug.md | awk '{print \$1}')"
 base_sha="\$(git merge-base origin/main HEAD)"
 cur_bytes="\$(git diff "\$base_sha...HEAD" | wc -c | tr -d ' ')"
 est=\$((cur_bytes + 40))
-printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"marker-$slug.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}}' \
-  "\$plan_sha" "\$spec_sha" "\$cur_bytes" "\$est"
+jq -n \
+  --arg result "Forecast fits." \
+  --arg plan_sha "\$plan_sha" \
+  --arg spec_sha "\$spec_sha" \
+  --argjson cur_bytes "\$cur_bytes" \
+  --argjson est "\$est" \
+  '{result:\$result, structured_output:{plan_sha256:\$plan_sha, spec_sha256:\$spec_sha, current_diff_bytes:\$cur_bytes, files:[{path:"marker-$slug.txt", loc:1}], total_loc:1, implementation_est_bytes:40, est_bytes:\$est, verdict:"fits"}}'
 EOF
   enqueue "$implement" <<EOF
 if [ -n "$prerequisite" ] && [ ! -f "$prerequisite" ]; then
