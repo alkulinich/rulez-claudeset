@@ -103,11 +103,14 @@ gain a trailing optional `schema_name`. When it is non-empty,
    `--json-schema "$schema_json"` to `claude_args`
    (alongside the existing `-p --output-format json --dangerously-skip-permissions`
    and any `--model`).
-3. After the call succeeds and the envelope parses as JSON, normalizes:
+3. After the call succeeds and the envelope parses as JSON, requires
+   `.structured_output` to be present, then normalizes:
    ```bash
-   jq 'if .structured_output != null then .result = .structured_output else . end' \
+   jq -e 'select(.structured_output != null) | .result = .structured_output' \
       "$out" > "$out.tmp" && mv "$out.tmp" "$out"
    ```
+   If `.structured_output` is absent, clean back to `CALL_START_HEAD` and
+   return `3` so callers treat the response as malformed.
 
 When `schema_name` is empty/absent the function is byte-for-byte its current
 self: no schema flag, no normalization. So `plan`, `pr-review` round, and
@@ -164,8 +167,8 @@ already enforces that "exceeds" requires them, so the schema avoids relying on
 
 ### 3. Call sites pass a schema name
 
-- `implement`: `run_claude_json implement "$cpf" "$out" "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT" implement`
-- `forecast`: inside `forecast_claude_attempt`, `claude_json_attempt "$tag" "$pf" "$out" "" "" forecast`
+- `implement`: `run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT" implement`
+- `forecast`: inside `forecast_claude_attempt`, `claude_json_attempt "$tag" "$prompt_file" "$out" "" "" forecast`
 - `classify`: `claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json" "" "" classify`
 
 The `""` positional padding for model/timeout matches the codebase's existing
@@ -230,9 +233,10 @@ forecast, and pr-review need it for schema-bound output.
   encode sha equality or the forecast arithmetic.
 - **`.structured_output` absent → clean halt, no new failure mode.** If a schema
   was requested but the envelope has no `.structured_output` (model never
-  produced it, or an unexpectedly old claude), `.result` is left untouched, the
-  existing extractor fails, and the stage halts exactly as it does today for
-  invalid JSON. No corruption, no partial commit.
+  produced it, or an unexpectedly old claude), `claude_json_attempt` cleans back
+  to `CALL_START_HEAD` and returns `3`; callers halt exactly as they do today
+  for invalid JSON. No corruption, no partial commit, and no fallback to a
+  legacy prose/`.result` payload for schema-bound calls.
 - **Normalization is a no-op without a schema.** The `.result =
   .structured_output` rewrite runs only when `schema_name` is set, so every
   prose call and the whole codex path are byte-unchanged.
