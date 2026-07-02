@@ -29,6 +29,19 @@ if command -v claude >/dev/null 2>&1; then
     warn "  add it once globally:  claude mcp add --transport http --scope user context7 https://mcp.context7.com/mcp --header 'CONTEXT7_API_KEY: <key>'"
     missing=1
   fi
+
+  claude_ver="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+  if [ -n "$claude_ver" ]; then
+    IFS=. read -r claude_major claude_minor claude_patch <<EOF
+$claude_ver
+EOF
+    if [ "$claude_major" -lt 2 ] || \
+      { [ "$claude_major" -eq 2 ] && [ "$claude_minor" -lt 1 ]; } || \
+      { [ "$claude_major" -eq 2 ] && [ "$claude_minor" -eq 1 ] && [ "$claude_patch" -lt 187 ]; }; then
+      warn "claude >= 2.1.187 recommended for schema-bound output; found $claude_ver."
+      warn "  affects implement, forecast, pr-review classify, and punts-enrich callers; advisory only."
+    fi
+  fi
 fi
 
 if [ "$missing" -eq 0 ]; then

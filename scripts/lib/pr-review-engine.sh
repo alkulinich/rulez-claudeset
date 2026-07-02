@@ -105,7 +105,7 @@ pr_review_engine_run() {
   fi
 
   local round review_prompt review_json review_file review_blockers review_majors status_reviewer
-  local classify_prompt classify_json classify_result classify_tmp
+  local classify_prompt classify_json classify_result
   local malformed attempt classify_rc b m fix_prompt fix_history_preamble after_model_head before_fix_head after_fix_head
 
   for round in $(seq 1 "$MAX_FIX_ROUNDS"); do
@@ -147,7 +147,6 @@ EOF
       classify_prompt="$META_DIR/pr-review-r$round.classify.prompt"
       classify_json="$META_DIR/pr-review-r$round.classify.json"
       classify_result="$META_DIR/pr-review-r$round.classify.result.json"
-      classify_tmp="$META_DIR/pr-review-r$round.classify.tmp"
       malformed=0
       for attempt in 1 2; do
         cat > "$classify_prompt" <<EOF
@@ -160,7 +159,7 @@ Review:
 $(cat "$review_file")
 EOF
         set +e
-        claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json"
+        claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json" "" "" classify
         classify_rc=$?
         set -e
         after_model_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
@@ -176,20 +175,12 @@ EOF
           malformed=1
           continue
         fi
-        if jq -e 'if (.result | type) == "object" then .result else (.result | tostring | fromjson?) end
+        if jq -e '.result
           | select(type=="object")
           | {blockers_found, majors_found}
           | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
           | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
             "$classify_json" > "$classify_result" 2>/dev/null; then
-          malformed=0
-          break
-        fi
-        jq -r '.result // empty' "$classify_json" | extract_json_object > "$classify_tmp" 2>/dev/null || true
-        if [ -s "$classify_tmp" ] && jq -e '{blockers_found, majors_found}
-            | select((.blockers_found|type)=="number" and .blockers_found == (.blockers_found | floor) and .blockers_found >= 0)
-            | select((.majors_found|type)=="number" and .majors_found == (.majors_found | floor) and .majors_found >= 0)' \
-            "$classify_tmp" > "$classify_result" 2>/dev/null; then
           malformed=0
           break
         fi

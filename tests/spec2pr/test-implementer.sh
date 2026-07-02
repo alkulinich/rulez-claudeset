@@ -61,13 +61,13 @@ q_claude_impl_done() {
 printf '1.0.0\n' > version.txt
 git add version.txt
 git commit -qm 'spec2pr: implement version file'
-printf '{"result":{"status":"done","summary":"implemented with claude","blocked_reason":""}}'
+printf '{"result":"implemented with claude","structured_output":{"status":"done","summary":"implemented with claude","blocked_reason":""}}'
 EOF
 }
 
 q_claude_impl_blocked() {
   enqueue_claude "$1" <<'EOF'
-printf '{"result":{"status":"blocked","summary":"blocked","blocked_reason":"missing API key"}}'
+printf '{"result":"blocked","structured_output":{"status":"blocked","summary":"blocked","blocked_reason":"missing API key"}}'
 EOF
 }
 
@@ -76,7 +76,7 @@ q_claude_impl_badschema() {
 printf '1.0.0\n' > version.txt
 git add version.txt
 git commit -qm 'spec2pr: implement version file'
-printf '{"result":{"status":"done","summary":"x","blocked_reason":"","extra":1}}'
+printf '{"result":"invalid implement object","structured_output":{"status":"done","summary":"x","blocked_reason":"","extra":1}}'
 EOF
 }
 

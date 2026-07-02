@@ -161,8 +161,13 @@ spec_sha="$(sha256sum docs/superpowers/specs/toy-spec.md | awk '{print $1}')"
 base_sha="$(git merge-base origin/main HEAD)"
 cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
 est=$((cur_bytes + 40))
-printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"version.txt","loc":1}],"total_loc":1,"implementation_est_bytes":40,"est_bytes":%s,"verdict":"fits"}}' \
-  "$plan_sha" "$spec_sha" "$cur_bytes" "$est"
+jq -n \
+  --arg result "Forecast fits." \
+  --arg plan_sha "$plan_sha" \
+  --arg spec_sha "$spec_sha" \
+  --argjson cur_bytes "$cur_bytes" \
+  --argjson est "$est" \
+  '{result:$result, structured_output:{plan_sha256:$plan_sha, spec_sha256:$spec_sha, current_diff_bytes:$cur_bytes, files:[{path:"version.txt", loc:1}], total_loc:1, implementation_est_bytes:40, est_bytes:$est, verdict:"fits"}}'
 EOF
 }
 
@@ -176,8 +181,15 @@ cur_bytes="$(git diff "$base_sha...HEAD" | wc -c | tr -d ' ')"
 total_loc=4000
 impl_bytes=$((total_loc * 40))
 est=$((cur_bytes + impl_bytes))
-printf '{"result":{"plan_sha256":"%s","spec_sha256":"%s","current_diff_bytes":%s,"files":[{"path":"big.ts","loc":%s}],"total_loc":%s,"implementation_est_bytes":%s,"est_bytes":%s,"verdict":"exceeds","summary":"Forecast exceeds diff limit. Recommended split: part-1 helpers; part-2 wiring + tests.","parts":["part-1: helpers + types","part-2: wiring + tests"]}}' \
-  "$plan_sha" "$spec_sha" "$cur_bytes" "$total_loc" "$total_loc" "$impl_bytes" "$est"
+jq -n \
+  --arg result "Forecast exceeds." \
+  --arg plan_sha "$plan_sha" \
+  --arg spec_sha "$spec_sha" \
+  --argjson cur_bytes "$cur_bytes" \
+  --argjson total_loc "$total_loc" \
+  --argjson impl_bytes "$impl_bytes" \
+  --argjson est "$est" \
+  '{result:$result, structured_output:{plan_sha256:$plan_sha, spec_sha256:$spec_sha, current_diff_bytes:$cur_bytes, files:[{path:"big.ts", loc:$total_loc}], total_loc:$total_loc, implementation_est_bytes:$impl_bytes, est_bytes:$est, verdict:"exceeds", summary:"Forecast exceeds diff limit. Recommended split: part-1 helpers; part-2 wiring + tests.", parts:["part-1: helpers + types","part-2: wiring + tests"]}}'
 EOF
 }
 

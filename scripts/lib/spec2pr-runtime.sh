@@ -479,12 +479,92 @@ resolve_timeout_bin() {
   esac
 }
 
+spec2pr_schema() {
+  local name="$1"
+  case "$name" in
+    implement)
+      cat <<'EOF'
+{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "enum": ["done", "blocked"]},
+    "summary": {"type": "string"},
+    "blocked_reason": {"type": "string"}
+  },
+  "required": ["status", "summary", "blocked_reason"],
+  "additionalProperties": false
+}
+EOF
+      ;;
+    forecast)
+      cat <<'EOF'
+{
+  "type": "object",
+  "properties": {
+    "plan_sha256": {"type": "string"},
+    "spec_sha256": {"type": "string"},
+    "current_diff_bytes": {"type": "integer", "minimum": 0},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "loc": {"type": "integer", "minimum": 0}
+        },
+        "required": ["path", "loc"],
+        "additionalProperties": false
+      }
+    },
+    "total_loc": {"type": "integer", "minimum": 0},
+    "implementation_est_bytes": {"type": "integer", "minimum": 0},
+    "est_bytes": {"type": "integer", "minimum": 0},
+    "verdict": {"type": "string", "enum": ["fits", "exceeds"]},
+    "summary": {"type": "string"},
+    "parts": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": ["plan_sha256", "spec_sha256", "current_diff_bytes", "files", "total_loc", "implementation_est_bytes", "est_bytes", "verdict"],
+  "additionalProperties": false
+}
+EOF
+      ;;
+    classify)
+      cat <<'EOF'
+{
+  "type": "object",
+  "properties": {
+    "blockers_found": {"type": "integer", "minimum": 0},
+    "majors_found": {"type": "integer", "minimum": 0}
+  },
+  "required": ["blockers_found", "majors_found"],
+  "additionalProperties": false
+}
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 claude_json_attempt() {
-  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}" schema_name="${6:-}"
   local err="$META_DIR/$tag.stderr"
   local -a claude_args=(-p --output-format json --dangerously-skip-permissions)
   if [ -n "$model" ]; then
     claude_args=(-p --model "$model" --output-format json --dangerously-skip-permissions)
+  fi
+  if [ -n "$schema_name" ]; then
+    local schema_path="$META_DIR/$tag.schema.json"
+    local schema_json
+    if ! spec2pr_schema "$schema_name" > "$schema_path"; then
+      halt "unknown claude schema: $schema_name"
+    fi
+    schema_json="$(jq -c . "$schema_path")" || halt "invalid claude schema: $schema_name"
+    claude_args+=(--json-schema "$schema_json")
   fi
 
   # When a timeout is requested (implement call only), neutralize the harness's
@@ -514,13 +594,23 @@ claude_json_attempt() {
     clean_worktree_to "$CALL_START_HEAD"
     return 3
   fi
+  if [ -n "$schema_name" ]; then
+    local tmp="$out.tmp"
+    if ! jq -e 'select(.structured_output != null) | .result = .structured_output' \
+        "$out" > "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      clean_worktree_to "$CALL_START_HEAD"
+      return 3
+    fi
+    mv "$tmp" "$out"
+  fi
 }
 
 run_claude_json() {
-  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}"
+  local tag="$1" prompt_file="$2" out="$3" model="${4:-}" timeout_secs="${5:-}" schema_name="${6:-}"
   local rc
   set +e
-  claude_json_attempt "$tag" "$prompt_file" "$out" "$model" "$timeout_secs"
+  claude_json_attempt "$tag" "$prompt_file" "$out" "$model" "$timeout_secs" "$schema_name"
   rc=$?
   set -e
   case "$rc" in
@@ -543,7 +633,7 @@ forecast_claude_attempt() {
   local pre_head post_head rc
 
   pre_head="$(git -C "$WORKTREE" rev-parse HEAD)" || halt "git rev-parse HEAD failed"
-  if claude_json_attempt "$tag" "$prompt_file" "$out"; then
+  if claude_json_attempt "$tag" "$prompt_file" "$out" "" "" forecast; then
     rc=0
   else
     rc=$?

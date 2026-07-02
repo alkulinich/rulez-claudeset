@@ -12,17 +12,16 @@ interim prose instead of the JSON (the headless-SDD failure we just fixed, and
 any run where the model narrates instead of answering), the extraction fails and
 the stage halts.
 
-Claude Code ships the same mechanism codex uses: `--output-format json
---json-schema <schema>` compiles the schema into a grammar and **restricts token
-generation during inference — the model literally cannot emit tokens that
-violate the schema** — while still letting the agent use every tool (Bash, Edit,
-subagents) to do the work and return schema-conforming JSON at the end. The
+Claude Code ships the same structured-output mechanism codex uses:
+`--output-format json --json-schema <schema-json>` asks the agent to complete
+the workflow and then return validated JSON matching the schema, while still
+letting the agent use every tool (Bash, Edit, subagents) to do the work. The
 structured result arrives in the envelope's `.structured_output` field. The
 reliability fixes for this landed in **claude 2.1.187** (2026-06-23).
 
-This makes the prose→JSON failure impossible at the token level for every claude
-call whose result we consume as structured data. This spec applies it to all
-four such calls, converging the claude path onto codex's robustness model.
+This removes the prose→JSON parsing dependency for every claude call whose
+result we consume as structured data. This spec applies it to all four such
+calls, converging the claude path onto codex's robustness model.
 
 Not every claude call qualifies. Three return **freeform prose** — the plan
 summary, the pr-review write-up, and the fix report — where the deliverable is
@@ -59,7 +58,8 @@ break the stage. Those stay exactly as they are.
   + `SPEC2PR_IMPLEMENT_TIMEOUT` solve the *subagent-wait* problem, which is
   orthogonal to output shape. The implement prompt's behavioral directives
   (wait for all subagents; do not invoke finishing-a-development-branch) stay;
-  the "final message must be ONLY the JSON" line is now enforced by the grammar.
+  the "final message must be ONLY the JSON" line is now enforced by structured
+  output validation.
 - **`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` is not part of this change** —
   deferred (see Out of scope).
 - **codex path unchanged. VERSION/UPGRADE.md deferred** to a release step per
@@ -70,7 +70,7 @@ break the stage. Those stay exactly as they are.
 
 - `scripts/lib/spec2pr-runtime.sh`
   - `claude_json_attempt` (~482-517) — gains the optional `schema_name`; when
-    set, resolves the schema, adds `--json-schema <file>` to `claude_args`, and
+    set, resolves the schema, passes compact schema JSON to `--json-schema`, and
     normalizes `.result = .structured_output` on success.
   - `run_claude_json` (~519-531) — threads `schema_name` through to
     `claude_json_attempt`.
@@ -83,8 +83,8 @@ break the stage. Those stay exactly as they are.
 - `scripts/lib/pr-review-engine.sh`
   - classify call (~163) — passes `classify`.
 - `scripts/punts-enrich.sh`
-  - the direct `claude -p` call (~72) — adds `--json-schema` with an inline
-    array schema and reads `.structured_output`.
+  - the direct `claude -p` call (~72) — adds `--json-schema` with compact array
+    schema JSON and reads `.structured_output`.
 - `scripts/check-deps.sh` — non-fatal `claude >= 2.1.187` advisory.
 - `tests/spec2pr/` — stub + new assertions (see Testing).
 
@@ -99,14 +99,18 @@ gain a trailing optional `schema_name`. When it is non-empty,
 
 1. Resolves the schema JSON via `spec2pr_schema "$schema_name"` and writes it to
    `$META_DIR/$tag.schema.json`.
-2. Appends `--json-schema "$META_DIR/$tag.schema.json"` to `claude_args`
+2. Compacts the file with `schema_json="$(jq -c . "$schema_file")"` and appends
+   `--json-schema "$schema_json"` to `claude_args`
    (alongside the existing `-p --output-format json --dangerously-skip-permissions`
    and any `--model`).
-3. After the call succeeds and the envelope parses as JSON, normalizes:
+3. After the call succeeds and the envelope parses as JSON, requires
+   `.structured_output` to be present, then normalizes:
    ```bash
-   jq 'if .structured_output != null then .result = .structured_output else . end' \
+   jq -e 'select(.structured_output != null) | .result = .structured_output' \
       "$out" > "$out.tmp" && mv "$out.tmp" "$out"
    ```
+   If `.structured_output` is absent, clean back to `CALL_START_HEAD` and
+   return `3` so callers treat the response as malformed.
 
 When `schema_name` is empty/absent the function is byte-for-byte its current
 self: no schema flag, no normalization. So `plan`, `pr-review` round, and
@@ -163,8 +167,8 @@ already enforces that "exceeds" requires them, so the schema avoids relying on
 
 ### 3. Call sites pass a schema name
 
-- `implement`: `run_claude_json implement "$cpf" "$out" "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT" implement`
-- `forecast`: inside `forecast_claude_attempt`, `claude_json_attempt "$tag" "$pf" "$out" "" "" forecast`
+- `implement`: `run_claude_json implement "$cpf" "$META_DIR/implement.envelope.json" "$IMPLEMENTER_MODEL" "$SPEC2PR_IMPLEMENT_TIMEOUT" implement`
+- `forecast`: inside `forecast_claude_attempt`, `claude_json_attempt "$tag" "$prompt_file" "$out" "" "" forecast`
 - `classify`: `claude_json_attempt "pr-review-r$round.classify-a$attempt" "$classify_prompt" "$classify_json" "" "" classify`
 
 The `""` positional padding for model/timeout matches the codebase's existing
@@ -173,11 +177,31 @@ positional style.
 ### 4. `punts-enrich` (separate script)
 
 Its call is a single-turn extraction (`--max-turns 1`, no subagents) — the ideal
-case for schema binding. Write an inline array schema to a temp file, add
-`--json-schema "$schema_file"`, and read the result from `.structured_output`
-(this script does not source the runtime, so it applies the same
-`.result = .structured_output` normalization locally before the existing
-`jq -e .` validation / `mv`). Schema:
+case for schema binding. Write an inline array schema to a temp file, compact it
+with `schema_json="$(jq -c . "$schema_file")"`, pass
+`--json-schema "$schema_json"`, and read the result from `.structured_output`
+(this script does not source the runtime, and its raw-file contract is the
+structured punt array itself, not a Claude envelope). Write the Claude envelope
+to a separate temp file, extract `.structured_output` to `$raw_file.tmp`, then
+run the existing validation / `mv` on that extracted array:
+
+```bash
+if "$CLAUDE_BIN" -p "$prompt" --output-format json --max-turns 1 \
+     --json-schema "$schema_json" > "$raw_file.envelope.tmp" 2>/dev/null \
+   && jq -e '.structured_output | select(type == "array")' \
+        "$raw_file.envelope.tmp" > "$raw_file.tmp" 2>/dev/null \
+   && jq -e . "$raw_file.tmp" >/dev/null 2>&1; then
+  mv "$raw_file.tmp" "$raw_file"
+  rm -f "$raw_file.envelope.tmp"
+  rm -f "$slice_file"
+  enriched=$((enriched + 1))
+else
+  rm -f "$raw_file.tmp" "$raw_file.envelope.tmp"
+  failed=$((failed + 1))
+fi
+```
+
+Schema:
 ```json
 { "type": "array", "items": {
   "type": "object", "additionalProperties": false,
@@ -209,13 +233,14 @@ forecast, and pr-review need it for schema-bound output.
   encode sha equality or the forecast arithmetic.
 - **`.structured_output` absent → clean halt, no new failure mode.** If a schema
   was requested but the envelope has no `.structured_output` (model never
-  produced it, or an unexpectedly old claude), `.result` is left untouched, the
-  existing extractor fails, and the stage halts exactly as it does today for
-  invalid JSON. No corruption, no partial commit.
+  produced it, or an unexpectedly old claude), `claude_json_attempt` cleans back
+  to `CALL_START_HEAD` and returns `3`; callers halt exactly as they do today
+  for invalid JSON. No corruption, no partial commit, and no fallback to a
+  legacy prose/`.result` payload for schema-bound calls.
 - **Normalization is a no-op without a schema.** The `.result =
   .structured_output` rewrite runs only when `schema_name` is set, so every
   prose call and the whole codex path are byte-unchanged.
-- **Constrained-decoding subset.** The schemas use only object/array/string/
+- **Structured-output schema subset.** The schemas use only object/array/string/
   integer/enum/`minimum`/`required`/`additionalProperties` — no `if/then`,
   `oneOf`, or regex `pattern`, keeping them within the safe supported subset.
   Conditional requirements (forecast "exceeds") are enforced by the validator,
@@ -231,7 +256,7 @@ forecast, and pr-review need it for schema-bound output.
 Stub-driven, matching the suite's `SPEC2PR_CLAUDE_BIN` stub pattern:
 
 - **Stub learns `--json-schema`.** `stub-claude.sh` accepts `--json-schema
-  <file>` and, when present, emits an envelope with a `.structured_output`
+  <schema-json>` and, when present, emits an envelope with a `.structured_output`
   object (and may leave `.result` as prose) so tests can prove normalization.
 - **Flag present for the four, absent for the three.** Assert the generated
   claude args carry `--json-schema` for `implement`, `forecast`, and
@@ -243,8 +268,10 @@ Stub-driven, matching the suite's `SPEC2PR_CLAUDE_BIN` stub pattern:
 - **`.structured_output` missing → halt.** A schema-bound stub that omits
   `.structured_output` and returns prose in `.result` halts cleanly with the
   worktree reset.
-- **punts-enrich.** A stub run asserts `--json-schema` is passed and the array
-  is read from `.structured_output`.
+- **punts-enrich.** A stub run emits a Claude JSON envelope with prose in
+  `.result` and the array only in `.structured_output`; assert
+  `--json-schema` is passed and the promoted raw file is the structured array,
+  not the envelope.
 - **Regression.** The full existing suite passes unchanged (no schema name → the
   new arg is inert for every current caller and for codex).
 
