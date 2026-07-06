@@ -35,8 +35,11 @@ WORKTREES_DIR="$MAIN_ROOT/.worktrees"
 TARGET="$WORKTREES_DIR/$BRANCH"
 
 # Ensure .worktrees/ is gitignored. The ignore takes effect immediately, so we
-# do NOT commit (honors "commit only when asked").
-if ! git -C "$MAIN_ROOT" check-ignore -q .worktrees; then
+# do NOT commit (honors "commit only when asked"). Probe the target path *under*
+# .worktrees/, not the bare directory: a trailing-slash pattern only matches a
+# directory, and `check-ignore .worktrees` returns "not ignored" until that dir
+# exists on disk — which would append a duplicate line on the first run.
+if ! git -C "$MAIN_ROOT" check-ignore -q ".worktrees/$BRANCH"; then
   printf '.worktrees/\n' >> "$MAIN_ROOT/.gitignore"
   echo "note: added .worktrees/ to $MAIN_ROOT/.gitignore (uncommitted)" >&2
 fi

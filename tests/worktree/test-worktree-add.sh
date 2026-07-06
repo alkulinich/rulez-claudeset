@@ -57,6 +57,17 @@ test_worktree_add_gitignores_without_commit() {
     "gitignore: left uncommitted (shows in git status)"
 }
 
+test_worktree_add_gitignore_no_duplicate_when_preignored() {
+  make_repo
+  # The failing case: pattern already present, but no .worktrees dir on disk yet
+  # — a trailing-slash pattern does not match the bare path until the dir exists.
+  printf '.worktrees/\n' > "$PROJECT/.gitignore"
+  run_wta "$PROJECT" feature/pre
+  assert_eq "0" "$WT_RC" "preignored: exits 0"
+  assert_eq "1" "$(grep -c '^\.worktrees/$' "$PROJECT/.gitignore")" \
+    "preignored: .worktrees/ not duplicated when already ignored"
+}
+
 test_worktree_add_anchors_at_main_root_from_inside_worktree() {
   make_repo
   run_wta "$PROJECT" feature/first
