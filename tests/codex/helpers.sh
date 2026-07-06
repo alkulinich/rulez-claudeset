@@ -37,6 +37,18 @@ assert_contains() {
   fi
 }
 
+assert_file_exists() {
+  local path="$1"
+  local msg="${2:-file should exist}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [ -f "$path" ]; then
+    printf '  ok: %s\n' "$msg"
+  else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    printf '  FAIL: %s\n    missing file: %s\n' "$msg" "$path"
+  fi
+}
+
 assert_symlink_target() {
   local link_path="$1"
   local expected_target="$2"
