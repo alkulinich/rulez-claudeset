@@ -3,3 +3,4 @@
 .update-lock
 .updated-marker
 legacy/
+.worktrees/

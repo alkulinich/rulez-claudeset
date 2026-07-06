@@ -27,3 +27,14 @@ Captured punts can be reviewed later via `/rulez:punts-triage`.
 Avoid dense industry-memo register. Prefer plain prose: short sentences,
 plain verbs, one idea per clause. Applies to chat replies, not code
 identifiers or quoted error text.
+
+## Worktrees
+
+Need a git worktree? Run
+
+    ~/.claude/skills/rulez-claudeset/scripts/git-worktree-add.sh <branch> [<base>]
+
+instead of `git worktree add`. It anchors the worktree under `.worktrees/` at
+the project root (creating and gitignoring that directory if needed) and prints
+the new worktree path on stdout. A native worktree tool (e.g. EnterWorktree)
+still wins when one is available.
