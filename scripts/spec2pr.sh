@@ -201,6 +201,16 @@ acquire_lock "$SPEC2PR_HOME/$ID.lock"
 
 git -C "$GIT_ROOT" fetch -q origin "$BASE_BRANCH" || halt "git fetch origin $BASE_BRANCH failed"
 SOURCE_SHA="$(sha256_of "$SPEC_ABS")"
+PLAN_ABS=""
+PLAN_SOURCE_SHA=""
+if [ -n "$PLAN_INPUT" ]; then
+  [ -e "$PLAN_INPUT" ] || halt "plan not found: $PLAN_INPUT"
+  [ -f "$PLAN_INPUT" ] || halt "plan is not a regular file: $PLAN_INPUT"
+  [ -r "$PLAN_INPUT" ] || halt "plan is not readable: $PLAN_INPUT"
+  PLAN_DIR="$(cd "$(dirname "$PLAN_INPUT")" && pwd -P)"
+  PLAN_ABS="$PLAN_DIR/$(basename "$PLAN_INPUT")"
+  PLAN_SOURCE_SHA="$(sha256_of "$PLAN_ABS")"
+fi
 
 if [ -d "$WORKTREE/.git" ] || git -C "$WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   WORKTREE_RESUMED=1

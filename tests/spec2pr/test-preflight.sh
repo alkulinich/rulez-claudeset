@@ -67,6 +67,33 @@ test_preflight_plan_path_with_implementation_reaches_no_worktree_halt() {
   assert_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "implementation plan path reaches no-worktree halt"
 }
 
+test_preflight_missing_plan_halts() {
+  make_sandbox
+  run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/nope.md"
+  assert_eq "1" "$RC" "missing plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan not found:" "missing plan named"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created on missing plan"
+}
+
+test_preflight_non_regular_plan_halts() {
+  make_sandbox
+  mkdir -p "$SANDBOX/plandir"
+  run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/plandir"
+  assert_eq "1" "$RC" "directory plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan is not a regular file:" "non-regular plan named"
+}
+
+test_preflight_unreadable_plan_halts() {
+  make_sandbox
+  local plan="$SANDBOX/imported-plan.md"
+  printf '# Imported plan\n' > "$plan"
+  chmod 000 "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  chmod 644 "$plan"
+  assert_eq "1" "$RC" "unreadable plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan is not readable:" "unreadable plan named"
+}
+
 test_preflight_third_positional_is_usage() {
   make_sandbox
   local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
