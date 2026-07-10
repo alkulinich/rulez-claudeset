@@ -5,10 +5,11 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path> [plan-path]"
 }
 
 SPEC_INPUT=""
+PLAN_INPUT=""
 START_FROM="spec-review"
 START_FROM_GIVEN=0
 IMPLEMENTER_AGENT="codex"
@@ -70,8 +71,13 @@ while [ "$#" -gt 0 ]; do
       usage
       ;;
     *)
-      [ -z "$SPEC_INPUT" ] || usage
-      SPEC_INPUT="$1"
+      if [ -z "$SPEC_INPUT" ]; then
+        SPEC_INPUT="$1"
+      elif [ -z "$PLAN_INPUT" ]; then
+        PLAN_INPUT="$1"
+      else
+        usage
+      fi
       shift
       ;;
   esac
@@ -102,6 +108,10 @@ stage_index() {
 }
 START_INDEX="$(stage_index "$START_FROM")"
 [ "$START_INDEX" -ge 1 ] || usage
+if [ -n "$PLAN_INPUT" ]; then
+  [ "$START_FROM_GIVEN" -eq 1 ] || usage
+  [ "$START_INDEX" -ge 3 ] || usage
+fi
 
 if [ ! -f "$SPEC_INPUT" ]; then
   halt "spec not found: $SPEC_INPUT"
