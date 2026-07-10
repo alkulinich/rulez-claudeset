@@ -186,6 +186,18 @@ EOF
   run_spec2pr "$SPEC"
 }
 
+# Build a fresh imported-plan worktree that halts at a blocked implement, so the
+# worktree exists with both boundary commits + imported metadata, no PR/branch.
+# Sets IMPORTED_PLAN_ABS to the canonical plan source path.
+build_imported_impl_worktree() { # <plan-content-marker>
+  local plan="$SANDBOX/imported-plan.md"
+  printf '# Imported plan\n\nMarker: %s\n' "${1:-x}" > "$plan"
+  queue_clean_forecast 01-forecast
+  queue_blocked_implementation 02-implement
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  IMPORTED_PLAN_ABS="$(cd "$(dirname "$plan")" && pwd -P)/$(basename "$plan")"
+}
+
 test_start_from_no_worktree_halts() {
   make_sandbox
   run_spec2pr --start-from plan "$SPEC"
@@ -335,4 +347,112 @@ test_no_flag_run_unchanged() {
   assert_contains "$OUT" "SPEC2PR DONE" "no-flag run reaches done"
   assert_eq "3" "$(codex_calls)" "no-flag run makes the same three codex calls"
   assert_eq "4" "$(claude_calls)" "no-flag run makes the same four claude calls"
+}
+
+test_imported_resume_same_path_hash_succeeds() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  local plan_abs="$IMPORTED_PLAN_ABS"
+  assert_eq "1" "$RC" "setup blocked implement halts"
+
+  queue_clean_forecast 03-forecast
+  queue_implementation_commit 04-implement
+  queue_clean_pr_review 05-pr-review
+  run_spec2pr --start-from implementation "$SPEC" "$plan_abs"
+  assert_eq "0" "$RC" "same-path same-hash resume reaches done"
+  assert_contains "$OUT" "SPEC2PR DONE" "resume DONE"
+}
+
+test_imported_oversized_plan_override_resume_commits_boundary() {
+  make_sandbox
+  local plan="$SANDBOX/big-plan.md"
+  perl -e 'print "x" x 70000' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "2" "$RC" "oversized imported plan splits"
+  assert_not_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "split run has no plan boundary"
+
+  queue_clean_forecast 01-forecast
+  queue_implementation_commit 02-implement
+  queue_clean_pr_review 03-pr-review
+  run_spec2pr --ignore-plan-limit --start-from implementation "$SPEC" "$plan"
+  assert_eq "0" "$RC" "override run reaches done"
+  assert_contains "$OUT" "SPEC2PR OK plan: size=70000 exceeds limit; overridden" "override status printed"
+  assert_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "plan boundary commit after override"
+}
+
+test_imported_resume_changed_source_halts() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  local plan_abs="$IMPORTED_PLAN_ABS"
+  printf '\nchanged after import\n' >> "$plan_abs"
+  run_spec2pr --start-from implementation "$SPEC" "$plan_abs"
+  assert_eq "1" "$RC" "changed source exits 1"
+  assert_contains "$OUT" "source plan changed since import" "changed source halt named"
+}
+
+test_imported_resume_moved_source_halts_when_omitted() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  local plan_abs="$IMPORTED_PLAN_ABS"
+  rm -f "$plan_abs"
+  run_spec2pr --start-from implementation "$SPEC"
+  assert_eq "1" "$RC" "moved source exits 1"
+  assert_contains "$OUT" "imported plan source missing" "missing recorded source halt named"
+}
+
+test_imported_resume_mismatched_path_halts() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  local plan_abs="$IMPORTED_PLAN_ABS"
+  local other="$SANDBOX/other-plan.md"
+  printf '# Imported plan\n\nMarker: ok\n' > "$other"
+  run_spec2pr --start-from implementation "$SPEC" "$other"
+  assert_eq "1" "$RC" "mismatched path exits 1"
+  assert_contains "$OUT" "worktree imported plan is $plan_abs" "path mismatch halt names recorded path"
+}
+
+test_imported_resume_incomplete_metadata_halts() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  rm -f "$SPEC2PR_HOME/$ID/plan-source-sha256"
+  run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/imported-plan.md"
+  assert_eq "1" "$RC" "incomplete metadata exits 1"
+  assert_contains "$OUT" "incomplete imported-plan metadata" "incomplete pair halt named"
+}
+
+test_legacy_worktree_rejects_plan_arg() {
+  make_sandbox
+  run_spec2pr "$SPEC"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "legacy worktree has no imported metadata"
+  local plan="$SANDBOX/imported-plan.md"
+  printf '# Imported plan\n' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan arg against legacy worktree exits 1"
+  assert_contains "$OUT" "worktree has no imported plan" "legacy + plan arg halt named"
+}
+
+test_legacy_one_file_resume_unchanged_by_import_feature() {
+  make_sandbox
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_blocked_implementation 05-implement
+  run_spec2pr "$SPEC"
+  assert_eq "1" "$RC" "legacy seed halts at blocked implementation"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "legacy seed writes no imported metadata"
+
+  queue_clean_spec_review 06-spec-review
+  queue_clean_plan_review 07-plan-review
+  queue_clean_forecast 08-forecast
+  queue_implementation_commit 09-implement
+  queue_clean_pr_review 10-pr-review
+  run_spec2pr "$SPEC"
+  assert_eq "0" "$RC" "legacy one-file resume reaches done"
+  assert_contains "$OUT" "SPEC2PR DONE" "legacy resume DONE"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "legacy resume writes no imported metadata"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "legacy plan.json still carries the generated summary"
 }

@@ -276,12 +276,41 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
     IMPLEMENTER_AGENT="$RECORDED_AGENT"
     IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
-  if [ -f "$META_DIR/plan-source-path" ] && [ -f "$META_DIR/plan-source-sha256" ] \
-      && ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: write plan"; then
+  # Discard restarts (spec-review / plan) drop the imported plan wholesale, so
+  # they must not be blocked by a missing/changed recorded source (see Task 5).
+  DISCARD_IMPORTED=0
+  if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$START_INDEX" -le 2 ]; then
+    DISCARD_IMPORTED=1
+  fi
+
+  have_pp=0; [ -f "$META_DIR/plan-source-path" ] && have_pp=1
+  have_ps=0; [ -f "$META_DIR/plan-source-sha256" ] && have_ps=1
+  if [ "$((have_pp + have_ps))" -eq 1 ]; then
+    halt "incomplete imported-plan metadata"
+  fi
+  if [ "$have_pp" -eq 1 ]; then
     IMPORTED_PLAN=1
-    IMPORTED_PLAN_NEEDS_BOUNDARY=1
-    PLAN_SOURCE_ABS="$(cat "$META_DIR/plan-source-path")"
-    PLAN_SOURCE_SHA="$(cat "$META_DIR/plan-source-sha256")"
+    RECORDED_PLAN_PATH="$(cat "$META_DIR/plan-source-path")"
+    RECORDED_PLAN_SHA="$(cat "$META_DIR/plan-source-sha256")"
+    if [ -n "$PLAN_INPUT" ]; then
+      [ "$PLAN_ABS" = "$RECORDED_PLAN_PATH" ] || halt "worktree imported plan is $RECORDED_PLAN_PATH"
+      [ "$PLAN_SOURCE_SHA" = "$RECORDED_PLAN_SHA" ] || halt "source plan changed since import"
+    elif [ "$DISCARD_IMPORTED" -eq 0 ]; then
+      [ -f "$RECORDED_PLAN_PATH" ] || halt "imported plan source missing: $RECORDED_PLAN_PATH"
+      [ "$(sha256_of "$RECORDED_PLAN_PATH")" = "$RECORDED_PLAN_SHA" ] \
+        || halt "source plan changed since import"
+    fi
+    PLAN_SOURCE_ABS="$RECORDED_PLAN_PATH"
+    PLAN_SOURCE_SHA="$RECORDED_PLAN_SHA"
+    plan_boundary_matches="$(git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" \
+        | grep -Fxc "spec2pr: write plan" || true)"
+    if [ "$plan_boundary_matches" -eq 0 ]; then
+      IMPORTED_PLAN_NEEDS_BOUNDARY=1
+    fi
+  else
+    if [ -n "$PLAN_INPUT" ]; then
+      halt "worktree has no imported plan; omit the plan path"
+    fi
   fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse "origin/$BASE_BRANCH")" || halt "git rev-parse origin/$BASE_BRANCH failed"
