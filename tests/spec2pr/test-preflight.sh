@@ -45,7 +45,7 @@ test_preflight_plan_path_with_plan_stage_is_usage() {
   assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan path with plan prints usage halt"
 }
 
-test_preflight_plan_path_with_plan_review_reaches_no_worktree_halt() {
+test_preflight_plan_path_with_plan_review_imports_plan() {
   make_sandbox
   local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
   mkdir -p "$(dirname "$plan")"
@@ -53,10 +53,12 @@ test_preflight_plan_path_with_plan_review_reaches_no_worktree_halt() {
   run_spec2pr --start-from plan-review "$SPEC" "$plan"
   assert_eq "1" "$RC" "plan path with plan-review exits 1"
   assert_not_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan-review plan path passes usage grammar"
-  assert_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "plan-review plan path reaches no-worktree halt"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "plan-review plan path does not hit old no-worktree halt"
+  assert_contains "$OUT" "SPEC2PR OK plan: plan imported docs/superpowers/plans/toy-spec-plan.md" "plan-review plan path imports supplied plan"
+  assert_contains "$OUT" "SPEC2PR OK plan: preflight ok" "plan-review plan path reaches preflight ok"
 }
 
-test_preflight_plan_path_with_implementation_reaches_no_worktree_halt() {
+test_preflight_plan_path_with_implementation_imports_plan() {
   make_sandbox
   local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
   mkdir -p "$(dirname "$plan")"
@@ -64,7 +66,9 @@ test_preflight_plan_path_with_implementation_reaches_no_worktree_halt() {
   run_spec2pr --start-from implementation "$SPEC" "$plan"
   assert_eq "1" "$RC" "plan path with implementation exits 1"
   assert_not_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "implementation plan path passes usage grammar"
-  assert_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "implementation plan path reaches no-worktree halt"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "implementation plan path does not hit old no-worktree halt"
+  assert_contains "$OUT" "SPEC2PR OK plan: plan imported docs/superpowers/plans/toy-spec-plan.md" "implementation plan path imports supplied plan"
+  assert_contains "$OUT" "SPEC2PR OK plan: preflight ok" "implementation plan path reaches preflight ok"
 }
 
 test_preflight_missing_plan_halts() {

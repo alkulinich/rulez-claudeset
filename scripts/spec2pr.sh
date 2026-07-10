@@ -218,9 +218,13 @@ else
   WORKTREE_RESUMED=0
 fi
 
-if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 0 ]; then
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 0 ] && [ -z "$PLAN_INPUT" ]; then
   halt "no worktree to restart; run spec2pr without --start-from first"
 fi
+
+IMPORTED_PLAN=0
+IMPORTED_PLAN_NEEDS_BOUNDARY=0
+PLAN_SOURCE_ABS=""
 
 if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   [ -f "$META_DIR/source-path" ] || halt "missing metadata: source-path"
@@ -272,6 +276,13 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
     IMPLEMENTER_AGENT="$RECORDED_AGENT"
     IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
+  if [ -f "$META_DIR/plan-source-path" ] && [ -f "$META_DIR/plan-source-sha256" ] \
+      && ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: write plan"; then
+    IMPORTED_PLAN=1
+    IMPORTED_PLAN_NEEDS_BOUNDARY=1
+    PLAN_SOURCE_ABS="$(cat "$META_DIR/plan-source-path")"
+    PLAN_SOURCE_SHA="$(cat "$META_DIR/plan-source-sha256")"
+  fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse "origin/$BASE_BRANCH")" || halt "git rev-parse origin/$BASE_BRANCH failed"
   if git -C "$GIT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -285,6 +296,12 @@ else
   printf '%s\n' "$BASE_BRANCH" > "$META_DIR/base-branch"
   printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
   printf '%s\n' "$IMPLEMENTER_MODEL" > "$META_DIR/implementer-model"
+  if [ -n "$PLAN_INPUT" ]; then
+    printf '%s\n' "$PLAN_ABS" > "$META_DIR/plan-source-path"
+    printf '%s\n' "$PLAN_SOURCE_SHA" > "$META_DIR/plan-source-sha256"
+    IMPORTED_PLAN=1
+    PLAN_SOURCE_ABS="$PLAN_ABS"
+  fi
 fi
 
 commit_with_subject() {
@@ -310,7 +327,8 @@ newest_commit_with_prefix() {
   done < <(git -C "$WORKTREE" log --format='%H %s' "$BASE_SHA..HEAD")
 }
 
-if [ "$START_FROM_GIVEN" -eq 1 ]; then
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
+    && [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 0 ]; then
   STAGE="restart"
   if [ "$NO_PR" -eq 1 ]; then
     open_pr=""
@@ -394,6 +412,27 @@ if ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: 
   cp "$SPEC_ABS" "$WORKTREE/$WT_SPEC_REL"
   git -C "$WORKTREE" add "$WT_SPEC_REL"
   git -C "$WORKTREE" commit -q --allow-empty -m "spec2pr: import spec" || halt "git commit import spec failed"
+fi
+
+if [ "$IMPORTED_PLAN" -eq 1 ] \
+    && ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: write plan"; then
+  STAGE="plan"
+  mkdir -p "$WORKTREE/$(dirname "$WT_PLAN_REL")"
+  cp "$PLAN_SOURCE_ABS" "$WORKTREE/$WT_PLAN_REL"
+  plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
+  if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
+    if [ "${IGNORE_PLAN_LIMIT:-}" = "1" ]; then
+      status "OK" "size=$plan_size exceeds limit; overridden"
+    else
+      split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+    fi
+  fi
+  git -C "$WORKTREE" add "$WT_PLAN_REL"
+  git -C "$WORKTREE" commit -q --allow-empty -m "spec2pr: write plan" || halt "git commit write plan failed"
+  jq -n --arg p "$WT_PLAN_REL" \
+        --arg s "imported plan from $PLAN_SOURCE_ABS sha256=$PLAN_SOURCE_SHA" \
+        '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
+  status "OK" "plan imported $WT_PLAN_REL"
 fi
 
 status "OK" "preflight ok"
