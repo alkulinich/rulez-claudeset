@@ -6,6 +6,15 @@ descriptions and motivation prose live in the commit messages, not
 here. The legacy v1.0.0 migration sections at the bottom are kept
 verbatim — anyone arriving from a pre-1.0 install needs them.
 
+## To v1.13.1 - from v1.13.0
+
+**Action:** Re-run the installer on Codex machines where setup previously
+stopped at "Refusing to overwrite non-generated Codex guidance."
+
+**Caveat:** `setup-codex` now owns only a marked block at the beginning of
+`~/.codex/AGENTS.md`. Existing manual guidance is preserved after the block,
+and legacy files generated entirely by Rulez migrate automatically.
+
 ## To v1.13.0 - from v1.12.0
 
 **Action:** Using `--implementer claude`? Upgrade the Claude CLI to >= 2.1.187;

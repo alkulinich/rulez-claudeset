@@ -43,6 +43,12 @@ This symlinks the Codex skill:
 ~/.codex/skills/rulez-tools -> ~/.codex/skills/rulez-claudeset/adapters/codex/skills/rulez-tools
 ```
 
+`setup-codex` also maintains a Rulez-owned block at the beginning of
+`~/.codex/AGENTS.md`. Existing manual guidance remains unchanged after that
+block, so it can override generated guidance when needed. Re-running setup
+refreshes only the marked Rulez block; legacy files generated entirely by
+Rulez are migrated automatically.
+
 Then ask Codex with phrases like:
 
 ```text
@@ -93,7 +99,8 @@ rm -rf ~/.codex/skills/rulez-claudeset
 ```
 
 This removes the Codex `rulez-tools` skill symlink and the cloned repository
-checkout. It does not touch `.claude/punts/` data in your projects.
+checkout. It does not remove the marked Rulez block from `~/.codex/AGENTS.md`
+or touch `.claude/punts/` data in your projects.
 
 ## Commands
 

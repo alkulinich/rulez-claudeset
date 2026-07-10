@@ -37,6 +37,19 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local needle="$1"
+  local haystack="$2"
+  local msg="${3:-string should not contain unexpected text}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ "$haystack" != *"$needle"* ]]; then
+    printf '  ok: %s\n' "$msg"
+  else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    printf '  FAIL: %s\n    did not expect: %s\n    actual: %s\n' "$msg" "$needle" "$haystack"
+  fi
+}
+
 assert_file_exists() {
   local path="$1"
   local msg="${2:-file should exist}"
