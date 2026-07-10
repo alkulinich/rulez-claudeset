@@ -357,7 +357,7 @@ newest_commit_with_prefix() {
 }
 
 if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
-    && [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 0 ]; then
+    && { [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 0 ] || [ "${DISCARD_IMPORTED:-0}" -eq 1 ]; }; then
   STAGE="restart"
   if [ "$NO_PR" -eq 1 ]; then
     open_pr=""
@@ -384,9 +384,13 @@ if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
       restart_boundary="$(commit_with_subject "spec2pr: import spec")"
       ;;
     plan)
-      restart_boundary="$(newest_commit_with_prefix "spec2pr: spec-review review fixes ")"
-      if [ -z "$restart_boundary" ]; then
+      if [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 1 ]; then
         restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+      else
+        restart_boundary="$(newest_commit_with_prefix "spec2pr: spec-review review fixes ")"
+        if [ -z "$restart_boundary" ]; then
+          restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+        fi
       fi
       ;;
     plan-review)
@@ -418,7 +422,11 @@ if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
       rm -f "$META_DIR/plan.json" \
         "$META_DIR/implementation-base" \
         "$META_DIR/implementation-head" \
-        "$META_DIR/implementation-ok"
+        "$META_DIR/implementation-ok" \
+        "$META_DIR/plan-source-path" \
+        "$META_DIR/plan-source-sha256"
+      IMPORTED_PLAN=0
+      PLAN_SOURCE_ABS=""
       ;;
     plan-review|implementation)
       rm -f "$META_DIR/implementation-base" \

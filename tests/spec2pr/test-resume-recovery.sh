@@ -382,6 +382,33 @@ test_imported_oversized_plan_override_resume_commits_boundary() {
     "plan boundary commit after override"
 }
 
+test_start_from_spec_review_discards_imported_plan_without_boundary() {
+  make_sandbox
+  local plan="$SANDBOX/big-plan.md"
+  perl -e 'print "x" x 70000' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "2" "$RC" "oversized imported plan splits before boundary"
+  assert_file_exists "$SPEC2PR_HOME/$ID/plan-source-path" "imported metadata exists after split"
+  assert_not_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "split run has no plan boundary"
+
+  rm -f "$plan"
+  queue_clean_spec_review 01-spec-review
+  queue_valid_planner 02-plan
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr --start-from spec-review "$SPEC"
+
+  assert_eq "0" "$RC" "discard without boundary reaches done via generated plan"
+  assert_not_contains "$OUT" "imported plan source missing" "missing source does not block no-boundary discard"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "plan-source-path removed on no-boundary discard"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-sha256" "plan-source-sha256 removed on no-boundary discard"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "plan.json now carries generated summary after no-boundary discard"
+}
+
 test_imported_resume_changed_source_halts() {
   make_sandbox
   build_imported_impl_worktree ok
@@ -420,6 +447,76 @@ test_imported_resume_incomplete_metadata_halts() {
   run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/imported-plan.md"
   assert_eq "1" "$RC" "incomplete metadata exits 1"
   assert_contains "$OUT" "incomplete imported-plan metadata" "incomplete pair halt named"
+}
+
+test_start_from_spec_review_discards_imported_plan() {
+  make_sandbox
+  build_imported_impl_worktree ok >/dev/null
+  assert_file_exists "$SPEC2PR_HOME/$ID/plan-source-path" "imported metadata present before discard"
+
+  queue_clean_spec_review 03-spec-review
+  queue_valid_planner 04-plan
+  queue_clean_plan_review 05-plan-review
+  queue_clean_forecast 06-forecast
+  queue_implementation_commit 07-implement
+  queue_clean_pr_review 08-pr-review
+  run_spec2pr --start-from spec-review "$SPEC"
+
+  assert_eq "0" "$RC" "discard restart reaches done via generated plan"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "plan-source-path removed on discard"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-sha256" "plan-source-sha256 removed on discard"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "plan.json now carries the generated summary"
+}
+
+test_start_from_spec_review_discards_even_if_source_missing() {
+  make_sandbox
+  build_imported_impl_worktree ok
+  local plan_abs="$IMPORTED_PLAN_ABS"
+  rm -f "$plan_abs"
+  queue_clean_spec_review 03-spec-review
+  queue_valid_planner 04-plan
+  queue_clean_plan_review 05-plan-review
+  queue_clean_forecast 06-forecast
+  queue_implementation_commit 07-implement
+  queue_clean_pr_review 08-pr-review
+  run_spec2pr --start-from spec-review "$SPEC"
+  assert_eq "0" "$RC" "discard proceeds despite missing source"
+  assert_not_contains "$OUT" "imported plan source missing" "missing source does not block discard"
+}
+
+test_start_from_plan_discards_imported_plan() {
+  make_sandbox
+  build_imported_impl_worktree ok >/dev/null
+  assert_file_exists "$SPEC2PR_HOME/$ID/plan-source-path" "imported metadata present before plan discard"
+
+  queue_valid_planner 03-plan
+  queue_clean_plan_review 04-plan-review
+  queue_clean_forecast 05-forecast
+  queue_implementation_commit 06-implement
+  queue_clean_pr_review 07-pr-review
+  run_spec2pr --start-from plan "$SPEC"
+
+  assert_eq "0" "$RC" "plan discard restart reaches done via generated plan"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-path" "plan-source-path removed on plan discard"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-source-sha256" "plan-source-sha256 removed on plan discard"
+  assert_eq "wrote plan" "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" \
+    "plan.json now carries the generated summary after plan discard"
+}
+
+test_start_from_plan_review_keeps_imported_plan() {
+  make_sandbox
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  build_imported_impl_worktree keepme >/dev/null
+
+  queue_clean_plan_review 03-plan-review
+  queue_clean_forecast 04-forecast
+  queue_implementation_commit 05-implement
+  queue_clean_pr_review 06-pr-review
+  run_spec2pr --start-from plan-review "$SPEC"
+  assert_eq "0" "$RC" "plan-review restart of imported worktree reaches done"
+  assert_file_exists "$SPEC2PR_HOME/$ID/plan-source-path" "imported metadata kept on plan-review restart"
+  assert_contains "$(cat "$wt/$WT_PLAN_REL_T")" "Marker: keepme" "imported plan content kept"
 }
 
 test_legacy_worktree_rejects_plan_arg() {
