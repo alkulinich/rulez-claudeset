@@ -353,7 +353,7 @@ test_import_plan_review_runs_review_then_downstream() {
   assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: write plan" "plan boundary commit present"
 }
 
-test_import_oversized_plan_splits_then_override_proceeds() {
+test_import_oversized_plan_splits_before_boundary() {
   make_sandbox
   local plan="$SANDBOX/big-plan.md"
   perl -e 'print "x" x 70000' > "$plan"
@@ -362,17 +362,6 @@ test_import_oversized_plan_splits_then_override_proceeds() {
   assert_contains "$OUT" "SPEC2PR SPLIT plan size=70000 limit=65536" "imported plan split line"
   assert_not_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
     "no plan boundary commit before split"
-
-  # Re-run with the override: metadata written at creation lets the resume
-  # re-import and commit the same source.
-  queue_clean_forecast 01-forecast
-  queue_implementation_commit 02-implement
-  queue_clean_pr_review 03-pr-review
-  run_spec2pr --ignore-plan-limit --start-from implementation "$SPEC" "$plan"
-  assert_eq "0" "$RC" "override run reaches done"
-  assert_contains "$OUT" "SPEC2PR OK plan: size=70000 exceeds limit; overridden" "override status printed"
-  assert_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
-    "plan boundary commit after override"
 }
 ```
 
@@ -405,6 +394,7 @@ In `scripts/spec2pr.sh`, just before the worktree resume/create `if` (before lin
 
 ```bash
 IMPORTED_PLAN=0
+IMPORTED_PLAN_NEEDS_BOUNDARY=0
 PLAN_SOURCE_ABS=""
 ```
 
@@ -434,7 +424,8 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
 to:
 
 ```bash
-if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ]; then
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
+    && [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 0 ]; then
 ```
 
 A fresh imported-plan run has `START_FROM_GIVEN=1` but nothing to reset; the import blocks below create both boundary commits and the `START_INDEX` gates route execution.
@@ -492,7 +483,7 @@ On a resumed worktree, treat the imported-plan metadata pair atomically: validat
 
 **Interfaces:**
 - Consumes: `PLAN_INPUT`, `PLAN_ABS`, `PLAN_SOURCE_SHA` (Tasks 1-2), `META_DIR`, `sha256_of`, `START_FROM_GIVEN`, `START_INDEX`.
-- Produces: `IMPORTED_PLAN`, `PLAN_SOURCE_ABS`, `PLAN_SOURCE_SHA` on the resume path; `DISCARD_IMPORTED` (0/1) — consumed by Task 5.
+- Produces: `IMPORTED_PLAN`, `PLAN_SOURCE_ABS`, `PLAN_SOURCE_SHA`, and `IMPORTED_PLAN_NEEDS_BOUNDARY` on the resume path; `DISCARD_IMPORTED` (0/1) — consumed by Task 5.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -522,6 +513,28 @@ test_imported_resume_same_path_hash_succeeds() {
   run_spec2pr --start-from implementation "$SPEC" "$plan_abs"
   assert_eq "0" "$RC" "same-path same-hash resume reaches done"
   assert_contains "$OUT" "SPEC2PR DONE" "resume DONE"
+}
+
+test_imported_oversized_plan_override_resume_commits_boundary() {
+  make_sandbox
+  local plan="$SANDBOX/big-plan.md"
+  perl -e 'print "x" x 70000' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "2" "$RC" "oversized imported plan splits"
+  assert_not_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "split run has no plan boundary"
+
+  # Re-run with the override: resume validation reloads the recorded source
+  # identity, skips the restart reset because no plan boundary exists yet, and
+  # lets the import block commit the same source.
+  queue_clean_forecast 01-forecast
+  queue_implementation_commit 02-implement
+  queue_clean_pr_review 03-pr-review
+  run_spec2pr --ignore-plan-limit --start-from implementation "$SPEC" "$plan"
+  assert_eq "0" "$RC" "override run reaches done"
+  assert_contains "$OUT" "SPEC2PR OK plan: size=70000 exceeds limit; overridden" "override status printed"
+  assert_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "plan boundary commit after override"
 }
 
 test_imported_resume_changed_source_halts() {
@@ -592,7 +605,7 @@ test_legacy_one_file_resume_unchanged_by_import_feature() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A2 -E 'test_(imported_resume|legacy_worktree_rejects|legacy_one_file)'`
+Run: `bash tests/spec2pr/run-tests.sh 2>&1 | grep -A2 -E 'test_(imported_resume|imported_oversized|legacy_worktree_rejects|legacy_one_file)'`
 Expected: FAIL — with no resume validation, a mismatched/changed/missing plan is silently accepted (the resume restarts implementation against stale identity), and a plan arg against a legacy worktree is not rejected.
 
 - [ ] **Step 3: Add the resume identity validation block**
@@ -626,6 +639,11 @@ In `scripts/spec2pr.sh`, inside the resume branch (`WORKTREE_RESUMED` == 1), aft
     fi
     PLAN_SOURCE_ABS="$RECORDED_PLAN_PATH"
     PLAN_SOURCE_SHA="$RECORDED_PLAN_SHA"
+    plan_boundary_matches="$(git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" \
+        | grep -Fxc "spec2pr: write plan" || true)"
+    if [ "$plan_boundary_matches" -eq 0 ]; then
+      IMPORTED_PLAN_NEEDS_BOUNDARY=1
+    fi
   else
     if [ -n "$PLAN_INPUT" ]; then
       halt "worktree has no imported plan; omit the plan path"
@@ -634,6 +652,13 @@ In `scripts/spec2pr.sh`, inside the resume branch (`WORKTREE_RESUMED` == 1), aft
 ```
 
 Note: a plan arg can only reach a resume with `START_INDEX >= 3` (Task 1 grammar), so `DISCARD_IMPORTED=1` always implies `PLAN_INPUT` is empty — the `elif` correctly gates only the omitted-arg source validation.
+
+`IMPORTED_PLAN_NEEDS_BOUNDARY=1` handles the oversized-plan SPLIT resume path:
+the first run wrote the atomic metadata pair but exited before the
+`spec2pr: write plan` commit. The guarded restart block from Task 3 skips reset
+only in this no-boundary state, so the Task 3 import block can copy, size-gate
+with the override, and create the missing plan boundary. Normal imported-plan
+resumes already have the boundary and still execute the restart protections.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -780,7 +805,7 @@ Add the two new invocation forms and their true skip semantics to the `spec2pr &
 
 In `README.md`, immediately after the `**`scripts/spec2pr.sh [--fast] <spec.md>`** …` paragraph (line 144), insert:
 
-```markdown
+````markdown
 **Importing an approved plan.** When you already have a trusted implementation
 plan, pass it as a second positional path together with an explicit start stage
 to skip the earlier work:
@@ -801,7 +826,7 @@ forecast → implement → PR. The skipped stages make **no** model calls — no
 asks a model whether an earlier stage is already done. The plan source may live
 outside the spec's repository. An explicit `--start-from spec-review` or
 `--start-from plan` later discards the imported plan and regenerates one.
-```
+````
 
 - [ ] **Step 2: Verify the README renders as intended**
 
