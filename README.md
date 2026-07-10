@@ -143,6 +143,27 @@ Two unattended pipelines that drive `codex` and `claude -p` from spec to merged 
 
 **`scripts/spec2pr.sh [--fast] <spec.md>`** - run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.rulez-claudeset/spec2pr/<id>/`) and runs: spec-review loop -> plan -> plan-review loop -> implement -> push + open a GitHub PR -> diff gate -> PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
 
+**Importing an approved plan.** When you already have a trusted implementation
+plan, pass it as a second positional path together with an explicit start stage
+to skip the earlier work:
+
+```bash
+scripts/spec2pr.sh --start-from plan-review path/to/spec.md path/to/plan.md
+scripts/spec2pr.sh --start-from implementation path/to/spec.md path/to/plan.md
+```
+
+The plan is copied to the canonical worktree path
+(`docs/superpowers/plans/<spec-slug>-plan.md`) and committed as the usual
+`spec2pr: write plan` boundary; its source path and SHA-256 are recorded so a
+later resume halts rather than silently adopting a moved or edited plan. A plan
+path is accepted **only** with `--start-from plan-review` or
+`--start-from implementation`. `plan-review` runs the plan-review loop first,
+then forecast -> implement -> PR; `implementation` continues straight to
+forecast -> implement -> PR. The skipped stages make **no** model calls - nothing
+asks a model whether an earlier stage is already done. The plan source may live
+outside the spec's repository. An explicit `--start-from spec-review` or
+`--start-from plan` later discards the imported plan and regenerates one.
+
 **`scripts/review-pr.sh [--fast] [--reviewer <claude|codex>] <pr-number|pr-url>`** — run from inside the PR's repo to review *any* existing PR with the same engine: fetch the PR head into a throwaway worktree, the selected reviewer reviews the diff, the opposite model fixes findings, commit + push to the PR head branch, repeat until clean (`PRREVIEW DONE`) or stuck (`PRREVIEW DIRTY`). Fork PRs are unsupported (fixes push to the head branch).
 
 ### Codex fast mode
