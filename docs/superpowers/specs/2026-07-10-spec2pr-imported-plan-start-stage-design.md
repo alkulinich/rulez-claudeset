@@ -82,7 +82,8 @@ For a fresh two-file run:
    even when the base branch already contains identical plan content.
 6. Write `plan-source-path` and `plan-source-sha256` under `META_DIR`.
 7. Write the existing `plan.json` artifact with the canonical worktree path
-   and a deterministic imported-plan summary. No model generates this summary.
+   and a deterministic imported-plan summary. No model generates this summary,
+   and this importer-authored metadata is not a skipped-stage model result.
 
 Keeping the `spec2pr: write plan` subject preserves the existing restart
 boundary lookup and PR links without adding a second plan representation.
@@ -122,9 +123,11 @@ The existing `START_INDEX` gates remain the only stage-routing mechanism:
   and plan-review blocks are not entered. Execution continues with forecast
   and implementation.
 
-Skipping means the earlier stages create no prompts, JSON results, review-fix
-commits, status entries, Codex calls, or Claude calls. The orchestrator does not
-ask a model whether an earlier stage is already complete.
+Skipping means the earlier stages create no prompts, model-call JSON envelopes,
+review-fix commits, status entries, Codex calls, or Claude calls. The imported
+`plan.json` metadata above is still written so downstream resume and summary
+logic has the canonical plan path, but the orchestrator does not ask a model
+whether an earlier stage is already complete.
 
 Dependency checks remain part of preflight because later stages still use both
 CLIs. Forecast still runs unless `SPEC2PR_FORECAST=0`; PR review still runs
@@ -175,7 +178,9 @@ The test suite must cover:
 - Fresh `plan-review spec plan` import invokes plan review first, then the
   unchanged downstream stages.
 - Invocation logs contain no hidden model calls for skipped stages.
-- Skipped-stage prompt, JSON, status, and review-fix artifacts do not exist.
+- Skipped-stage prompt, model-call JSON envelope, status, and review-fix
+  artifacts do not exist; the importer-authored `plan.json` is present and
+  contains the deterministic imported-plan summary.
 - The worktree plan content matches the supplied source, and Git history
   contains the standard spec and plan boundary commits.
 - Plan source metadata contains the canonical absolute source path and its
