@@ -106,6 +106,41 @@ Keep this exact text.'
   assert_eq "$manual" "$(manual_content_after_managed_block "$agents")" "outside manual content is preserved"
 }
 
+test_setup_codex_uses_gnu_stat_mode_probe_before_bsd_fallback() {
+  local temp_home agents output status
+  temp_home="$(make_temp_home)"
+  agents="$temp_home/.codex/AGENTS.md"
+
+  mkdir -p "$temp_home/bin" "$(dirname "$agents")"
+  cat > "$temp_home/bin/stat" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -c)
+    printf '664\n'
+    ;;
+  -f)
+    printf 'GNU filesystem report, not a mode\n664\n'
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "$temp_home/bin/stat"
+  printf '# Manual Codex rules\n' > "$agents"
+
+  set +e
+  output="$(PATH="$temp_home/bin:$PATH" HOME="$temp_home" CODEX_DIR="$temp_home/.codex" \
+    bash "$REPO_ROOT/bin/setup-codex" 2>&1)"
+  status=$?
+  set +e
+
+  assert_eq "0" "$status" "GNU stat mode probe completes setup-codex"
+  assert_not_contains "invalid mode" "$output" "GNU stat output never reaches chmod"
+  assert_eq "# Manual Codex rules" "$(manual_content_after_managed_block "$agents")" \
+    "GNU stat path preserves manual guidance"
+}
+
 test_setup_codex_rejects_malformed_managed_markers_before_side_effects() {
   local case_name temp_home agents skill_dst content before output status
 

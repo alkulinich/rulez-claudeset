@@ -98,8 +98,8 @@ render_managed_guidance > "$agents_tmp"
 cat "$outside_tmp" >> "$agents_tmp"
 
 if [ -e "$AGENTS_DST" ]; then
-  agents_mode="$(stat -f '%Lp' "$AGENTS_DST" 2>/dev/null \
-    || stat -c '%a' "$AGENTS_DST" 2>/dev/null \
+  agents_mode="$(stat -c '%a' "$AGENTS_DST" 2>/dev/null \
+    || stat -f '%Lp' "$AGENTS_DST" 2>/dev/null \
     || true)"
   if [ -n "$agents_mode" ]; then
     chmod "$agents_mode" "$agents_tmp"
