@@ -90,8 +90,11 @@ For a fresh two-file run:
    even when the base branch already contains identical plan content.
 8. Write `plan-source-path` and `plan-source-sha256` under `META_DIR`.
 9. Write the existing `plan.json` artifact with the canonical worktree path
-   and a deterministic imported-plan summary. No model generates this summary,
-   and this importer-authored metadata is not a skipped-stage model result.
+   and the deterministic imported-plan summary. The JSON shape remains
+   `{plan_path, summary}`. `plan_path` is `WT_PLAN_REL`, and `summary` is
+   exactly `imported plan from <plan-source-path> sha256=<plan-source-sha256>`.
+   No model generates this summary, and this importer-authored metadata is not
+   a skipped-stage model result.
 
 Keeping the `spec2pr: write plan` subject preserves the existing restart
 boundary lookup and PR links without adding a second plan representation.
