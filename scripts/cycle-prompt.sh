@@ -26,6 +26,8 @@ case "$ROLE" in reviewer|fixer) ;; *) usage; exit 2 ;; esac
 case "$MODE" in loop|goal)      ;; *) usage; exit 2 ;; esac
 case "$TYPE" in spec|plan|PR)   ;; *) usage; exit 2 ;; esac
 
+if [ -z "${1:-}" ]; then echo "error: target must not be empty" >&2; usage; exit 2; fi
+
 # Mode wrapper values — the only mode-dependent text.
 case "$MODE" in
   loop)
@@ -50,14 +52,18 @@ case "$TYPE" in
   plan)
     ARTIFACT="$1"
     FINDINGS="${ARTIFACT%.md}-findings.md"
-    if [ "$#" -ge 2 ]; then
-      SPEC="$2"
-    else
-      case "$ARTIFACT" in
-        *-plan.md) ;;
-        *) echo "error: plan path must end in -plan.md to derive its spec, or pass the spec explicitly" >&2; exit 2 ;;
-      esac
-      SPEC="$(printf '%s' "$ARTIFACT" | sed -e 's#-plan\.md$#.md#' -e 's#/plans/#/specs/#')"
+    # Only reviewer:plan references @@SPEC@@; a fixer needs no spec, so don't
+    # derive it (or reject an underivable name) unless we're the reviewer.
+    if [ "$ROLE" = reviewer ]; then
+      if [ "$#" -ge 2 ]; then
+        SPEC="$2"
+      else
+        case "$ARTIFACT" in
+          *-plan.md) ;;
+          *) echo "error: plan path must end in -plan.md to derive its spec, or pass the spec explicitly" >&2; exit 2 ;;
+        esac
+        SPEC="$(printf '%s' "$ARTIFACT" | sed -e 's#-plan\.md$#.md#' -e 's#/plans/#/specs/#')"
+      fi
     fi
     ;;
   PR)

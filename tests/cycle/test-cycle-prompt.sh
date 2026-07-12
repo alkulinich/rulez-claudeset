@@ -101,3 +101,15 @@ test_cycle_pr_non_numeric_errors() {
   assert_eq "2" "$CY_RC" "non-numeric PR: exit 2"
   assert_contains "$CY_ERR" "PR target must be a number" "non-numeric PR: explains the error"
 }
+
+test_cycle_fixer_plan_offconvention_name_ok() {
+  run_cycle fixer goal plan "docs/superpowers/plans/weird-name.md"
+  assert_eq "0" "$CY_RC" "fixer/plan off-convention name: exit 0 (fixer needs no spec)"
+  assert_contains "$CY_OUT" "update the plan (docs/superpowers/plans/weird-name.md)" "fixer/plan off-convention: names the plan"
+}
+
+test_cycle_rejects_empty_target() {
+  run_cycle reviewer loop spec ""
+  assert_eq "2" "$CY_RC" "empty target: exit 2"
+  assert_contains "$CY_ERR" "target must not be empty" "empty target: explains the error"
+}
