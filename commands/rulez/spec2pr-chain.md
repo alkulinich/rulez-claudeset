@@ -28,7 +28,7 @@ Otherwise:
    after them is the ordered spec list. Require at least one spec path.
 2. If any spec file does not exist, tell the user and stop.
 3. Launch the orchestrator as one **background** Bash task (single call,
-   `run_in_background: true`), the same pattern `/rulez:spec2pr` uses:
+   `run_in_background: true`), the same background pattern `spec2pr.sh` uses:
    `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr-chain.sh [--admin] [--fast] <spec…>`
    Pass `--admin` and/or `--fast` only if the user supplied them. The orchestrator
    supports Bash 3.2+ so macOS system Bash is valid.
@@ -42,7 +42,7 @@ and react:
 - `CHAIN DONE merged=<n>/<total>` — every spec merged; report the count.
 - `CHAIN HALT <slug>: <reason>` — the chain stopped at `<slug>`. Earlier specs
   stayed merged; show the reason. If `<reason>` is a forwarded `SPEC2PR DIRTY`
-  or `SPEC2PR HALT` line, treat it like the matching `/rulez:spec2pr` outcome
+  or `SPEC2PR HALT` line, treat it like the matching `spec2pr.sh` outcome
   for that one spec, then re-run `/rulez:spec2pr-chain [--admin] [--fast] <spec…>` with
   the original flags to resume past the specs already merged. If `<reason>` is
   a forwarded `SPEC2PR SPLIT` line, split or replace the offending spec in the

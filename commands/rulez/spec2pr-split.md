@@ -139,12 +139,12 @@ If no blob argument is given, ask the user to paste the halt output and stop.
      computed in step 2, one path at a time. In the example commands below,
      replace `<part-1-path>` and `<part-2-path>` with those computed paths:
      - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh <part-1-path>`
-     - `/rulez:spec2pr <part-1-path>`, then
-       review and merge that PR
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh <part-1-path>`,
+       then review and merge that PR
      - `git pull --ff-only origin main`
      - `bash ~/.claude/skills/rulez-claudeset/scripts/git-publish-spec.sh <part-2-path>`
-     - `/rulez:spec2pr <part-2-path>`, then
-       review and merge that PR
+     - `bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh <part-2-path>`,
+       then review and merge that PR
    - One-shot alternative to the manual sequence above: after publishing the
      part specs, run
      `/rulez:spec2pr-chain <part-1-path> <part-2-path>`
