@@ -5,7 +5,109 @@ test_preflight_no_args_usage() {
   make_sandbox
   run_spec2pr
   assert_eq "1" "$RC" "no args exits 1"
-  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path>" "no args prints usage halt"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path> [plan-path]" "no args prints usage halt"
+}
+
+test_preflight_usage_lists_optional_plan_path() {
+  make_sandbox
+  run_spec2pr --unknown
+  assert_eq "1" "$RC" "unknown flag exits 1"
+  assert_contains "$OUT" "[--no-pr] <spec-path> [plan-path]" "usage lists optional plan path"
+}
+
+test_preflight_plan_path_without_start_from_is_usage() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  run_spec2pr "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan path without start-from exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan path without start-from prints usage halt"
+}
+
+test_preflight_plan_path_with_spec_review_is_usage() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  run_spec2pr --start-from spec-review "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan path with spec-review exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan path with spec-review prints usage halt"
+}
+
+test_preflight_plan_path_with_plan_stage_is_usage() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  run_spec2pr --start-from plan "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan path with plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan path with plan prints usage halt"
+}
+
+test_preflight_plan_path_with_plan_review_imports_plan() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  run_spec2pr --start-from plan-review "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan path with plan-review exits 1"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "plan-review plan path passes usage grammar"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "plan-review plan path does not hit old no-worktree halt"
+  assert_contains "$OUT" "SPEC2PR OK plan: plan imported docs/superpowers/plans/toy-spec-plan.md" "plan-review plan path imports supplied plan"
+  assert_contains "$OUT" "SPEC2PR OK plan: preflight ok" "plan-review plan path reaches preflight ok"
+}
+
+test_preflight_plan_path_with_implementation_imports_plan() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "1" "$RC" "plan path with implementation exits 1"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "implementation plan path passes usage grammar"
+  assert_not_contains "$OUT" "SPEC2PR HALT preflight: no worktree to restart; run spec2pr without --start-from first" "implementation plan path does not hit old no-worktree halt"
+  assert_contains "$OUT" "SPEC2PR OK plan: plan imported docs/superpowers/plans/toy-spec-plan.md" "implementation plan path imports supplied plan"
+  assert_contains "$OUT" "SPEC2PR OK plan: preflight ok" "implementation plan path reaches preflight ok"
+}
+
+test_preflight_missing_plan_halts() {
+  make_sandbox
+  run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/nope.md"
+  assert_eq "1" "$RC" "missing plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan not found:" "missing plan named"
+  assert_file_absent "$SPEC2PR_WORKTREES/$ID" "no worktree created on missing plan"
+}
+
+test_preflight_non_regular_plan_halts() {
+  make_sandbox
+  mkdir -p "$SANDBOX/plandir"
+  run_spec2pr --start-from implementation "$SPEC" "$SANDBOX/plandir"
+  assert_eq "1" "$RC" "directory plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan is not a regular file:" "non-regular plan named"
+}
+
+test_preflight_unreadable_plan_halts() {
+  make_sandbox
+  local plan="$SANDBOX/imported-plan.md"
+  printf '# Imported plan\n' > "$plan"
+  chmod 000 "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  chmod 644 "$plan"
+  assert_eq "1" "$RC" "unreadable plan exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: plan is not readable:" "unreadable plan named"
+}
+
+test_preflight_third_positional_is_usage() {
+  make_sandbox
+  local plan="$PROJECT/docs/superpowers/plans/toy-spec-plan.md"
+  local extra="$PROJECT/docs/superpowers/plans/extra-plan.md"
+  mkdir -p "$(dirname "$plan")"
+  printf '# Toy plan\n' > "$plan"
+  printf '# Extra plan\n' > "$extra"
+  run_spec2pr --start-from plan-review "$SPEC" "$plan" "$extra"
+  assert_eq "1" "$RC" "third positional exits 1"
+  assert_contains "$OUT" "SPEC2PR HALT preflight: usage: spec2pr.sh" "third positional prints usage halt"
 }
 
 test_preflight_missing_spec() {

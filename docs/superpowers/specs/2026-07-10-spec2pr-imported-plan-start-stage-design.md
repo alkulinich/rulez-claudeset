@@ -50,7 +50,8 @@ The usage suffix becomes:
 <spec-path> [plan-path]
 ```
 
-Argument validation happens before worktree creation:
+Argument grammar and source availability validation happen before worktree
+creation:
 
 - More than two positional paths is usage failure.
 - A second positional path without an explicit `--start-from` is usage
@@ -58,9 +59,12 @@ Argument validation happens before worktree creation:
 - A second positional path with `--start-from spec-review` or
   `--start-from plan` is usage failure.
 - A missing, non-regular, or unreadable plan halts in preflight.
-- The existing plan size limit applies to imported plans. Oversized plans
-  produce the existing `SPLIT plan` result unless `--ignore-plan-limit` is
-  supplied.
+
+The existing plan size limit also applies to imported plans, but it is checked
+after the plan has been copied to the canonical worktree path and before any
+plan-review, forecast, or implementation model call. Oversized imported plans
+produce the existing `SPLIT plan` result unless `--ignore-plan-limit` is
+supplied.
 
 ## Import and metadata flow
 
@@ -77,12 +81,20 @@ For a fresh two-file run:
 3. Create the managed worktree using the existing branch and base logic.
 4. Import and commit the spec with the existing `spec2pr: import spec`
    subject.
-5. Copy the plan to `WT_PLAN_REL` and commit it separately as
+5. Copy the plan to `WT_PLAN_REL`.
+6. Apply the existing plan size gate to the copied plan. Without
+   `--ignore-plan-limit`, an oversized imported plan exits with the existing
+   `SPLIT plan` result before the plan boundary commit or downstream stages.
+7. Commit the plan separately as
    `spec2pr: write plan`. Use an allow-empty commit so this boundary exists
    even when the base branch already contains identical plan content.
-6. Write `plan-source-path` and `plan-source-sha256` under `META_DIR`.
-7. Write the existing `plan.json` artifact with the canonical worktree path
-   and a deterministic imported-plan summary. No model generates this summary.
+8. Write `plan-source-path` and `plan-source-sha256` under `META_DIR`.
+9. Write the existing `plan.json` artifact with the canonical worktree path
+   and the deterministic imported-plan summary. The JSON shape remains
+   `{plan_path, summary}`. `plan_path` is `WT_PLAN_REL`, and `summary` is
+   exactly `imported plan from <plan-source-path> sha256=<plan-source-sha256>`.
+   No model generates this summary, and this importer-authored metadata is not
+   a skipped-stage model result.
 
 Keeping the `spec2pr: write plan` subject preserves the existing restart
 boundary lookup and PR links without adding a second plan representation.
@@ -122,9 +134,11 @@ The existing `START_INDEX` gates remain the only stage-routing mechanism:
   and plan-review blocks are not entered. Execution continues with forecast
   and implementation.
 
-Skipping means the earlier stages create no prompts, JSON results, review-fix
-commits, status entries, Codex calls, or Claude calls. The orchestrator does not
-ask a model whether an earlier stage is already complete.
+Skipping means the earlier stages create no prompts, model-call JSON envelopes,
+review-fix commits, status entries, Codex calls, or Claude calls. The imported
+`plan.json` metadata above is still written so downstream resume and summary
+logic has the canonical plan path, but the orchestrator does not ask a model
+whether an earlier stage is already complete.
 
 Dependency checks remain part of preflight because later stages still use both
 CLIs. Forecast still runs unless `SPEC2PR_FORECAST=0`; PR review still runs
@@ -135,8 +149,8 @@ after implementation. Neither is considered one of the skipped stages.
 - Source validation precedes model calls and worktree mutation where possible.
 - Imported plan content in the worktree always matches the recorded source
   hash at initialization.
-- Every fresh imported-plan run has both standard boundary commits, even when
-  either import is identical to a file already on the base branch.
+- Every successful fresh imported-plan run has both standard boundary commits,
+  even when either import is identical to a file already on the base branch.
 - Resume never silently adopts a different plan or source path.
 - Existing open-PR and remote-branch restart protections remain in force.
 - Existing implementation backup-tag behavior remains in force when restarting
@@ -175,7 +189,9 @@ The test suite must cover:
 - Fresh `plan-review spec plan` import invokes plan review first, then the
   unchanged downstream stages.
 - Invocation logs contain no hidden model calls for skipped stages.
-- Skipped-stage prompt, JSON, status, and review-fix artifacts do not exist.
+- Skipped-stage prompt, model-call JSON envelope, status, and review-fix
+  artifacts do not exist; the importer-authored `plan.json` is present and
+  contains the deterministic imported-plan summary.
 - The worktree plan content matches the supplied source, and Git history
   contains the standard spec and plan boundary commits.
 - Plan source metadata contains the canonical absolute source path and its
@@ -183,8 +199,9 @@ The test suite must cover:
 - Same-path, same-hash resume succeeds.
 - Missing, moved, changed, or mismatched plan sources halt before model calls
   or reset.
-- Missing, unreadable, and oversized input plans take their specified preflight
-  paths; `--ignore-plan-limit` preserves the existing override behavior.
+- Missing and unreadable input plans halt in preflight. Oversized input plans
+  take the existing `SPLIT plan` path after import and before any model call;
+  `--ignore-plan-limit` preserves the existing override behavior.
 - A plan argument is rejected for absent, `spec-review`, and `plan` start-stage
   selections, and a third positional argument is rejected.
 - A plan argument against a legacy worktree is rejected, while an ordinary

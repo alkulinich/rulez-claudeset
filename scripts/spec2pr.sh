@@ -5,10 +5,11 @@ source "$(dirname "$0")/lib/spec2pr-runtime.sh"
 source "$(dirname "$0")/lib/pr-review-engine.sh"
 
 usage() {
-  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path>"
+  halt "usage: spec2pr.sh [--fast] [--implementer codex|claude|claude:sonnet] [--ignore-plan-limit] [--ignore-pr-limit] [--start-from spec-review|plan|plan-review|implementation] [--base <branch>] [--no-pr] <spec-path> [plan-path]"
 }
 
 SPEC_INPUT=""
+PLAN_INPUT=""
 START_FROM="spec-review"
 START_FROM_GIVEN=0
 IMPLEMENTER_AGENT="codex"
@@ -70,8 +71,13 @@ while [ "$#" -gt 0 ]; do
       usage
       ;;
     *)
-      [ -z "$SPEC_INPUT" ] || usage
-      SPEC_INPUT="$1"
+      if [ -z "$SPEC_INPUT" ]; then
+        SPEC_INPUT="$1"
+      elif [ -z "$PLAN_INPUT" ]; then
+        PLAN_INPUT="$1"
+      else
+        usage
+      fi
       shift
       ;;
   esac
@@ -102,6 +108,10 @@ stage_index() {
 }
 START_INDEX="$(stage_index "$START_FROM")"
 [ "$START_INDEX" -ge 1 ] || usage
+if [ -n "$PLAN_INPUT" ]; then
+  [ "$START_FROM_GIVEN" -eq 1 ] || usage
+  [ "$START_INDEX" -ge 3 ] || usage
+fi
 
 if [ ! -f "$SPEC_INPUT" ]; then
   halt "spec not found: $SPEC_INPUT"
@@ -191,6 +201,16 @@ acquire_lock "$SPEC2PR_HOME/$ID.lock"
 
 git -C "$GIT_ROOT" fetch -q origin "$BASE_BRANCH" || halt "git fetch origin $BASE_BRANCH failed"
 SOURCE_SHA="$(sha256_of "$SPEC_ABS")"
+PLAN_ABS=""
+PLAN_SOURCE_SHA=""
+if [ -n "$PLAN_INPUT" ]; then
+  [ -e "$PLAN_INPUT" ] || halt "plan not found: $PLAN_INPUT"
+  [ -f "$PLAN_INPUT" ] || halt "plan is not a regular file: $PLAN_INPUT"
+  [ -r "$PLAN_INPUT" ] || halt "plan is not readable: $PLAN_INPUT"
+  PLAN_DIR="$(cd "$(dirname "$PLAN_INPUT")" && pwd -P)"
+  PLAN_ABS="$PLAN_DIR/$(basename "$PLAN_INPUT")"
+  PLAN_SOURCE_SHA="$(sha256_of "$PLAN_ABS")"
+fi
 
 if [ -d "$WORKTREE/.git" ] || git -C "$WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   WORKTREE_RESUMED=1
@@ -198,9 +218,13 @@ else
   WORKTREE_RESUMED=0
 fi
 
-if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 0 ]; then
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 0 ] && [ -z "$PLAN_INPUT" ]; then
   halt "no worktree to restart; run spec2pr without --start-from first"
 fi
+
+IMPORTED_PLAN=0
+IMPORTED_PLAN_NEEDS_BOUNDARY=0
+PLAN_SOURCE_ABS=""
 
 if [ "$WORKTREE_RESUMED" -eq 1 ]; then
   [ -f "$META_DIR/source-path" ] || halt "missing metadata: source-path"
@@ -252,6 +276,42 @@ if [ "$WORKTREE_RESUMED" -eq 1 ]; then
     IMPLEMENTER_AGENT="$RECORDED_AGENT"
     IMPLEMENTER_MODEL="$RECORDED_MODEL"
   fi
+  # Discard restarts (spec-review / plan) drop the imported plan wholesale, so
+  # they must not be blocked by a missing/changed recorded source (see Task 5).
+  DISCARD_IMPORTED=0
+  if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$START_INDEX" -le 2 ]; then
+    DISCARD_IMPORTED=1
+  fi
+
+  have_pp=0; [ -f "$META_DIR/plan-source-path" ] && have_pp=1
+  have_ps=0; [ -f "$META_DIR/plan-source-sha256" ] && have_ps=1
+  if [ "$((have_pp + have_ps))" -eq 1 ]; then
+    halt "incomplete imported-plan metadata"
+  fi
+  if [ "$have_pp" -eq 1 ]; then
+    IMPORTED_PLAN=1
+    RECORDED_PLAN_PATH="$(cat "$META_DIR/plan-source-path")"
+    RECORDED_PLAN_SHA="$(cat "$META_DIR/plan-source-sha256")"
+    if [ -n "$PLAN_INPUT" ]; then
+      [ "$PLAN_ABS" = "$RECORDED_PLAN_PATH" ] || halt "worktree imported plan is $RECORDED_PLAN_PATH"
+      [ "$PLAN_SOURCE_SHA" = "$RECORDED_PLAN_SHA" ] || halt "source plan changed since import"
+    elif [ "$DISCARD_IMPORTED" -eq 0 ]; then
+      [ -f "$RECORDED_PLAN_PATH" ] || halt "imported plan source missing: $RECORDED_PLAN_PATH"
+      [ "$(sha256_of "$RECORDED_PLAN_PATH")" = "$RECORDED_PLAN_SHA" ] \
+        || halt "source plan changed since import"
+    fi
+    PLAN_SOURCE_ABS="$RECORDED_PLAN_PATH"
+    PLAN_SOURCE_SHA="$RECORDED_PLAN_SHA"
+    plan_boundary_matches="$(git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" \
+        | grep -Fxc "spec2pr: write plan" || true)"
+    if [ "$plan_boundary_matches" -eq 0 ]; then
+      IMPORTED_PLAN_NEEDS_BOUNDARY=1
+    fi
+  else
+    if [ -n "$PLAN_INPUT" ]; then
+      halt "worktree has no imported plan; omit the plan path"
+    fi
+  fi
 else
   BASE_SHA="$(git -C "$GIT_ROOT" rev-parse "origin/$BASE_BRANCH")" || halt "git rev-parse origin/$BASE_BRANCH failed"
   if git -C "$GIT_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -265,6 +325,12 @@ else
   printf '%s\n' "$BASE_BRANCH" > "$META_DIR/base-branch"
   printf '%s\n' "$IMPLEMENTER_AGENT" > "$META_DIR/implementer-agent"
   printf '%s\n' "$IMPLEMENTER_MODEL" > "$META_DIR/implementer-model"
+  if [ -n "$PLAN_INPUT" ]; then
+    printf '%s\n' "$PLAN_ABS" > "$META_DIR/plan-source-path"
+    printf '%s\n' "$PLAN_SOURCE_SHA" > "$META_DIR/plan-source-sha256"
+    IMPORTED_PLAN=1
+    PLAN_SOURCE_ABS="$PLAN_ABS"
+  fi
 fi
 
 commit_with_subject() {
@@ -290,7 +356,8 @@ newest_commit_with_prefix() {
   done < <(git -C "$WORKTREE" log --format='%H %s' "$BASE_SHA..HEAD")
 }
 
-if [ "$START_FROM_GIVEN" -eq 1 ]; then
+if [ "$START_FROM_GIVEN" -eq 1 ] && [ "$WORKTREE_RESUMED" -eq 1 ] \
+    && { [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 0 ] || [ "${DISCARD_IMPORTED:-0}" -eq 1 ]; }; then
   STAGE="restart"
   if [ "$NO_PR" -eq 1 ]; then
     open_pr=""
@@ -317,9 +384,13 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
       restart_boundary="$(commit_with_subject "spec2pr: import spec")"
       ;;
     plan)
-      restart_boundary="$(newest_commit_with_prefix "spec2pr: spec-review review fixes ")"
-      if [ -z "$restart_boundary" ]; then
+      if [ "${IMPORTED_PLAN_NEEDS_BOUNDARY:-0}" -eq 1 ]; then
         restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+      else
+        restart_boundary="$(newest_commit_with_prefix "spec2pr: spec-review review fixes ")"
+        if [ -z "$restart_boundary" ]; then
+          restart_boundary="$(commit_with_subject "spec2pr: import spec")"
+        fi
       fi
       ;;
     plan-review)
@@ -351,7 +422,11 @@ if [ "$START_FROM_GIVEN" -eq 1 ]; then
       rm -f "$META_DIR/plan.json" \
         "$META_DIR/implementation-base" \
         "$META_DIR/implementation-head" \
-        "$META_DIR/implementation-ok"
+        "$META_DIR/implementation-ok" \
+        "$META_DIR/plan-source-path" \
+        "$META_DIR/plan-source-sha256"
+      IMPORTED_PLAN=0
+      PLAN_SOURCE_ABS=""
       ;;
     plan-review|implementation)
       rm -f "$META_DIR/implementation-base" \
@@ -374,6 +449,27 @@ if ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: 
   cp "$SPEC_ABS" "$WORKTREE/$WT_SPEC_REL"
   git -C "$WORKTREE" add "$WT_SPEC_REL"
   git -C "$WORKTREE" commit -q --allow-empty -m "spec2pr: import spec" || halt "git commit import spec failed"
+fi
+
+if [ "$IMPORTED_PLAN" -eq 1 ] \
+    && ! git -C "$WORKTREE" log --format=%s "$BASE_SHA..HEAD" | grep -Fqx "spec2pr: write plan"; then
+  STAGE="plan"
+  mkdir -p "$WORKTREE/$(dirname "$WT_PLAN_REL")"
+  cp "$PLAN_SOURCE_ABS" "$WORKTREE/$WT_PLAN_REL"
+  plan_size="$(wc -c < "$WORKTREE/$WT_PLAN_REL" | tr -d ' ')"
+  if [ "$plan_size" -gt "$SPEC2PR_MAX_PLAN" ]; then
+    if [ "${IGNORE_PLAN_LIMIT:-}" = "1" ]; then
+      status "OK" "size=$plan_size exceeds limit; overridden"
+    else
+      split plan "$plan_size" "$SPEC2PR_MAX_PLAN"
+    fi
+  fi
+  git -C "$WORKTREE" add "$WT_PLAN_REL"
+  git -C "$WORKTREE" commit -q --allow-empty -m "spec2pr: write plan" || halt "git commit write plan failed"
+  jq -n --arg p "$WT_PLAN_REL" \
+        --arg s "imported plan from $PLAN_SOURCE_ABS sha256=$PLAN_SOURCE_SHA" \
+        '{plan_path:$p, summary:$s}' > "$META_DIR/plan.json"
+  status "OK" "plan imported $WT_PLAN_REL"
 fi
 
 status "OK" "preflight ok"

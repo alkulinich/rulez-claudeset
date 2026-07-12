@@ -163,6 +163,75 @@ EOF
     "IGNORE_PLAN_LIMIT=0 still splits oversized plan"
 }
 
+# --- imported-plan start stages -----------------------------------------
+
+make_imported_plan() { # <content-marker>
+  local plan="$SANDBOX/imported-plan.md"
+  printf '# Imported plan\n\nMarker: %s\n' "$1" > "$plan"
+  printf '%s\n' "$plan"
+}
+
+test_import_implementation_reaches_impl_without_early_stages() {
+  make_sandbox
+  local plan; plan="$(make_imported_plan impl-start)"
+  local plan_abs; plan_abs="$(cd "$(dirname "$plan")" && pwd -P)/$(basename "$plan")"
+  local plan_sha; plan_sha="$(sha256sum "$plan_abs" | awk '{print $1}')"
+  queue_clean_forecast 01-forecast
+  queue_implementation_commit 02-implement
+  queue_clean_pr_review 03-pr-review
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "implementation import reaches done"
+  assert_contains "$OUT" "SPEC2PR DONE pr=https://example.com/pr/1" "implementation import DONE"
+  assert_eq "1" "$(codex_calls)" "only the implement codex call ran"
+  assert_eq "3" "$(claude_calls)" "only forecast + 2 pr-review claude calls ran"
+  assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: import spec" "spec import commit present"
+  assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: write plan" "plan boundary commit present"
+  assert_eq "$(cat "$plan_abs")" "$(cat "$wt/$PLAN_REL")" "worktree plan matches supplied source"
+  assert_eq "$PLAN_REL" "$(jq -r '.plan_path' "$SPEC2PR_HOME/$ID/plan.json")" "plan.json path is canonical"
+  assert_eq "imported plan from $plan_abs sha256=$plan_sha" \
+    "$(jq -r '.summary' "$SPEC2PR_HOME/$ID/plan.json")" "plan.json summary is deterministic"
+  assert_eq "$plan_abs" "$(cat "$SPEC2PR_HOME/$ID/plan-source-path")" "plan-source-path recorded"
+  assert_eq "$plan_sha" "$(cat "$SPEC2PR_HOME/$ID/plan-source-sha256")" "plan-source-sha256 recorded"
+  assert_file_absent "$SPEC2PR_HOME/$ID/spec-review-r1.json" "no spec-review artifact"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan.prompt" "no plan-generation prompt"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan.claude.json" "no plan-generation envelope"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan-review-r1.json" "no plan-review artifact"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "spec-review" "no spec-review codex call"
+  assert_not_contains "$(cat "$SPEC2PR_TEST_FIXTURES/invocations.log")" "plan-review" "no plan-review codex call"
+}
+
+test_import_plan_review_runs_review_then_downstream() {
+  make_sandbox
+  local plan; plan="$(make_imported_plan plan-review-start)"
+  queue_clean_plan_review 01-plan-review
+  queue_clean_forecast 02-forecast
+  queue_implementation_commit 03-implement
+  queue_clean_pr_review 04-pr-review
+  run_spec2pr --start-from plan-review "$SPEC" "$plan"
+
+  local wt="$SPEC2PR_WORKTREES/$ID"
+  assert_eq "0" "$RC" "plan-review import reaches done"
+  assert_eq "2" "$(codex_calls)" "plan-review + implement codex calls ran"
+  assert_eq "3" "$(claude_calls)" "forecast + 2 pr-review claude calls ran"
+  assert_contains "$(cat "$SPEC2PR_HOME/$ID.status")" "plan-review r1 blockers=0 majors=0 clean" "plan review ran"
+  assert_file_absent "$SPEC2PR_HOME/$ID/spec-review-r1.json" "no spec-review artifact"
+  assert_file_absent "$SPEC2PR_HOME/$ID/plan.claude.json" "no plan-generation envelope"
+  assert_contains "$(git -C "$wt" log --format=%s)" "spec2pr: write plan" "plan boundary commit present"
+}
+
+test_import_oversized_plan_splits_before_boundary() {
+  make_sandbox
+  local plan="$SANDBOX/big-plan.md"
+  perl -e 'print "x" x 70000' > "$plan"
+  run_spec2pr --start-from implementation "$SPEC" "$plan"
+  assert_eq "2" "$RC" "oversized imported plan splits"
+  assert_contains "$OUT" "SPEC2PR SPLIT plan size=70000 limit=65536" "imported plan split line"
+  assert_not_contains "$(git -C "$SPEC2PR_WORKTREES/$ID" log --format=%s)" "spec2pr: write plan" \
+    "no plan boundary commit before split"
+}
+
 test_plan_unrelated_file_change_halts() {
   make_sandbox
   queue_clean_spec_review 01-spec-review
