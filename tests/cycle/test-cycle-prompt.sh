@@ -8,6 +8,30 @@ PLAN_TARGET="docs/superpowers/plans/2026-07-12-foo-design-plan.md"
 PLAN_FINDINGS="docs/superpowers/plans/2026-07-12-foo-design-plan-findings.md"
 DERIVED_SPEC="docs/superpowers/specs/2026-07-12-foo-design.md"
 
+assert_codex_goal_prompt_fits() {
+  local role="$1" type="$2"
+  local prompt_chars within_limit="no"
+  shift 2
+
+  run_cycle "$role" goal "$type" "$@"
+  assert_eq "0" "$CY_RC" "Codex $role/$type goal prompt: exit 0"
+
+  prompt_chars="$(printf '%s' "$CY_OUT" | wc -m | tr -d '[:space:]')"
+  if [ "$prompt_chars" -le 4000 ]; then
+    within_limit="yes"
+  fi
+  assert_eq "yes" "$within_limit" "Codex $role/$type goal prompt: at most 4000 characters"
+}
+
+test_cycle_codex_goal_variants_fit_objective_limit() {
+  assert_codex_goal_prompt_fits reviewer spec "$SPEC_TARGET"
+  assert_codex_goal_prompt_fits fixer spec "$SPEC_TARGET"
+  assert_codex_goal_prompt_fits reviewer plan "$PLAN_TARGET"
+  assert_codex_goal_prompt_fits fixer plan "$PLAN_TARGET"
+  assert_codex_goal_prompt_fits reviewer PR 87
+  assert_codex_goal_prompt_fits fixer PR 87
+}
+
 test_cycle_reviewer_spec_loop() {
   run_cycle reviewer loop spec "$SPEC_TARGET"
   assert_eq "0" "$CY_RC" "reviewer/spec/loop: exit 0"

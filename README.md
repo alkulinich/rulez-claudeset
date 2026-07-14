@@ -55,13 +55,15 @@ Then ask Codex with phrases like:
 use rulez-tools to start issue 123
 use rulez-tools to create PR
 use rulez-tools to test PR 5
+use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md
+use rulez-tools to cycle fixer PR 34
 use rulez-tools to enrich punts
 use rulez-tools to triage punts
 ```
 
-The Codex adapter covers GitHub workflow, handoff, punts enrich, and punts
-triage workflows. It reuses the existing `.claude/punts/` queue; Claude slash
-commands, settings, hooks, and statusline remain Claude-specific.
+The Codex adapter covers GitHub workflow, cycle goal watchers, handoff, punts enrich, and punts triage workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
+
+Codex cycle syntax omits the Claude `mode` selector and always starts a persistent goal in the current task. Reviewer and fixer watchers run in separate Codex tasks. If a task already has an unfinished goal, the launcher refuses instead of replacing it.
 
 To update an existing Codex install:
 
@@ -122,9 +124,7 @@ or touch `.claude/punts/` data in your projects.
 | `/rulez:new-project:*` | New project setup workflow (7 steps) |
 | `/rulez:update-claudeset` | Pull latest version and re-run setup |
 
-For Codex, use the `rulez-tools` skill instead of Claude slash commands. The
-supported Codex workflows are start issue, create PR, test PR, push fixes,
-merge PR, handoff, punts enrich, and punts triage.
+For Codex, use the `rulez-tools` skill instead of Claude slash commands. The supported Codex workflows are start issue, create PR, test PR, push fixes, merge PR, cycle goal watchers, handoff, punts enrich, and punts triage.
 
 ## Punts
 
