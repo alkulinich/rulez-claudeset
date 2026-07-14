@@ -275,3 +275,22 @@ test_rulez_tools_skill_documents_punts_workflows() {
   assert_contains "APPROVE / REJECT / SKIP / MERGE" "$skill_body" "skill documents interactive triage choices"
   assert_contains "scripts/punts-extract-prompt.sh" "$skill_body" "skill documents shared prompt builder"
 }
+
+test_rulez_tools_skill_documents_cycle_goal_workflow() {
+  local skill_file skill_body skill_description
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+  skill_description="$(sed -n '3p' "$skill_file")"
+
+  assert_contains "cycle goal watchers" "$skill_description" "skill description advertises cycle goal watchers"
+  assert_contains "launching a cycle watcher" "$skill_body" "skill trigger list includes cycle watchers"
+  assert_contains 'use rulez-tools to cycle <reviewer|fixer> <spec|plan|PR> <target(s)>' "$skill_body" "skill documents Codex cycle syntax"
+  assert_not_contains 'use rulez-tools to cycle <reviewer|fixer> <loop|goal>' "$skill_body" "Codex cycle syntax omits mode"
+  assert_contains 'Call `get_goal` before running the builder.' "$skill_body" "cycle preflights task goal"
+  assert_contains 'status other than no goal or `complete`' "$skill_body" "cycle refuses unfinished goals"
+  assert_contains 'cycle-prompt.sh" <role> goal <type> <target...>' "$skill_body" "cycle delegates with literal goal mode"
+  assert_contains 'show its stderr unchanged' "$skill_body" "cycle preserves builder validation errors"
+  assert_contains '4,000-character' "$skill_body" "cycle enforces Codex objective limit"
+  assert_contains 'Call `create_goal` once' "$skill_body" "cycle launches one persisted goal"
+  assert_contains 'Do not use `update_goal`' "$skill_body" "cycle never mutates existing goal state"
+}
