@@ -294,3 +294,14 @@ test_rulez_tools_skill_documents_cycle_goal_workflow() {
   assert_contains 'Call `create_goal` once' "$skill_body" "cycle launches one persisted goal"
   assert_contains 'Do not use `update_goal`' "$skill_body" "cycle never mutates existing goal state"
 }
+
+test_readme_documents_codex_cycle_goal_workflow() {
+  local readme
+  readme="$(cat "$REPO_ROOT/README.md")"
+
+  assert_contains "use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md" "$readme" "README shows Codex reviewer cycle invocation"
+  assert_contains "use rulez-tools to cycle fixer PR 34" "$readme" "README shows Codex fixer cycle invocation"
+  assert_contains 'Codex cycle syntax omits the Claude `mode` selector' "$readme" "README documents implicit goal mode"
+  assert_contains "Reviewer and fixer watchers run in separate Codex tasks." "$readme" "README documents one watcher per task"
+  assert_contains "cycle goal watchers" "$readme" "README capability list includes cycle watchers"
+}
