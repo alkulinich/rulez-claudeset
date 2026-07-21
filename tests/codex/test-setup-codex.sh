@@ -295,6 +295,42 @@ test_rulez_tools_skill_documents_cycle_goal_workflow() {
   assert_contains 'Do not use `update_goal`' "$skill_body" "cycle never mutates existing goal state"
 }
 
+test_rulez_tools_skill_documents_standalone_forecast_workflow() {
+  local skill_file skill_body skill_description
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+  skill_description="$(sed -n '3p' "$skill_file")"
+
+  assert_contains "standalone spec2pr forecasting" "$skill_description" "skill description advertises standalone forecasting"
+  assert_contains "standalone spec2pr forecasting" "$skill_body" "skill trigger prose advertises standalone forecasting"
+  assert_contains 'use rulez-tools to forecast <path>' "$skill_body" "skill documents forecast invocation"
+  assert_contains 'Call `spawn_agent` exactly once' "$skill_body" "forecast launches one subagent"
+  assert_contains 'fork_turns' "$skill_body" "forecast uses fresh forked context semantics"
+  assert_contains 'Read <path> and relevant context in <repository-root>.' "$skill_body" "forecast prompt reads artifact and repository context"
+  assert_contains '131072' "$skill_body" "forecast prompt includes byte threshold"
+  assert_contains 'Risk: LOW, MEDIUM, or HIGH' "$skill_body" "forecast prompt includes risk labels"
+  assert_contains 'Expected size: a rough changed-LOC range' "$skill_body" "forecast prompt includes rough size"
+  assert_contains 'Reasons:' "$skill_body" "forecast prompt includes reasons"
+  assert_contains 'Suggested split:' "$skill_body" "forecast prompt includes conditional split advice"
+  assert_contains 'Do not modify anything and do not launch another agent' "$skill_body" "forecast prompt is read-only and non-nested"
+  assert_contains "return the subagent's forecast without re-estimating" "$skill_body" "forecast returns subagent result directly"
+  assert_contains 'no retry, reviewer, implementation agent, or split agent' "$skill_body" "forecast authorizes one forecast agent only"
+  assert_contains 'Do not run external `claude`, external `codex`, `spec2pr`, or `spec2pr-split`' "$skill_body" "forecast forbids external dispatch"
+}
+
+test_rulez_tools_skill_avoids_forecast_extra_machinery() {
+  local skill_file skill_body
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+
+  assert_not_contains "shared helper" "$skill_body" "forecast has no shared helper"
+  assert_not_contains "JSON schema" "$skill_body" "forecast has no JSON schema"
+  assert_not_contains "cache" "$skill_body" "forecast has no cache"
+  assert_not_contains "state manifest" "$skill_body" "forecast has no state manifest"
+  assert_not_contains "exact byte arithmetic" "$skill_body" "forecast has no exact arithmetic"
+  assert_not_contains "SPEC2PR OK/WARN/SPLIT/HALT" "$skill_body" "forecast has no status tokens"
+}
+
 test_readme_documents_codex_cycle_goal_workflow() {
   local readme
   readme="$(cat "$REPO_ROOT/README.md")"
