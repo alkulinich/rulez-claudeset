@@ -25,7 +25,9 @@ Return the Agent result directly.
 
 ## Agent Prompt
 
-Read <path> and relevant context in <repository-root>. If the supplied artifact has an obvious conventional companion spec or plan, read that too. This is a read-only forecast: do not run spec2pr or spec2pr-split, implement any work, create split specs, commit, or push. Do not modify anything and do not launch another agent.
+Read <path> and relevant context in <repository-root>. If the supplied artifact
+has an obvious conventional companion spec or plan, read that too. Do not
+modify anything and do not launch another agent.
 
 Estimate the likelihood that implementing this spec or plan will produce a PR
 diff larger than 131072 bytes. Consider implementation code, tests, migrations,

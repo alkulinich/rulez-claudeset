@@ -12,6 +12,27 @@ manual_content_after_managed_block() {
   ' "$path"
 }
 
+codex_forecast_prompt() {
+  local path="$1"
+  awk '
+    $0 == "```text" && armed { in_prompt=1; next }
+    in_prompt && $0 == "```" { exit }
+    in_prompt { print }
+    $0 == "Use this prompt as the complete task for the single `spawn_agent` call:" { armed=1 }
+  ' "$path"
+}
+
+claude_forecast_prompt() {
+  local path="$1"
+  awk '
+    $0 == "## Agent Prompt" { in_prompt=1; next }
+    in_prompt {
+      if (seen) { print }
+      else if ($0 == "") { seen=1 }
+    }
+  ' "$path"
+}
+
 test_setup_codex_creates_rulez_tools_symlink() {
   local temp_home skill_src skill_dst output
   temp_home="$(make_temp_home)"
@@ -305,17 +326,19 @@ test_rulez_tools_skill_documents_standalone_forecast_workflow() {
   assert_contains "standalone spec2pr forecasting" "$skill_body" "skill trigger prose advertises standalone forecasting"
   assert_contains 'use rulez-tools to forecast <path>' "$skill_body" "skill documents forecast invocation"
   assert_contains 'Call `spawn_agent` exactly once' "$skill_body" "forecast launches one subagent"
-  assert_contains 'fork_turns' "$skill_body" "forecast uses fresh forked context semantics"
+  assert_contains 'fork_context: false' "$skill_body" "forecast uses fresh non-forked context semantics"
+  assert_not_contains 'fork_turns' "$skill_body" "forecast avoids obsolete spawn_agent arguments"
   assert_contains 'Read <path> and relevant context in <repository-root>.' "$skill_body" "forecast prompt reads artifact and repository context"
   assert_contains '131072' "$skill_body" "forecast prompt includes byte threshold"
   assert_contains 'Risk: LOW, MEDIUM, or HIGH' "$skill_body" "forecast prompt includes risk labels"
   assert_contains 'Expected size: a rough changed-LOC range' "$skill_body" "forecast prompt includes rough size"
   assert_contains 'Reasons:' "$skill_body" "forecast prompt includes reasons"
   assert_contains 'Suggested split:' "$skill_body" "forecast prompt includes conditional split advice"
-  assert_contains 'Do not modify anything and do not launch another agent' "$skill_body" "forecast prompt is read-only and non-nested"
+  assert_contains 'modify anything and do not launch another agent' "$skill_body" "forecast prompt is read-only and non-nested"
   assert_contains "return the subagent's forecast without re-estimating" "$skill_body" "forecast returns subagent result directly"
   assert_contains 'no retry, reviewer, implementation agent, or split agent' "$skill_body" "forecast authorizes one forecast agent only"
   assert_contains 'Do not run external `claude`, external `codex`, `spec2pr`, or `spec2pr-split`' "$skill_body" "forecast forbids external dispatch"
+  assert_eq "$(claude_forecast_prompt "$REPO_ROOT/commands/rulez/spec2pr-forecast.md")" "$(codex_forecast_prompt "$skill_file")" "Codex forecast prompt matches Claude command prompt"
 }
 
 test_rulez_tools_skill_avoids_forecast_extra_machinery() {

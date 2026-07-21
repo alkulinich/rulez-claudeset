@@ -120,7 +120,7 @@ When the user says `use rulez-tools to forecast <path>`:
 
 1. Accept exactly one readable file path. Reject a missing path, an unknown option, or any additional positional argument with usage text and stop before dispatch. A quoted path containing spaces remains one argument.
 2. Resolve the current working directory as the repository root with Git. If the current working directory is not inside a Git repository, report the problem and stop before dispatch.
-3. Call `spawn_agent` exactly once with `fork_turns: 0`, using a fresh context with no forked conversation context. The complete task is the forecast prompt below, with the validated path and repository root substituted. Wait for the result and return the subagent's forecast without re-estimating or adding a second estimate.
+3. Call `spawn_agent` exactly once with `fork_context: false`, using a fresh context with no forked conversation context. The complete task is the forecast prompt below, with the validated path and repository root substituted. Wait for the result and return the subagent's forecast without re-estimating or adding a second estimate.
 4. This command authorizes this one forecast subagent only: no retry, reviewer, implementation agent, or split agent. If the subagent fails or has no final response, report that the forecast failed. If its response does not follow the requested format, report that the response was malformed and do not infer a risk label.
 
 Do not run external `claude`, external `codex`, `spec2pr`, or `spec2pr-split` for this workflow.
@@ -130,7 +130,9 @@ Do not run external `claude`, external `codex`, `spec2pr`, or `spec2pr-split` fo
 Use this prompt as the complete task for the single `spawn_agent` call:
 
 ```text
-Read <path> and relevant context in <repository-root>. If the supplied artifact has an obvious conventional companion spec or plan, read that too. This is a read-only forecast: do not run spec2pr or spec2pr-split, implement any work, create split specs, commit, or push. Do not modify anything and do not launch another agent.
+Read <path> and relevant context in <repository-root>. If the supplied artifact
+has an obvious conventional companion spec or plan, read that too. Do not
+modify anything and do not launch another agent.
 
 Estimate the likelihood that implementing this spec or plan will produce a PR
 diff larger than 131072 bytes. Consider implementation code, tests, migrations,
