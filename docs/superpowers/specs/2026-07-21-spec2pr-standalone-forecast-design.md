@@ -95,7 +95,13 @@ scripts/spec2pr-forecast.sh prepare <artifact-path> <run-dir>
 scripts/spec2pr-forecast.sh evaluate <run-dir>
 ```
 
-The adapter creates `<run-dir>` with `mktemp` outside the target repository.
+It also exposes `cleanup <run-dir>` as a guarded lifecycle utility. `cleanup`
+accepts only directories matching `/tmp/spec2pr-forecast.*`; it refuses every
+other path. This keeps deletion behind the already allowlisted helper instead
+of granting Claude a general `rm` permission. It is not a third forecast phase.
+
+The adapter creates `<run-dir>` with
+`mktemp -d /tmp/spec2pr-forecast.XXXXXX`, outside the target repository.
 `prepare` writes a manifest and `prompt.txt` into that directory. After the
 native subagent finishes, the adapter writes its final response to
 `result.txt`; `evaluate` reads the manifest and result, validates live state,
@@ -107,8 +113,8 @@ the resulting `SPEC2PR HALT forecast: ...` line. This keeps failure wording and
 exit behavior shared instead of duplicating them in the two adapter documents.
 
 The run directory is transient orchestration state, not a cache. The adapter
-removes it after every success or failure. Cleanup failure produces a warning
-without replacing the forecast exit status.
+calls the helper's guarded `cleanup` utility after every success or failure.
+Cleanup failure produces a warning without replacing the forecast exit status.
 
 ### Native adapters
 
@@ -354,7 +360,8 @@ acceptance.
   - add the Codex command mapping and one-subagent workflow.
 - Modify `settings.json`:
   - allow the installed Claude command to run
-    `scripts/spec2pr-forecast.sh`.
+    `scripts/spec2pr-forecast.sh` and create its exact `/tmp` directory shape;
+  - do not grant a general `rm` permission.
 - Modify `README.md`:
   - document both command surfaces, outputs, risk band, and the difference from
     the automatic pipeline forecast.
@@ -374,6 +381,7 @@ Automated shell coverage includes:
 
 - primary spec, primary plan, generic artifact, external artifact, and paths
   containing spaces;
+- guarded cleanup accepts only `/tmp/spec2pr-forecast.*` directories;
 - companion discovery in both directions and primary-only fallback;
 - manifest hashes, prompt constants, schema, and read-only instructions;
 - bare JSON and a single fenced JSON result;
