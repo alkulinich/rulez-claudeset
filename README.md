@@ -59,9 +59,10 @@ use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md
 use rulez-tools to cycle fixer PR 34
 use rulez-tools to enrich punts
 use rulez-tools to triage punts
+use rulez-tools to forecast docs/superpowers/specs/foo-design.md
 ```
 
-The Codex adapter covers GitHub workflow, cycle goal watchers, handoff, punts enrich, and punts triage workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
+The Codex adapter covers GitHub workflow, cycle goal watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
 
 Codex cycle syntax omits the Claude `mode` selector and always starts a persistent goal in the current task. Reviewer and fixer watchers run in separate Codex tasks. If a task already has an unfinished goal, the launcher refuses instead of replacing it.
 
@@ -123,8 +124,9 @@ or touch `.claude/punts/` data in your projects.
 | `/rulez:what-have-i-done [N]` | Cross-project rollup: last N calendar days (default 3) of HANDOFF.md + commit subjects across every recently-touched Claude project. |
 | `/rulez:new-project:*` | New project setup workflow (7 steps) |
 | `/rulez:update-claudeset` | Pull latest version and re-run setup |
+| `/rulez:spec2pr-forecast <path>` | Forecast whether a spec or plan is likely to fit in one PR |
 
-For Codex, use the `rulez-tools` skill instead of Claude slash commands. The supported Codex workflows are start issue, create PR, test PR, push fixes, merge PR, cycle goal watchers, handoff, punts enrich, and punts triage.
+For Codex, use the `rulez-tools` skill instead of Claude slash commands. The supported Codex workflows are start issue, create PR, test PR, push fixes, merge PR, cycle goal watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting.
 
 ## Punts
 
@@ -147,6 +149,29 @@ The same markdown is also written to `~/.claude/what-have-i-done/<today>.md`. Re
 ## spec2pr & review-pr
 
 Two unattended pipelines that drive `codex` and `claude -p` from spec to merged PR.
+
+### Standalone forecast
+
+Use a lightweight standalone forecast before running spec2pr when you want a
+quick view of whether a draft spec or plan is likely to fit in one PR:
+
+```text
+use rulez-tools to forecast docs/superpowers/specs/foo-design.md
+/rulez:spec2pr-forecast docs/superpowers/plans/foo-design-plan.md
+```
+
+Each invocation uses one native subagent from the current tool. It returns a
+qualitative risk of exceeding the `131072` byte PR-diff threshold: `LOW` means
+comfortably unlikely, `MEDIUM` means plausibly near or above the limit, and
+`HIGH` means likely to exceed it. The response includes a rough changed-LOC range
+and `Reasons`; `Suggested split` appears only for `MEDIUM` or `HIGH`.
+
+The forecast is read-only: it does not run spec2pr, does not create split files,
+does not cache results, and does not emit exact byte or exit-code contracts. It
+is advisory only and does not claim an exact byte estimate.
+
+The automatic forecast inside `spec2pr.sh` remains unchanged; it still runs
+after plan review and before implementation.
 
 **`scripts/spec2pr.sh [--fast] <spec.md>`** - run from inside a repo, pointed at a feature spec. It works in an isolated worktree (`~/.worktrees/<id>`, branch `spec2pr/<slug>`, logs/state under `~/.rulez-claudeset/spec2pr/<id>/`) and runs: spec-review loop -> plan -> plan-review loop -> implement -> push + open a GitHub PR -> diff gate -> PR-review loop. Each review loop fixes blocker/major findings and repeats up to `MAX_FIX_ROUNDS`. Ends on `SPEC2PR DONE pr=<url> worktree=<path>` (exit 0), or HALT (1) / SPLIT (2, diff too big) / DIRTY (3, findings remain after the cap).
 
