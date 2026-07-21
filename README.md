@@ -160,11 +160,13 @@ use rulez-tools to forecast docs/superpowers/specs/foo-design.md
 /rulez:spec2pr-forecast docs/superpowers/plans/foo-design-plan.md
 ```
 
-Each invocation uses one native subagent from the current tool. It returns a
+Each invocation uses one native subagent from the current tool, using that
+tool's default model and quota. It returns a
 qualitative risk of exceeding the `131072` byte PR-diff threshold: `LOW` means
 comfortably unlikely, `MEDIUM` means plausibly near or above the limit, and
 `HIGH` means likely to exceed it. The response includes a rough changed-LOC range
-and `Reasons`; `Suggested split` appears only for `MEDIUM` or `HIGH`.
+and `Reasons`; `Suggested split` is omitted for `LOW` and included only for
+`MEDIUM` or `HIGH`.
 
 The forecast is read-only: it does not run spec2pr, does not create split files,
 does not cache results, and does not emit exact byte or exit-code contracts. It
