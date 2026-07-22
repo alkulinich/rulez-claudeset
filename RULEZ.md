@@ -28,6 +28,13 @@ Avoid dense industry-memo register. Prefer plain prose: short sentences,
 plain verbs, one idea per clause. Applies to chat replies, not code
 identifiers or quoted error text.
 
+## Codex GitHub CLI Authentication
+
+On macOS, sandboxed `gh` commands may report an invalid token because the
+sandbox cannot read the token from Keychain. Before asking the user to
+reauthenticate, retry the command with sandbox escalation. Do not move the
+token into plaintext configuration as a workaround.
+
 ## Worktrees
 
 Need a git worktree? Run
