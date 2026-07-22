@@ -12,6 +12,27 @@ manual_content_after_managed_block() {
   ' "$path"
 }
 
+codex_forecast_prompt() {
+  local path="$1"
+  awk '
+    $0 == "```text" && armed { in_prompt=1; next }
+    in_prompt && $0 == "```" { exit }
+    in_prompt { print }
+    $0 == "Use this prompt as the complete task for the single `spawn_agent` call:" { armed=1 }
+  ' "$path"
+}
+
+claude_forecast_prompt() {
+  local path="$1"
+  awk '
+    $0 == "## Agent Prompt" { in_prompt=1; next }
+    in_prompt {
+      if (seen) { print }
+      else if ($0 == "") { seen=1 }
+    }
+  ' "$path"
+}
+
 test_setup_codex_creates_rulez_tools_symlink() {
   local temp_home skill_src skill_dst output
   temp_home="$(make_temp_home)"
@@ -309,6 +330,44 @@ test_rulez_tools_skill_documents_cycle_goal_workflow() {
   assert_contains 'Do not use `update_goal`' "$skill_body" "cycle never mutates existing goal state"
 }
 
+test_rulez_tools_skill_documents_standalone_forecast_workflow() {
+  local skill_file skill_body skill_description
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+  skill_description="$(sed -n '3p' "$skill_file")"
+
+  assert_contains "standalone spec2pr forecasting" "$skill_description" "skill description advertises standalone forecasting"
+  assert_contains "standalone spec2pr forecasting" "$skill_body" "skill trigger prose advertises standalone forecasting"
+  assert_contains 'use rulez-tools to forecast <path>' "$skill_body" "skill documents forecast invocation"
+  assert_contains 'Call `spawn_agent` exactly once' "$skill_body" "forecast launches one subagent"
+  assert_contains 'fork_context: false' "$skill_body" "forecast uses fresh non-forked context semantics"
+  assert_not_contains 'fork_turns' "$skill_body" "forecast avoids obsolete spawn_agent arguments"
+  assert_contains 'Read <path> and relevant context in <repository-root>.' "$skill_body" "forecast prompt reads artifact and repository context"
+  assert_contains '131072' "$skill_body" "forecast prompt includes byte threshold"
+  assert_contains 'Risk: LOW, MEDIUM, or HIGH' "$skill_body" "forecast prompt includes risk labels"
+  assert_contains 'Expected size: a rough changed-LOC range' "$skill_body" "forecast prompt includes rough size"
+  assert_contains 'Reasons:' "$skill_body" "forecast prompt includes reasons"
+  assert_contains 'Suggested split:' "$skill_body" "forecast prompt includes conditional split advice"
+  assert_contains 'modify anything and do not launch another agent' "$skill_body" "forecast prompt is read-only and non-nested"
+  assert_contains "return the subagent's forecast without re-estimating" "$skill_body" "forecast returns subagent result directly"
+  assert_contains 'no retry, reviewer, implementation agent, or split agent' "$skill_body" "forecast authorizes one forecast agent only"
+  assert_contains 'Do not run external `claude`, external `codex`, `spec2pr`, or `spec2pr-split`' "$skill_body" "forecast forbids external dispatch"
+  assert_eq "$(claude_forecast_prompt "$REPO_ROOT/commands/rulez/spec2pr-forecast.md")" "$(codex_forecast_prompt "$skill_file")" "Codex forecast prompt matches Claude command prompt"
+}
+
+test_rulez_tools_skill_avoids_forecast_extra_machinery() {
+  local skill_file skill_body
+  skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
+  skill_body="$(cat "$skill_file")"
+
+  assert_not_contains "shared helper" "$skill_body" "forecast has no shared helper"
+  assert_not_contains "JSON schema" "$skill_body" "forecast has no JSON schema"
+  assert_not_contains "cache" "$skill_body" "forecast has no cache"
+  assert_not_contains "state manifest" "$skill_body" "forecast has no state manifest"
+  assert_not_contains "exact byte arithmetic" "$skill_body" "forecast has no exact arithmetic"
+  assert_not_contains "SPEC2PR OK/WARN/SPLIT/HALT" "$skill_body" "forecast has no status tokens"
+}
+
 test_readme_documents_codex_cycle_goal_workflow() {
   local readme
   readme="$(cat "$REPO_ROOT/README.md")"
@@ -318,4 +377,31 @@ test_readme_documents_codex_cycle_goal_workflow() {
   assert_contains 'Codex cycle syntax omits the Claude `mode` selector' "$readme" "README documents implicit goal mode"
   assert_contains "Reviewer and fixer watchers run in separate Codex tasks." "$readme" "README documents one watcher per task"
   assert_contains "cycle goal watchers" "$readme" "README capability list includes cycle watchers"
+}
+
+test_readme_documents_standalone_spec2pr_forecast() {
+  local readme
+  readme="$(cat "$REPO_ROOT/README.md")"
+
+  assert_contains "use rulez-tools to forecast docs/superpowers/specs/foo-design.md" "$readme" "README shows Codex forecast invocation"
+  assert_contains "/rulez:spec2pr-forecast docs/superpowers/plans/foo-design-plan.md" "$readme" "README shows Claude forecast invocation"
+  assert_contains "/rulez:spec2pr-forecast <path>" "$readme" "README command table includes forecast command"
+  assert_contains "lightweight standalone forecast before running spec2pr" "$readme" "README explains forecast timing"
+  assert_contains "one native subagent from the current tool, using that" "$readme" "README documents one native subagent"
+  assert_contains "tool's default model and quota" "$readme" "README documents default model and quota"
+  assert_contains "LOW" "$readme" "README documents LOW forecast risk"
+  assert_contains "MEDIUM" "$readme" "README documents MEDIUM forecast risk"
+  assert_contains "HIGH" "$readme" "README documents HIGH forecast risk"
+  assert_contains "131072" "$readme" "README documents PR diff threshold"
+  assert_contains "rough changed-LOC range" "$readme" "README documents rough changed-LOC range"
+  assert_contains "Reasons" "$readme" "README documents forecast reasons"
+  assert_contains '`Suggested split` is omitted for `LOW` and included only for' "$readme" "README documents LOW split omission"
+  assert_contains '`MEDIUM` or `HIGH`.' "$readme" "README documents MEDIUM/HIGH split inclusion"
+  assert_contains "read-only" "$readme" "README documents read-only forecast"
+  assert_contains "does not run spec2pr" "$readme" "README says forecast does not run spec2pr"
+  assert_contains "does not create split files" "$readme" "README says forecast does not create split files"
+  assert_contains "does not cache results" "$readme" "README says forecast does not cache results"
+  assert_contains "does not emit exact byte or exit-code contracts" "$readme" "README avoids exact byte and exit-code contracts"
+  assert_contains 'automatic forecast inside `spec2pr.sh` remains unchanged' "$readme" "README distinguishes existing pipeline forecast"
+  assert_contains "standalone spec2pr forecasting" "$readme" "README capability list includes standalone forecasting"
 }
