@@ -41,6 +41,20 @@ test_setup_codex_generates_global_agents_guidance() {
   assert_contains "Updated Codex guidance block:" "$output" "setup-codex reports managed guidance update"
 }
 
+test_codex_keychain_guidance_is_codex_specific() {
+  local temp_home agents shared_guidance codex_guidance
+  temp_home="$(make_temp_home)"
+  agents="$temp_home/.codex/AGENTS.md"
+  shared_guidance="$(cat "$REPO_ROOT/RULEZ.md")"
+  codex_guidance="$(cat "$REPO_ROOT/adapters/codex/AGENTS.append.md")"
+
+  HOME="$temp_home" CODEX_DIR="$temp_home/.codex" bash "$REPO_ROOT/bin/setup-codex" >/dev/null
+
+  assert_contains "## GitHub CLI Authentication" "$codex_guidance" "Codex appendix includes Keychain guidance"
+  assert_not_contains "sandbox cannot read the token from Keychain" "$shared_guidance" "shared RULEZ.md excludes Codex-only Keychain guidance"
+  assert_contains "sandbox cannot read the token from Keychain" "$(cat "$agents")" "generated AGENTS.md includes Keychain guidance"
+}
+
 test_setup_codex_migrates_legacy_generated_agents_guidance() {
   local temp_home agents
   temp_home="$(make_temp_home)"
