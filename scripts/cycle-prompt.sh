@@ -2,7 +2,7 @@
 # cycle-prompt.sh — assemble a /rulez:cycle review/fix watcher prompt.
 #
 # Usage: cycle-prompt.sh <role> <mode> <type> <target...>
-#   role   reviewer | fixer
+#   role   reviewer | fixer | verifier   (verifier is PR-only)
 #   mode   loop | goal
 #   type   spec | plan | PR
 #   target(s):
@@ -16,15 +16,24 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: cycle-prompt.sh <reviewer|fixer> <loop|goal> <spec|plan|PR> <target...>" >&2
+  echo "usage: cycle-prompt.sh <reviewer|fixer|verifier> <loop|goal> <spec|plan|PR> <target...>" >&2
 }
 
 if [ "$#" -lt 4 ]; then usage; exit 2; fi
 ROLE="$1"; MODE="$2"; TYPE="$3"; shift 3
 
-case "$ROLE" in reviewer|fixer) ;; *) usage; exit 2 ;; esac
-case "$MODE" in loop|goal)      ;; *) usage; exit 2 ;; esac
-case "$TYPE" in spec|plan|PR)   ;; *) usage; exit 2 ;; esac
+case "$ROLE" in reviewer|fixer|verifier) ;; *) usage; exit 2 ;; esac
+case "$MODE" in loop|goal)               ;; *) usage; exit 2 ;; esac
+case "$TYPE" in spec|plan|PR)            ;; *) usage; exit 2 ;; esac
+
+# The role×type matrix is not a full cross-product: verifying that acceptance
+# criteria hold — and trying to break them — needs running code, which only a PR
+# has. Checked before the empty-target guard so the role constraint is what gets
+# reported for `verifier <mode> spec ""`.
+if [ "$ROLE" = verifier ] && [ "$TYPE" != PR ]; then
+  echo "error: verifier supports only type PR" >&2
+  exit 2
+fi
 
 if [ -z "${1:-}" ]; then echo "error: target must not be empty" >&2; usage; exit 2; fi
 
@@ -122,18 +131,27 @@ Never post idle/no-change comments.
 EOF
       ;;
     fixer:PR) cat <<'EOF'
-@@RECUR@@ PR @@ARTIFACT@@ for new, unhandled reviewer-agent comments titled `## Review round <N> — ...`.
+@@RECUR@@ PR @@ARTIFACT@@ for new, unhandled reviewer-agent comments titled `## Review round <N> — ...` or `## Verification round <N> — ...`.
 Resolve this PR's head branch with `gh pr view @@PRNUM@@ --json headRefName -q .headRefName`; work in `.worktrees/<branch>` on that branch (create it with `~/.claude/skills/rulez-claudeset/scripts/git-worktree-add.sh <branch>` if it doesn't exist).
 For each latest unhandled round:
-- `Result: No findings.` → @@TERMINATE@@.
+- `Result: No findings.` and no other unhandled round is pending → @@TERMINATE@@.
 - Findings → verify each against the current PR head; fix what is technically warranted in that worktree. Declines are allowed only with recorded technical rationale.
 - Run focused tests and typecheck; commit and push the fixes.
 - After the push succeeds, verify PR @@ARTIFACT@@ points to the new HEAD, then post ONE comment titled:
-  `## Fixed — Review round <N> — <date time UTC>`
+  `## Fixed — <Review|Verification> round <N> — <date time UTC>` — mirror the kind of round you handled.
   Include the reviewed SHA, new SHA, fixed vs declined findings, and test evidence.
 - Identify handled rounds by reviewer comment ID plus reviewed SHA; never process one twice.
 - No new reviewer round, or waiting for review of the pushed head → @@IDLE@@.
 Never post `fixed` before the push reaches PR @@ARTIFACT@@. Never create empty commits, touch unrelated files, or post idle/no-change comments. If every finding is declined and no head change is warranted, post one rationale response without `fixed` and notify me instead of fabricating a change.
+EOF
+      ;;
+    verifier:PR) cat <<'EOF'
+@@RECUR@@ PR @@ARTIFACT@@ for acceptance-verification cycles.
+Read the acceptance criteria from the PR body (`gh pr view @@PRNUM@@ --json body`). If the body states none, post nothing, stop immediately, and notify me that PR @@ARTIFACT@@ has no acceptance criteria to verify.
+- No verification comment from me exists yet, OR a new comment containing "fixed" (case-insensitive) was posted after my last verification comment AND the head commit differs from the "Head commit:" recorded in that comment → verify the current head against those criteria. Do not review style, naming, structure, or code quality — that is the code reviewer's job. For each criterion, exercise the real behavior (run it, drive the actual path, read the actual output) and record satisfied / not satisfied / not verifiable with the evidence you ran. Then try to break it: boundaries, empty and malformed input, failure paths, repeated or concurrent invocation, states the criterion does not mention. Mark each finding [P0 — Blocker] / [P1 — High] / [P2 — Medium] with file:line anchors and a reproduction. Post ONE PR comment titled "## Verification round <N> — <date time UTC>" recording the verified head commit SHA, the per-criterion verdicts, and the findings. Don't re-raise findings a prior comment already declined with recorded reasons, unless the new head adds new evidence.
+- Every criterion is satisfied and nothing broke → post the round comment with "Result: No findings." then @@TERMINATE@@.
+- A "fixed" comment arrived but the head commit is unchanged since the last verified SHA → do nothing (the push is lagging the comment; wait for it).
+Never post idle/no-change comments. A criterion you could not verify is a finding, not a pass.
 EOF
       ;;
     *) echo "error: no template for $ROLE:$TYPE" >&2; exit 3 ;;
