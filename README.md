@@ -56,6 +56,7 @@ use rulez-tools to start issue 123
 use rulez-tools to create PR
 use rulez-tools to test PR 5
 use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md
+use rulez-tools to cycle verifier PR 34
 use rulez-tools to cycle fixer PR 34
 use rulez-tools to enrich punts
 use rulez-tools to triage punts
@@ -64,7 +65,7 @@ use rulez-tools to forecast docs/superpowers/specs/foo-design.md
 
 The Codex adapter covers GitHub workflow, cycle goal watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
 
-Codex cycle syntax omits the Claude `mode` selector and always starts a persistent goal in the current task. Reviewer and fixer watchers run in separate Codex tasks. If a task already has an unfinished goal, the launcher refuses instead of replacing it.
+Codex cycle syntax omits the Claude `mode` selector and always starts a persistent goal in the current task. Reviewer, verifier, and fixer watchers run in separate Codex tasks. `verifier` is PR-only; a reviewer and verifier can watch the same PR at once, and the fixer consumes both review and verification rounds. If a task already has an unfinished goal, the launcher refuses instead of replacing it.
 
 To update an existing Codex install:
 
