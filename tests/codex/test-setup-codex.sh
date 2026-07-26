@@ -319,8 +319,12 @@ test_rulez_tools_skill_documents_cycle_goal_workflow() {
 
   assert_contains "cycle goal watchers" "$skill_description" "skill description advertises cycle goal watchers"
   assert_contains "launching a cycle watcher" "$skill_body" "skill trigger list includes cycle watchers"
-  assert_contains 'use rulez-tools to cycle <reviewer|fixer> <spec|plan|PR> <target(s)>' "$skill_body" "skill documents Codex cycle syntax"
-  assert_not_contains 'use rulez-tools to cycle <reviewer|fixer> <loop|goal>' "$skill_body" "Codex cycle syntax omits mode"
+  assert_contains 'use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>' "$skill_body" "skill documents Codex cycle syntax"
+  assert_not_contains 'use rulez-tools to cycle <reviewer|fixer|verifier> <loop|goal>' "$skill_body" "Codex cycle syntax omits mode"
+  assert_contains 'Reject `verifier spec` and `verifier plan` before running the builder' "$skill_body" "cycle documents verifier PR-only constraint"
+  assert_contains 'reviewer, verifier, and fixer watchers in separate tasks' "$skill_body" "cycle documents separate watcher tasks"
+  assert_contains '## Verification round <N>' "$skill_body" "cycle documents verifier comment channel"
+  assert_contains 'the PR fixer consumes both' "$skill_body" "cycle documents shared PR fixer"
   assert_contains 'Call `get_goal` before running the builder.' "$skill_body" "cycle preflights task goal"
   assert_contains 'status other than no goal or `complete`' "$skill_body" "cycle refuses unfinished goals"
   assert_contains 'cycle-prompt.sh" <role> goal <type> <target...>' "$skill_body" "cycle delegates with literal goal mode"
@@ -373,9 +377,12 @@ test_readme_documents_codex_cycle_goal_workflow() {
   readme="$(cat "$REPO_ROOT/README.md")"
 
   assert_contains "use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md" "$readme" "README shows Codex reviewer cycle invocation"
+  assert_contains "use rulez-tools to cycle verifier PR 34" "$readme" "README shows Codex verifier cycle invocation"
   assert_contains "use rulez-tools to cycle fixer PR 34" "$readme" "README shows Codex fixer cycle invocation"
   assert_contains 'Codex cycle syntax omits the Claude `mode` selector' "$readme" "README documents implicit goal mode"
-  assert_contains "Reviewer and fixer watchers run in separate Codex tasks." "$readme" "README documents one watcher per task"
+  assert_contains "Reviewer, verifier, and fixer watchers run in separate Codex tasks." "$readme" "README documents one watcher per task"
+  assert_contains '`verifier` is PR-only' "$readme" "README documents verifier PR-only constraint"
+  assert_contains "the fixer consumes both review and verification rounds" "$readme" "README documents shared PR fixer"
   assert_contains "cycle goal watchers" "$readme" "README capability list includes cycle watchers"
 }
 

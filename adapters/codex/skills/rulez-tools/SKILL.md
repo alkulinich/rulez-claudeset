@@ -39,7 +39,7 @@ Prefer the shared scripts over reimplementing workflow logic:
 - Push fixes: `scripts/git-push-fixes.sh <message> <files...>`
 - Merge PR: `scripts/git-merge-pr.sh <pr-number>`
 - Handoff: `scripts/git-commit-handoff.sh`
-- Cycle prompt: `scripts/cycle-prompt.sh <reviewer|fixer> goal <spec|plan|PR> <target...>`
+- Cycle prompt: `scripts/cycle-prompt.sh <reviewer|fixer|verifier> goal <spec|plan|PR> <target...>`
 
 Run these scripts by absolute path from the target project workspace. The Git workflow scripts operate on the current working directory.
 
@@ -97,7 +97,7 @@ When the user says `use rulez-tools to write handoff`:
 3. From the target repository root, run `"$RULEZ_HOME/scripts/git-commit-handoff.sh"`.
 4. Report the committed handoff or any missing information needed to finish it.
 
-When the user says `use rulez-tools to cycle <reviewer|fixer> <spec|plan|PR> <target(s)>`:
+When the user says `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>`:
 
 1. Use the `Cycle Watcher` workflow below.
 2. Report the launched role, artifact type, and target, or the blocking error.
@@ -155,9 +155,9 @@ For LOW, omit Suggested split.
 
 ## Cycle Watcher
 
-Use this workflow when the user says `use rulez-tools to cycle <reviewer|fixer> <spec|plan|PR> <target(s)>`.
+Use this workflow when the user says `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>`.
 
-Codex always launches cycle watchers as persisted goals. The public Codex syntax has no `loop|goal` mode selector. One invocation starts one watcher in the current task; start reviewer and fixer watchers in separate tasks.
+Codex always launches cycle watchers as persisted goals. The public Codex syntax has no `loop|goal` mode selector. One invocation starts one watcher in the current task; start reviewer, verifier, and fixer watchers in separate tasks. A reviewer and verifier may watch the same PR at once; they use separate `## Review round <N>` and `## Verification round <N>` comment channels, and the PR fixer consumes both.
 
 Enforce Codex's 4,000-character objective limit before creating a goal.
 
@@ -171,7 +171,7 @@ PR <#n|n>
 
 Workflow:
 
-1. Parse the arguments as `<role> <type> <target(s)>`. Require `role` to be `reviewer` or `fixer`, `type` to be `spec`, `plan`, or `PR`, and at least one non-empty target. On failure, print `use rulez-tools to cycle <reviewer|fixer> <spec|plan|PR> <target(s)>` and stop without changing goal state. Leave the detailed target validation to the shared builder.
+1. Parse the arguments as `<role> <type> <target(s)>`. Require `role` to be `reviewer`, `fixer`, or `verifier`, `type` to be `spec`, `plan`, or `PR`, and at least one non-empty target. Reject `verifier spec` and `verifier plan` before running the builder, saying that `verifier` is PR-only. On other parse failures, print `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>` and stop without changing goal state. Leave the detailed target validation to the shared builder.
 2. Call `get_goal` before running the builder. No current goal or a goal with status `complete` permits launch. Treat any status other than no goal or `complete`, including active, paused, or blocked, as an unfinished goal: stop and tell the user to use a fresh task or clear the current goal. Do not clear, edit, merge with, or replace it.
 3. Resolve `RULEZ_HOME` using the repository-layout rule above. Run `bash "$RULEZ_HOME/scripts/cycle-prompt.sh" <role> goal <type> <target...>`, preserving each target as a separate shell argument and capturing stdout as `PROMPT`. If the builder exits nonzero, show its stderr unchanged and stop without calling `create_goal`.
 4. Count the objective characters with `PROMPT_LENGTH="$(printf '%s' "$PROMPT" | wc -m | tr -d '[:space:]')"`. If `PROMPT_LENGTH` is greater than `4000`, report `Cycle goal is <PROMPT_LENGTH> characters; Codex allows at most 4,000.` and stop without creating a goal.
@@ -263,4 +263,4 @@ Ask the user what they want to do about it and record their answer here, or use 
 
 ## First-Pass Scope
 
-This skill currently covers GitHub workflow, cycle goal watchers, handoff, punts enrich, and punts triage workflows. It does not install or manage Codex hooks, statusline behavior, `what-have-i-done`, `.codex/punts/`, or Claude transcript/session storage.
+This skill currently covers GitHub workflow, cycle goal watchers, standalone spec2pr forecasting, handoff, punts enrich, and punts triage workflows. It does not install or manage Codex hooks, statusline behavior, `what-have-i-done`, `.codex/punts/`, or Claude transcript/session storage.
