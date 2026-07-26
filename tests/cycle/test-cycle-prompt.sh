@@ -30,6 +30,7 @@ test_cycle_codex_goal_variants_fit_objective_limit() {
   assert_codex_goal_prompt_fits fixer plan "$PLAN_TARGET"
   assert_codex_goal_prompt_fits reviewer PR 87
   assert_codex_goal_prompt_fits fixer PR 87
+  assert_codex_goal_prompt_fits verifier PR 87
 }
 
 test_cycle_reviewer_spec_loop() {
@@ -136,4 +137,62 @@ test_cycle_rejects_empty_target() {
   run_cycle reviewer loop spec ""
   assert_eq "2" "$CY_RC" "empty target: exit 2"
   assert_contains "$CY_ERR" "target must not be empty" "empty target: explains the error"
+}
+
+# --- verifier role (PR-only acceptance verification) -------------------------
+
+test_cycle_verifier_pr_loop() {
+  run_cycle verifier loop PR 40
+  assert_eq "0" "$CY_RC" "verifier/PR/loop: exit 0"
+  assert_contains "$CY_OUT" "Watch PR #40 for acceptance-verification cycles." "verifier/PR/loop: loop RECUR + #-normalized artifact"
+  assert_contains "$CY_OUT" "gh pr view 40 --json body" "verifier/PR/loop: criteria read from the PR body"
+  assert_contains "$CY_OUT" "no acceptance criteria to verify" "verifier/PR/loop: halts when the body states none"
+  assert_contains "$CY_OUT" "that is the code reviewer's job" "verifier/PR/loop: style exclusion names the owner"
+  assert_contains "$CY_OUT" "## Verification round <N>" "verifier/PR/loop: own comment channel"
+  assert_contains "$CY_OUT" "A criterion you could not verify is a finding, not a pass." "verifier/PR/loop: anti-rubber-stamp clause"
+  assert_contains "$CY_OUT" "stop the loop and notify" "verifier/PR/loop: loop TERMINATE"
+}
+
+test_cycle_verifier_pr_goal_wrapper() {
+  run_cycle verifier goal PR 40
+  assert_eq "0" "$CY_RC" "verifier/PR/goal: exit 0"
+  assert_contains "$CY_OUT" "re-read at least every 2 min" "verifier/PR/goal: goal cadence applied"
+  assert_contains "$CY_OUT" "complete the goal and notify" "verifier/PR/goal: goal TERMINATE"
+}
+
+test_cycle_verifier_pr_hash_normalized() {
+  run_cycle verifier loop PR "#40"
+  assert_eq "0" "$CY_RC" "verifier/PR #40: exit 0"
+  assert_contains "$CY_OUT" "Watch PR #40 for acceptance-verification cycles." "verifier/PR: #-normalized display"
+  assert_contains "$CY_OUT" "gh pr view 40 --json body" "verifier/PR: bare number in the gh command"
+}
+
+test_cycle_verifier_rejects_non_pr_types() {
+  run_cycle verifier loop spec "$SPEC_TARGET"
+  assert_eq "2" "$CY_RC" "verifier+spec: exit 2"
+  assert_contains "$CY_ERR" "verifier supports only type PR" "verifier+spec: explains the constraint"
+  run_cycle verifier loop plan "$PLAN_TARGET"
+  assert_eq "2" "$CY_RC" "verifier+plan: exit 2"
+  assert_contains "$CY_ERR" "verifier supports only type PR" "verifier+plan: explains the constraint"
+}
+
+test_cycle_verifier_rejects_non_pr_before_empty_target() {
+  run_cycle verifier loop spec ""
+  assert_eq "2" "$CY_RC" "verifier+spec+empty target: exit 2"
+  assert_contains "$CY_ERR" "verifier supports only type PR" "verifier+spec+empty: role constraint wins over empty-target"
+}
+
+test_cycle_fixer_pr_consumes_both_rounds() {
+  run_cycle fixer goal PR 87
+  assert_eq "0" "$CY_RC" "fixer/PR both rounds: exit 0"
+  assert_contains "$CY_OUT" '`## Review round <N> — ...`' "fixer/PR: still watches the review channel"
+  assert_contains "$CY_OUT" '`## Verification round <N> — ...`' "fixer/PR: also watches the verification channel"
+  assert_contains "$CY_OUT" '<Review|Verification> round <N>' "fixer/PR: mirrors the handled round kind in its reply"
+  assert_contains "$CY_OUT" "no other unhandled round is pending" "fixer/PR: guarded termination"
+}
+
+test_cycle_reviewer_pr_channel_unpolluted() {
+  run_cycle reviewer loop PR 40
+  assert_eq "0" "$CY_RC" "reviewer/PR: exit 0"
+  assert_not_contains "$CY_OUT" "Verification round" "reviewer/PR: reviewer channel untouched by the new role"
 }
