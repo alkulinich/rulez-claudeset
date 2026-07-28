@@ -74,6 +74,8 @@
       "Bash(chmod:*)",
       "Bash(bash ~/.claude/skills/rulez-claudeset/scripts/spec2pr.sh:*)",
       "Bash(bash ~/.claude/skills/rulez-claudeset/scripts/cycle-prompt.sh:*)",
+      "Bash(bash ~/.claude/skills/rulez-claudeset/scripts/handoff-decision-hits.sh:*)",
+      "Bash(bash ~/.claude/skills/rulez-claudeset/scripts/handoff-push-records.sh:*)",
       "Bash(curl:*)",
       "Bash(tree:*)",
       "Bash(jq:*)",
