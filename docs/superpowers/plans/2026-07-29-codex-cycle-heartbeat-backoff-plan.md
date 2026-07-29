@@ -48,6 +48,13 @@ Record:
 - Preserve the automation id, Scheduled run history, desktop version, and task
   status as spike evidence. Disable the spike heartbeat afterward.
 
+**Result:** Passed on desktop `26.707.72221`. Automation
+`rulez-cycle-heartbeat-spike` woke the same task three times, supplied its id in
+every trigger, created no goal, and deleted itself after the third wake. The
+tool contract's documented `$CODEX_HOME/automations/*/automation.toml` lookup
+provides duplicate discovery. The active assistant turn was not interrupted;
+wakes began after the task became idle.
+
 ## Task 1: Add the heartbeat prompt mode
 
 **Files**

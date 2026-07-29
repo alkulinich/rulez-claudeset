@@ -3,7 +3,7 @@
 #
 # Usage: cycle-prompt.sh <role> <mode> <type> <target...>
 #   role   reviewer | fixer | verifier   (verifier is PR-only)
-#   mode   loop | goal
+#   mode   loop | goal | heartbeat
 #   type   spec | plan | PR
 #   target(s):
 #     spec  <spec.md>
@@ -12,18 +12,18 @@
 #
 # Prints the fully expanded prompt on stdout. Hermetic: pure string work, no
 # network and no git — runtime state (SHAs, branch names, round numbers, dates)
-# stays as literal instructions in the emitted prompt for the loop/goal agent.
+# stays as literal instructions in the emitted prompt for the watcher.
 set -euo pipefail
 
 usage() {
-  echo "usage: cycle-prompt.sh <reviewer|fixer|verifier> <loop|goal> <spec|plan|PR> <target...>" >&2
+  echo "usage: cycle-prompt.sh <reviewer|fixer|verifier> <loop|goal|heartbeat> <spec|plan|PR> <target...>" >&2
 }
 
 if [ "$#" -lt 4 ]; then usage; exit 2; fi
 ROLE="$1"; MODE="$2"; TYPE="$3"; shift 3
 
 case "$ROLE" in reviewer|fixer|verifier) ;; *) usage; exit 2 ;; esac
-case "$MODE" in loop|goal)               ;; *) usage; exit 2 ;; esac
+case "$MODE" in loop|goal|heartbeat)     ;; *) usage; exit 2 ;; esac
 case "$TYPE" in spec|plan|PR)            ;; *) usage; exit 2 ;; esac
 
 # The role×type matrix is not a full cross-product: verifying that acceptance
@@ -48,6 +48,11 @@ case "$MODE" in
     RECUR="Watch (re-read at least every 2 min)"
     TERMINATE="complete the goal and notify"
     IDLE="wait 2 min without writing anything"
+    ;;
+  heartbeat)
+    RECUR="In this scheduled heartbeat tick, check"
+    TERMINATE="complete the cycle, disable this heartbeat, and notify"
+    IDLE="return control to the scheduler without writing anything"
     ;;
 esac
 

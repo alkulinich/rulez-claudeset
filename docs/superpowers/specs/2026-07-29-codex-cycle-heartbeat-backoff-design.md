@@ -60,6 +60,20 @@ Three approaches were considered:
    credentials, deployment, state, and cleanup that this local workflow does
    not need.
 
+## Desktop spike evidence
+
+The no-code spike ran in desktop version `26.707.72221` with automation id
+`rulez-cycle-heartbeat-spike`. A 462-character read-only prompt woke the same
+task at `15:33:24Z`, `15:38:49Z`, and `15:44:26Z`. Every trigger supplied the
+automation id, the heartbeat remained recurring, no task goal was created, and
+the third tick deleted the heartbeat successfully. An active assistant turn
+was not interrupted; the first wake arrived after the task became idle.
+
+The `automation_update` tool contract documents existing-automation lookup via
+`$CODEX_HOME/automations/*/automation.toml`. The persisted spike record
+contained its name, prompt, active status, recurrence, and target task id. This
+is the supported lookup used for deterministic cycle reuse.
+
 ## Public behavior
 
 ### Launch
@@ -111,8 +125,9 @@ Existing role-specific terminal conditions remain authoritative:
   review or verification round remains;
 - spec/plan roles: the existing no-findings condition is reached.
 
-On completion, the watcher disables its heartbeat, preserves its run history
-in Scheduled where the app supports that, and notifies the user once.
+On completion, the watcher deletes its heartbeat and notifies the user once.
+The Scheduled run history remains available where the app preserves deleted
+automation history.
 
 ## Components
 
@@ -157,16 +172,15 @@ unrelated goals.
 The heartbeat tick prompt includes:
 
 - the complete rendered watcher protocol;
-- the automation id and deterministic cycle identity;
+- the deterministic cycle identity;
 - role, type, normalized target, and repository root;
 - `idle_level` and `failure_count`;
 - instructions to update the same automation rather than create another one.
 
-New automation creation is always two-phase. The launcher first creates an
-inactive bootstrap heartbeat, captures its id, then updates it with the final
-self-rescheduling prompt and activates it. If the second call fails, the
-launcher deletes the bootstrap automation and reports the failure. A
-half-configured watcher is never left active.
+New automation creation is one step because the runtime supplies
+`<automation_id>` on every scheduled trigger. The launcher creates the active
+heartbeat with its final prompt and scheduler state; the prompt never needs to
+embed an allocated id.
 
 ### Automation identity and duplicates
 
@@ -208,7 +222,7 @@ clear `failure_count`, and update the same heartbeat's next schedule.
 
 ### `complete`
 
-Disable the heartbeat and notify once. Do not schedule another tick.
+Delete the heartbeat and notify once. Do not schedule another tick.
 
 ### `error`
 

@@ -311,13 +311,13 @@ test_rulez_tools_skill_documents_punts_workflows() {
   assert_contains "scripts/punts-extract-prompt.sh" "$skill_body" "skill documents shared prompt builder"
 }
 
-test_rulez_tools_skill_documents_cycle_goal_workflow() {
+test_rulez_tools_skill_documents_cycle_heartbeat_workflow() {
   local skill_file skill_body skill_description
   skill_file="$REPO_ROOT/adapters/codex/skills/rulez-tools/SKILL.md"
   skill_body="$(cat "$skill_file")"
   skill_description="$(sed -n '3p' "$skill_file")"
 
-  assert_contains "cycle goal watchers" "$skill_description" "skill description advertises cycle goal watchers"
+  assert_contains "cycle heartbeat watchers" "$skill_description" "skill description advertises cycle heartbeat watchers"
   assert_contains "launching a cycle watcher" "$skill_body" "skill trigger list includes cycle watchers"
   assert_contains 'use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>' "$skill_body" "skill documents Codex cycle syntax"
   assert_not_contains 'use rulez-tools to cycle <reviewer|fixer|verifier> <loop|goal>' "$skill_body" "Codex cycle syntax omits mode"
@@ -325,13 +325,28 @@ test_rulez_tools_skill_documents_cycle_goal_workflow() {
   assert_contains 'reviewer, verifier, and fixer watchers in separate tasks' "$skill_body" "cycle documents separate watcher tasks"
   assert_contains '## Verification round <N>' "$skill_body" "cycle documents verifier comment channel"
   assert_contains 'the PR fixer consumes both' "$skill_body" "cycle documents shared PR fixer"
-  assert_contains 'Call `get_goal` before running the builder.' "$skill_body" "cycle preflights task goal"
-  assert_contains 'status other than no goal or `complete`' "$skill_body" "cycle refuses unfinished goals"
-  assert_contains 'cycle-prompt.sh" <role> goal <type> <target...>' "$skill_body" "cycle delegates with literal goal mode"
+  assert_contains '`automation_update` capability' "$skill_body" "cycle requires the desktop scheduler capability"
+  assert_contains 'Durable Rulez cycles require Codex desktop Scheduled tasks.' "$skill_body" "cycle reports unsupported Codex surfaces"
+  assert_contains 'cycle-prompt.sh" <role> heartbeat <type> <target...>' "$skill_body" "cycle delegates with literal heartbeat mode"
   assert_contains 'show its stderr unchanged' "$skill_body" "cycle preserves builder validation errors"
-  assert_contains '4,000-character' "$skill_body" "cycle enforces Codex objective limit"
-  assert_contains 'Call `create_goal` once' "$skill_body" "cycle launches one persisted goal"
-  assert_contains 'Do not use `update_goal`' "$skill_body" "cycle never mutates existing goal state"
+  assert_contains 'Run the first watcher tick immediately.' "$skill_body" "cycle runs immediately before scheduling"
+  assert_contains 'Initialize `idle_level=0` and `failure_count=0`' "$skill_body" "cycle initializes scheduler state"
+  assert_contains 'A transient first-tick read failure creates or updates the heartbeat' "$skill_body" "cycle retries transient launch failures"
+  assert_contains 'A first-tick human-action error creates no active heartbeat' "$skill_body" "cycle does not arm unrecoverable launch failures"
+  assert_contains 'rulez_cycle_key' "$skill_body" "cycle stores deterministic automation identity"
+  assert_contains '$CODEX_HOME/automations/*/automation.toml' "$skill_body" "cycle uses the scheduler-supported lookup mechanism"
+  assert_contains 'trigger-provided `<automation_id>`' "$skill_body" "cycle ticks receive their automation identity"
+  assert_contains '`idle_level`' "$skill_body" "cycle stores idle scheduler state"
+  assert_contains '`failure_count`' "$skill_body" "cycle stores retry scheduler state"
+  assert_contains '5, 10, then 15 minutes' "$skill_body" "cycle documents capped idle backoff"
+  assert_contains 'reset `idle_level` to `0`' "$skill_body" "cycle resets backoff after activity"
+  assert_contains 'delete the heartbeat and notify once' "$skill_body" "cycle deletes terminal heartbeats"
+  assert_contains 'third consecutive transient failure' "$skill_body" "cycle pauses repeated transient failures"
+  assert_contains 'authentication, approval, malformed-state, or partial-write failure' "$skill_body" "cycle pauses human-action errors immediately"
+  assert_not_contains '`get_goal`' "$skill_body" "cycle does not inspect goal state"
+  assert_not_contains '`create_goal`' "$skill_body" "cycle does not create a goal fallback"
+  assert_not_contains '`update_goal`' "$skill_body" "cycle does not mutate goals"
+  assert_not_contains '4,000-character objective' "$skill_body" "cycle has no obsolete goal size gate"
 }
 
 test_rulez_tools_skill_documents_standalone_forecast_workflow() {
@@ -372,18 +387,25 @@ test_rulez_tools_skill_avoids_forecast_extra_machinery() {
   assert_not_contains "SPEC2PR OK/WARN/SPLIT/HALT" "$skill_body" "forecast has no status tokens"
 }
 
-test_readme_documents_codex_cycle_goal_workflow() {
+test_readme_documents_codex_cycle_heartbeat_workflow() {
   local readme
   readme="$(cat "$REPO_ROOT/README.md")"
 
   assert_contains "use rulez-tools to cycle reviewer spec docs/superpowers/specs/foo-design.md" "$readme" "README shows Codex reviewer cycle invocation"
   assert_contains "use rulez-tools to cycle verifier PR 34" "$readme" "README shows Codex verifier cycle invocation"
   assert_contains "use rulez-tools to cycle fixer PR 34" "$readme" "README shows Codex fixer cycle invocation"
-  assert_contains 'Codex cycle syntax omits the Claude `mode` selector' "$readme" "README documents implicit goal mode"
+  assert_contains 'Codex cycle syntax omits the Claude `mode` selector' "$readme" "README documents implicit heartbeat mode"
+  assert_contains 'Codex desktop uses same-task Scheduled heartbeats' "$readme" "README documents the desktop scheduler"
+  assert_contains 'The first check runs immediately' "$readme" "README documents the immediate first tick"
+  assert_contains '5, 10, and 15 minutes' "$readme" "README documents capped idle backoff"
+  assert_contains 'Activity resets the next delay to five minutes.' "$readme" "README documents activity reset"
   assert_contains "Reviewer, verifier, and fixer watchers run in separate Codex tasks." "$readme" "README documents one watcher per task"
   assert_contains '`verifier` is PR-only' "$readme" "README documents verifier PR-only constraint"
   assert_contains "the fixer consumes both review and verification rounds" "$readme" "README documents shared PR fixer"
-  assert_contains "cycle goal watchers" "$readme" "README capability list includes cycle watchers"
+  assert_contains 'Codex CLI and IDE cannot launch durable cycles' "$readme" "README documents unsupported Codex surfaces"
+  assert_contains 'The Codex app and computer must remain running' "$readme" "README documents local scheduler availability"
+  assert_contains "cycle heartbeat watchers" "$readme" "README capability list includes cycle watchers"
+  assert_not_contains 'always starts a persistent goal' "$readme" "README removes persisted-goal behavior"
 }
 
 test_readme_documents_standalone_spec2pr_forecast() {

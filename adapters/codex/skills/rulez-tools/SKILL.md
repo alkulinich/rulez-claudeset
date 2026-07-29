@@ -1,6 +1,6 @@
 ---
 name: rulez-tools
-description: "Use for Rulez shared tooling in Codex: GitHub workflows, cycle goal watchers, standalone spec2pr forecasting, handoffs, and punts backed by this repository's scripts."
+description: "Use for Rulez shared tooling in Codex: GitHub workflows, cycle heartbeat watchers, standalone spec2pr forecasting, handoffs, and punts backed by this repository's scripts."
 ---
 
 # Rulez Tools
@@ -39,7 +39,7 @@ Prefer the shared scripts over reimplementing workflow logic:
 - Push fixes: `scripts/git-push-fixes.sh <message> <files...>`
 - Merge PR: `scripts/git-merge-pr.sh <pr-number>`
 - Handoff: `scripts/git-commit-handoff.sh`
-- Cycle prompt: `scripts/cycle-prompt.sh <reviewer|fixer|verifier> goal <spec|plan|PR> <target...>`
+- Cycle prompt: `scripts/cycle-prompt.sh <reviewer|fixer|verifier> heartbeat <spec|plan|PR> <target...>`
 
 Run these scripts by absolute path from the target project workspace. The Git workflow scripts operate on the current working directory.
 
@@ -157,9 +157,7 @@ For LOW, omit Suggested split.
 
 Use this workflow when the user says `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>`.
 
-Codex always launches cycle watchers as persisted goals. The public Codex syntax has no `loop|goal` mode selector. One invocation starts one watcher in the current task; start reviewer, verifier, and fixer watchers in separate tasks. A reviewer and verifier may watch the same PR at once; they use separate `## Review round <N>` and `## Verification round <N>` comment channels, and the PR fixer consumes both.
-
-Enforce Codex's 4,000-character objective limit before creating a goal.
+Codex desktop launches durable cycle watchers as Scheduled heartbeats attached to the current task. The public Codex syntax has no `loop|goal` mode selector. One invocation starts one watcher in the current task; start reviewer, verifier, and fixer watchers in separate tasks. A reviewer and verifier may watch the same PR at once; they use separate `## Review round <N>` and `## Verification round <N>` comment channels, and the PR fixer consumes both.
 
 Target forms:
 
@@ -171,14 +169,29 @@ PR <#n|n>
 
 Workflow:
 
-1. Parse the arguments as `<role> <type> <target(s)>`. Require `role` to be `reviewer`, `fixer`, or `verifier`, `type` to be `spec`, `plan`, or `PR`, and at least one non-empty target. Reject `verifier spec` and `verifier plan` before running the builder, saying that `verifier` is PR-only. On other parse failures, print `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>` and stop without changing goal state. Leave the detailed target validation to the shared builder.
-2. Call `get_goal` before running the builder. No current goal or a goal with status `complete` permits launch. Treat any status other than no goal or `complete`, including active, paused, or blocked, as an unfinished goal: stop and tell the user to use a fresh task or clear the current goal. Do not clear, edit, merge with, or replace it.
-3. Resolve `RULEZ_HOME` using the repository-layout rule above. Run `bash "$RULEZ_HOME/scripts/cycle-prompt.sh" <role> goal <type> <target...>`, preserving each target as a separate shell argument and capturing stdout as `PROMPT`. If the builder exits nonzero, show its stderr unchanged and stop without calling `create_goal`.
-4. Count the objective characters with `PROMPT_LENGTH="$(printf '%s' "$PROMPT" | wc -m | tr -d '[:space:]')"`. If `PROMPT_LENGTH` is greater than `4000`, report `Cycle goal is <PROMPT_LENGTH> characters; Codex allows at most 4,000.` and stop without creating a goal.
-5. Call `create_goal` once with `objective` set to the complete `PROMPT`. Do not supply `token_budget`. If the tool is unavailable or rejects the request, report that the watcher did not start. Do not fall back to an ordinary prompt.
-6. Report the launched role, artifact type, and target. State that it runs as this task's persistent goal until the template's stop condition is met. Do not run the watcher protocol, poll, sleep, or process a review round in the launcher itself.
+1. Parse the arguments as `<role> <type> <target(s)>`. Require `role` to be `reviewer`, `fixer`, or `verifier`, `type` to be `spec`, `plan`, or `PR`, and at least one non-empty target. Reject `verifier spec` and `verifier plan` before running the builder, saying that `verifier` is PR-only. On other parse failures, print `use rulez-tools to cycle <reviewer|fixer|verifier> <spec|plan|PR> <target(s)>` and stop without changing automation state. Leave detailed target validation to the shared builder.
+2. Require the Codex app `automation_update` capability. If it is unavailable, report `Durable Rulez cycles require Codex desktop Scheduled tasks.` and stop. Do not fall back to a persisted goal, a sleeping shell, or an external scheduler.
+3. Resolve `RULEZ_HOME` using the repository-layout rule above. Run `bash "$RULEZ_HOME/scripts/cycle-prompt.sh" <role> heartbeat <type> <target...>`, preserving each target as a separate shell argument and capturing stdout as `PROTOCOL`. If the builder exits nonzero, show its stderr unchanged and stop without changing an automation.
+4. Resolve the target project's physical Git root. Use a normalized GitHub `owner/repo` from `origin` as the repository identity when available; otherwise use the physical root. Normalize PR targets to a bare number. Normalize spec and plan targets to absolute lexical paths based on the repository root without requiring the watched file to exist.
+5. Build an exact `rulez_cycle_key` from the repository identity, role, type, and normalized targets. Include the key as a machine-readable line in the heartbeat prompt and include a concise role/type/target label in the automation name.
+6. Follow the `automation_update` capability's supported existing-automation lookup: inspect `$CODEX_HOME/automations/*/automation.toml` for the exact `rulez_cycle_key` marker. Reuse one exact match, whether active or paused. If more than one exact match exists, report the duplicate state and stop without creating another heartbeat.
+7. Initialize `idle_level=0` and `failure_count=0`. Run the first watcher tick immediately. Apply `PROTOCOL` once against the current watched state and classify the result as `activity`, `idle`, `complete`, or `error` using the rules below.
+8. A complete first tick creates no heartbeat. A first-tick human-action error creates no active heartbeat and reports the blocker. A transient first-tick read failure creates or updates the heartbeat with `failure_count=1` and a five-minute retry. Activity and idle outcomes create or update the heartbeat with the state and delay selected below.
+9. Attach the heartbeat to the current task. Its prompt contains `rulez_cycle_key`, repository root, role, type, normalized targets, the complete `PROTOCOL`, `idle_level`, and `failure_count`. The runtime supplies the heartbeat's id on every scheduled trigger, so creation is one step; do not create a bootstrap automation merely to embed an id in its prompt.
+10. Report the role, artifact type, target, whether the heartbeat was created or refreshed, and the next delay. Re-launching the same cycle refreshes the existing heartbeat from the current Rulez version and resets its next delay to five minutes instead of creating a duplicate.
 
-Do not use `update_goal` from this launcher. The running goal owns its completion state.
+### Heartbeat Tick
+
+Every scheduled tick receives a trigger-provided `<automation_id>`. Validate the prompt metadata, change to the recorded repository root, run the complete watcher protocol once, and update only that same automation. Preserve its full current fields when calling `automation_update`; change only the prompt state, next interval, or status required by the outcome.
+
+Scheduler state is only `idle_level` and `failure_count`. GitHub comments, PR head SHAs, and findings-file revisions remain authoritative for handled work.
+
+- `activity`: after a successful non-terminal review, verification, fix, or rationale response, reset `idle_level` to `0`, clear `failure_count`, and schedule the next tick in five minutes.
+- `idle`: write no artifact, commit, PR comment, or task message. Clear `failure_count`; from idle levels `0`, `1`, and `2`, wait 5, 10, then 15 minutes and store levels `1`, `2`, and `2` respectively. Further idle ticks remain at 15 minutes.
+- `complete`: delete the heartbeat and notify once. Do not schedule another tick.
+- `error`: a transient read failure leaves `idle_level` unchanged. The first and second consecutive failures update the same heartbeat to retry after five and ten minutes. On the third consecutive transient failure, set status `PAUSED` and notify with the last error. Any authentication, approval, malformed-state, or partial-write failure pauses immediately and notifies.
+
+Any successful read clears `failure_count`, including an idle read. Meaningful activity always resets the next wait to five minutes. A PR fixer must still push and verify the new PR head before posting `fixed`. Never create an idle commit or comment, and never process a review or verification round twice.
 
 ## Punts Enrich
 
@@ -263,4 +276,4 @@ Ask the user what they want to do about it and record their answer here, or use 
 
 ## First-Pass Scope
 
-This skill currently covers GitHub workflow, cycle goal watchers, standalone spec2pr forecasting, handoff, punts enrich, and punts triage workflows. It does not install or manage Codex hooks, statusline behavior, `what-have-i-done`, `.codex/punts/`, or Claude transcript/session storage.
+This skill currently covers GitHub workflow, cycle heartbeat watchers, standalone spec2pr forecasting, handoff, punts enrich, and punts triage workflows. It does not install or manage Codex hooks, statusline behavior, `what-have-i-done`, `.codex/punts/`, or Claude transcript/session storage.
