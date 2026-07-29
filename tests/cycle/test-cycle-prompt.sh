@@ -100,6 +100,36 @@ test_cycle_reviewer_goal_decoupled() {
   assert_contains "$CY_OUT" "re-read at least every 2 min" "reviewer+goal: goal cadence applied"
 }
 
+assert_cycle_heartbeat_renders() {
+  local role="$1" type="$2"
+  shift 2
+
+  run_cycle "$role" heartbeat "$type" "$@"
+  assert_eq "0" "$CY_RC" "$role/$type/heartbeat: exit 0"
+  assert_contains "$CY_OUT" "In this scheduled heartbeat tick, check" "$role/$type/heartbeat: scheduled tick wrapper"
+  assert_contains "$CY_OUT" "complete the cycle, disable this heartbeat, and notify" "$role/$type/heartbeat: terminal wrapper"
+}
+
+test_cycle_heartbeat_variants_render() {
+  assert_cycle_heartbeat_renders reviewer spec "$SPEC_TARGET"
+  assert_cycle_heartbeat_renders fixer spec "$SPEC_TARGET"
+  assert_cycle_heartbeat_renders reviewer plan "$PLAN_TARGET"
+  assert_cycle_heartbeat_renders fixer plan "$PLAN_TARGET"
+  assert_cycle_heartbeat_renders reviewer PR 87
+  assert_cycle_heartbeat_renders fixer PR 87
+  assert_cycle_heartbeat_renders verifier PR 87
+}
+
+test_cycle_heartbeat_idle_returns_scheduler_control() {
+  run_cycle fixer heartbeat spec "$SPEC_TARGET"
+  assert_eq "0" "$CY_RC" "fixer/spec/heartbeat: exit 0"
+  assert_contains "$CY_OUT" "return control to the scheduler without writing anything" "fixer/spec/heartbeat: idle wrapper"
+
+  run_cycle verifier heartbeat PR 40
+  assert_eq "0" "$CY_RC" "verifier/PR/heartbeat: exit 0"
+  assert_contains "$CY_OUT" "In this scheduled heartbeat tick, check PR #40" "verifier/PR/heartbeat: target substitution"
+}
+
 test_cycle_rejects_bad_selectors() {
   run_cycle reviwer loop spec "$SPEC_TARGET"
   assert_eq "2" "$CY_RC" "bad role: exit 2"

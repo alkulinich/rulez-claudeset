@@ -63,9 +63,11 @@ use rulez-tools to triage punts
 use rulez-tools to forecast docs/superpowers/specs/foo-design.md
 ```
 
-The Codex adapter covers GitHub workflow, cycle goal watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
+The Codex adapter covers GitHub workflow, cycle heartbeat watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting workflows. It reuses the existing `.claude/punts/` queue; Claude slash commands, settings, hooks, and statusline remain Claude-specific.
 
-Codex cycle syntax omits the Claude `mode` selector and always starts a persistent goal in the current task. Reviewer, verifier, and fixer watchers run in separate Codex tasks. `verifier` is PR-only; a reviewer and verifier can watch the same PR at once, and the fixer consumes both review and verification rounds. If a task already has an unfinished goal, the launcher refuses instead of replacing it.
+Codex cycle syntax omits the Claude `mode` selector. Codex desktop uses same-task Scheduled heartbeats. The first check runs immediately. Consecutive idle checks wait 5, 10, and 15 minutes, then remain at 15 minutes. Activity resets the next delay to five minutes. Reviewer, verifier, and fixer watchers run in separate Codex tasks. `verifier` is PR-only; a reviewer and verifier can watch the same PR at once, and the fixer consumes both review and verification rounds.
+
+Codex CLI and IDE cannot launch durable cycles because they lack Scheduled task management. The Codex app and computer must remain running for local checks.
 
 To update an existing Codex install:
 
@@ -127,7 +129,7 @@ or touch `.claude/punts/` data in your projects.
 | `/rulez:update-claudeset` | Pull latest version and re-run setup |
 | `/rulez:spec2pr-forecast <path>` | Forecast whether a spec or plan is likely to fit in one PR |
 
-For Codex, use the `rulez-tools` skill instead of Claude slash commands. The supported Codex workflows are start issue, create PR, test PR, push fixes, merge PR, cycle goal watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting.
+For Codex, use the `rulez-tools` skill instead of Claude slash commands. The supported Codex workflows are start issue, create PR, test PR, push fixes, merge PR, cycle heartbeat watchers, handoff, punts enrich, punts triage, and standalone spec2pr forecasting.
 
 ## Punts
 
