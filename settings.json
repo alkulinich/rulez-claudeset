@@ -62,6 +62,7 @@
       "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-discover.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-render.sh:*)",
       "Bash(~/.claude/skills/rulez-claudeset/scripts/what-have-i-done-finalize.sh:*)",
+      "Bash(~/.claude/skills/rulez-claudeset/scripts/cross-review.sh:*)",
 
       "Skill(rulez:test-pr)",
       "Skill(rulez:push-fixes)",

@@ -226,3 +226,12 @@ test_cycle_reviewer_pr_channel_unpolluted() {
   assert_eq "0" "$CY_RC" "reviewer/PR: exit 0"
   assert_not_contains "$CY_OUT" "Verification round" "reviewer/PR: reviewer channel untouched by the new role"
 }
+
+test_cycle_verifier_pr_oneshot() {
+  run_cycle verifier oneshot PR 87
+  assert_eq "0" "$CY_RC" "verifier/PR/oneshot: exit 0"
+  assert_contains "$CY_OUT" "ONE-SHOT run: do exactly one round, then exit." "verifier/PR/oneshot: single-round preamble"
+  assert_contains "$CY_OUT" "Do NOT use rulez-tools, the cycle skill, or any scheduler" "verifier/PR/oneshot: forbids scheduler"
+  assert_contains "$CY_OUT" 'post the round comment with "Result: No findings." then exit.' "verifier/PR/oneshot: TERMINATE is exit"
+  assert_not_contains "$CY_OUT" "stop the loop" "verifier/PR/oneshot: no loop wording"
+}
