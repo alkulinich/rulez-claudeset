@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Launch one Codex CLI round of a PR cycle, detached in tmux session codex-<N>.
-# Usage: cross-review.sh <reviewer|fixer|verifier> <PR>
+# Usage: cross-review.sh <fixer|verifier> <PR>
 # Appends .claude/cross-review-guards.md (project env, forbidden commands,
 # owner decisions not to re-raise) to the prompt when present.
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  echo "usage: cross-review.sh <reviewer|fixer|verifier> <PR>" >&2
+if [ "$#" -ne 2 ] || { [ "$1" != fixer ] && [ "$1" != verifier ]; }; then
+  echo "usage: cross-review.sh <fixer|verifier> <PR>" >&2
   exit 2
 fi
 PRNUM="${2#\#}"
