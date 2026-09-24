@@ -16,14 +16,14 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: cycle-prompt.sh <reviewer|fixer|verifier> <loop|goal|heartbeat> <spec|plan|PR> <target...>" >&2
+  echo "usage: cycle-prompt.sh <reviewer|fixer|verifier> <loop|goal|heartbeat|oneshot> <spec|plan|PR> <target...>" >&2
 }
 
 if [ "$#" -lt 4 ]; then usage; exit 2; fi
 ROLE="$1"; MODE="$2"; TYPE="$3"; shift 3
 
 case "$ROLE" in reviewer|fixer|verifier) ;; *) usage; exit 2 ;; esac
-case "$MODE" in loop|goal|heartbeat)     ;; *) usage; exit 2 ;; esac
+case "$MODE" in loop|goal|heartbeat|oneshot) ;; *) usage; exit 2 ;; esac
 case "$TYPE" in spec|plan|PR)            ;; *) usage; exit 2 ;; esac
 
 # The role×type matrix is not a full cross-product: verifying that acceptance
@@ -53,6 +53,11 @@ case "$MODE" in
     RECUR="In this scheduled heartbeat tick, check"
     TERMINATE="complete the cycle, disable this heartbeat, and notify"
     IDLE="return control to the scheduler without writing anything"
+    ;;
+  oneshot)
+    RECUR="This is a ONE-SHOT run: do exactly one round, then exit. Do NOT use rulez-tools, the cycle skill, or any scheduler; this prompt IS the protocol. Check"
+    TERMINATE="exit"
+    IDLE="exit without writing anything"
     ;;
 esac
 
